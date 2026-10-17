@@ -115,7 +115,7 @@ struct FeedItem: Identifiable, Hashable {
     var stationRequest: (PlayRequest, PlayContext)? {
         switch content {
         case .station(let station): (.station(station), PlayContext(kind: .station, title: station.name))
-        case .demoStation(let name): (.demoStation(name), PlayContext(kind: .station, title: name))
+        case .demoStation(let name): (.demoStation(name, isLive: isLive), PlayContext(kind: .station, title: name))
         case .album, .playlist: nil
         }
     }

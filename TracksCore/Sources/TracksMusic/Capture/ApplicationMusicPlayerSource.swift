@@ -14,15 +14,20 @@ public enum TracksPlayerContext {
     public static var stationName: String?
     /// Whether the queue is a station. Kept apart from the name, which a station might lack.
     public static var isStation = false
+    /// Whether the station is a live broadcast, such as Apple Music 1, rather than one that
+    /// plays on-demand songs. Only a live one's songs have no length to scrub.
+    public private(set) static var isLiveStation = false
 
-    public static func playingStation(named name: String?) {
+    public static func playingStation(named name: String?, isLive: Bool) {
         isStation = true
+        isLiveStation = isLive
         stationName = name
         startUsing()
     }
 
     public static func playingOnDemand() {
         isStation = false
+        isLiveStation = false
         stationName = nil
         startUsing()
     }

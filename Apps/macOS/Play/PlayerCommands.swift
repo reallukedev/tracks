@@ -195,7 +195,7 @@ private struct ControlsMenuItems: View {
             player.seek(to: 0)
         }
         .keyboardShortcut(".", modifiers: .command)
-        .disabled(!player.hasQueue || player.isLive || player.context?.isStation == true || player.current?.duration == nil)
+        .disabled(!player.hasQueue || player.current?.duration == nil)
 
         Button("Next", systemImage: "forward") { player.skipToNext() }
             .keyboardShortcut(.rightArrow, modifiers: .command)

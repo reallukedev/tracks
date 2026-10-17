@@ -17,7 +17,7 @@ nonisolated struct PlayerTrack: Identifiable, Equatable, Codable, Sendable {
     let artistName: String
     let albumTitle: String?
     let cover: CoverArt
-    /// Nil on a station, where a song has no length to show.
+    /// Nil on a live broadcast, where a song has no length to show. See ``SongLength``.
     let duration: TimeInterval?
     let isExplicit: Bool
     /// The song itself, for Add to Library, Go to Album and Create Station. Nil in the demo,
@@ -164,9 +164,18 @@ enum PlayRequest {
     case album(Album)
     case playlist(Playlist)
     /// A sample station, in the demo.
-    case demoStation(String)
+    case demoStation(String, isLive: Bool)
     /// Songs from your own music: files, and songs on your servers.
     case local([LocalTrack], startingAt: Int = 0)
+
+    /// A live broadcast, such as Apple Music 1, rather than a station of on-demand songs.
+    var isLiveBroadcast: Bool {
+        switch self {
+        case .station(let station): station.isLive
+        case .demoStation(_, let isLive): isLive
+        default: false
+        }
+    }
 }
 
 enum PlayerStatus: Equatable {

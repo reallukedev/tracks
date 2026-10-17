@@ -180,7 +180,7 @@ private struct TracksPlayerHeader: View {
                 }
                 .animation(LiveUpdate.animation(reduceMotion: reduceMotion), value: track.id)
 
-                if showsProgress, let duration = track.duration, duration > 0, player.context?.isStation != true {
+                if showsProgress, let duration = track.duration, duration > 0 {
                     MenuBarProgress(
                         duration: duration,
                         isPlaying: player.isPlaying,

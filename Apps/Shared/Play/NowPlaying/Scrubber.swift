@@ -110,7 +110,7 @@ struct Scrubber: View {
     }
 }
 
-/// A station has no length: the track stays full, marked live.
+/// A live broadcast has no length: the track stays full, marked live.
 struct LiveScrubber: View {
     var body: some View {
         VStack(spacing: 8) {

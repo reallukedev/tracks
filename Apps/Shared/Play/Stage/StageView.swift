@@ -470,7 +470,7 @@ struct StageView: View {
             Spacer()
             if let track = player.current {
                 VStack(spacing: isShort ? 8 : 18) {
-                    if let duration = track.duration, duration > 0, duration.isFinite, !player.isLive, player.context?.isStation != true {
+                    if let duration = track.duration, duration > 0, duration.isFinite {
                         Scrubber(duration: duration, isPlaying: player.isPlaying, time: { player.playbackTime }, track: track, interval: Scrubber.platformInterval) { time in
                             player.seek(to: time)
                         }

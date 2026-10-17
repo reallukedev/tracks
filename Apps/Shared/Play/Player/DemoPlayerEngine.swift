@@ -63,7 +63,8 @@ final class DemoPlayerEngine: PlayerEngine {
         }
         isStation = context.isStation
         if isStation { repeatMode = .off }
-        queue = songs.map { makeTrack($0, isStation: context.isStation) }
+        let isLive = request.isLiveBroadcast
+        queue = songs.map { makeTrack($0, isLive: isLive) }
         index = min(max(0, start), queue.count - 1)
         restartClock(playing: true)
     }
@@ -76,7 +77,7 @@ final class DemoPlayerEngine: PlayerEngine {
         default: throw PlayerProblem.nothingToPlay
         }
         guard !isStation else { throw PlayerProblem.nothingToPlay }
-        let tracks = songs.map { makeTrack($0, isStation: false) }
+        let tracks = songs.map { makeTrack($0, isLive: false) }
         if queue.isEmpty {
             queue = tracks
             index = 0
@@ -216,14 +217,14 @@ final class DemoPlayerEngine: PlayerEngine {
         }
     }
 
-    private func makeTrack(_ song: HistorySong, isStation: Bool) -> PlayerTrack {
+    private func makeTrack(_ song: HistorySong, isLive: Bool) -> PlayerTrack {
         nextEntryNumber += 1
-        var track = Self.track(song, number: nextEntryNumber, isStation: isStation)
+        var track = Self.track(song, number: nextEntryNumber, isLive: isLive)
         track.local = localTracks[song.songID]
         return track
     }
 
-    private static func track(_ song: HistorySong, number: Int, isStation: Bool) -> PlayerTrack {
+    private static func track(_ song: HistorySong, number: Int, isLive: Bool) -> PlayerTrack {
         // Believable lengths that stay the same for a song.
         let seconds = 150 + Double(abs(GeneratedCover.hash(song.title)) % 120)
         return PlayerTrack(
@@ -232,7 +233,7 @@ final class DemoPlayerEngine: PlayerEngine {
             artistName: song.artistName,
             albumTitle: song.albumTitle,
             cover: demoCover(number: number) ?? .url(song.artworkURL, seed: song.albumTitle ?? song.title),
-            duration: isStation ? nil : seconds,
+            duration: SongLength.shown(seconds, isLiveBroadcast: isLive),
             isExplicit: false,
             song: nil
         )

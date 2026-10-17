@@ -155,15 +155,15 @@ final class MusicKitPlayerEngine: PlayerEngine {
     private struct MadeTrack {
         let songID: String?
         let title: String
-        let isStation: Bool
+        let isLive: Bool
         let track: PlayerTrack
     }
 
     private func track(from entry: MusicPlayer.Queue.Entry) -> MadeTrack {
         var song: Song?
         if case .song(let resolved) = entry.item { song = resolved }
-        let isStation = TracksPlayerContext.isStation
-        if let cached = made[entry.id], cached.songID == song?.id.rawValue, cached.title == entry.title, cached.isStation == isStation {
+        let isLive = TracksPlayerContext.isLiveStation
+        if let cached = made[entry.id], cached.songID == song?.id.rawValue, cached.title == entry.title, cached.isLive == isLive {
             return cached
         }
         let title = song?.title ?? entry.title
@@ -181,12 +181,11 @@ final class MusicKitPlayerEngine: PlayerEngine {
             artistName: song?.artistName ?? entry.subtitle ?? "",
             albumTitle: song?.albumTitle,
             cover: artwork.map(CoverArt.artwork) ?? .url(nil, seed: title),
-            // A station's songs report a length, but it can't be scrubbed or counted down.
-            duration: isStation ? nil : song?.duration,
+            duration: SongLength.shown(song?.duration, isLiveBroadcast: isLive),
             isExplicit: song?.contentRating == .explicit,
             song: song
         )
-        return MadeTrack(songID: song?.id.rawValue, title: entry.title, isStation: isStation, track: track)
+        return MadeTrack(songID: song?.id.rawValue, title: entry.title, isLive: isLive, track: track)
     }
 
     // MARK: - Playing
@@ -275,7 +274,7 @@ final class MusicKitPlayerEngine: PlayerEngine {
         // (the capture source, its recheck) can see the new queue under the old flag, or the
         // old song under the new one.
         if context.isStation {
-            TracksPlayerContext.playingStation(named: context.title)
+            TracksPlayerContext.playingStation(named: context.title, isLive: request.isLiveBroadcast)
         } else {
             TracksPlayerContext.playingOnDemand()
         }
