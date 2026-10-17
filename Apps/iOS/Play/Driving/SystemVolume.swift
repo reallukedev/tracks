@@ -36,6 +36,9 @@ final class SystemVolume {
     func forget() {
         anchor = nil
         lastSeen = nil
+        // Left in the window, it would keep iPhone's volume display away for your own
+        // presses too, everywhere in Tracks, long after the drive. `set` puts it back.
+        volumeView.removeFromSuperview()
     }
 
     /// Takes the volume as it is to be right for this level. For the first reading of a drive.

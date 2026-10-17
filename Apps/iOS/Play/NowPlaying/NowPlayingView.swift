@@ -242,8 +242,16 @@ struct NowPlayingView: View {
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.6))
                     .accessibilityHidden(true)
-                VolumeSlider()
-                    .frame(height: 34)
+                // A volume view in the window keeps iPhone's own volume display away, even
+                // under Stage's cover, where the buttons then seemed to do nothing.
+                Group {
+                    if StagePresenter.shared.isShowing {
+                        Color.clear
+                    } else {
+                        VolumeSlider()
+                    }
+                }
+                .frame(height: 34)
                 Image(systemName: "speaker.wave.3.fill")
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.6))
