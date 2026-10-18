@@ -487,17 +487,6 @@ struct MeterMotionTests {
         #expect(drops.last! > drops.first!)
     }
 
-    @Test("A jump in the bass is a hit that falls away")
-    func onset() {
-        var follower = OnsetFollower()
-        for _ in 0..<60 { follower.step(0.2, elapsed: 1 / 60) }
-        #expect(follower.hit < 0.05)
-        follower.step(0.6, elapsed: 1 / 60)
-        #expect(follower.hit > 0.9)
-        for _ in 0..<30 { follower.step(0.2, elapsed: 1 / 60) }
-        #expect(follower.hit < 0.1)
-    }
-
     @Test("A quiet master is stretched over more of the height")
     func contrastStretches() {
         var contrast = LevelContrast()

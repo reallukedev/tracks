@@ -97,7 +97,7 @@ private struct FlowBackdrop: View {
     @Environment(PlayerModel.self) private var player: PlayerModel?
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: BackdropFrameRate.interval(reduceMotion: reduceMotion), paused: reduceMotion || isSettled || !isOnScreen)) { context in
+        TimelineView(.animation(minimumInterval: BackdropFrameRate.everyFrame, paused: reduceMotion || isSettled || !isOnScreen)) { context in
             let time = context.date.timeIntervalSinceReferenceDate
             let pulse = reduceMotion ? .still(isPlaying: isPlaying) : levels.next(heard: AudioLevelMeter.shared.current(), time: time, song: SongMoment(player: player, energy: energy), isPlaying: isPlaying)
             let bass = pulse.bass
@@ -164,7 +164,7 @@ private struct BloomBackdrop: View {
     var body: some View {
         GeometryReader { proxy in
             let side = max(proxy.size.width, proxy.size.height) * 1.5
-            TimelineView(.animation(minimumInterval: LowPowerMode.shared.isOn ? 1 / 20 : 1 / 30, paused: reduceMotion || isSettled || !isOnScreen)) { context in
+            TimelineView(.animation(minimumInterval: BackdropFrameRate.everyFrame, paused: reduceMotion || isSettled || !isOnScreen)) { context in
                 let time = context.date.timeIntervalSinceReferenceDate
                 let pulse = reduceMotion ? .still(isPlaying: isPlaying) : levels.next(heard: AudioLevelMeter.shared.current(), time: time, song: SongMoment(player: player, energy: energy), isPlaying: isPlaying)
                 let bass = CGFloat(pulse.bass)

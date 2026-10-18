@@ -13,27 +13,28 @@ import Foundation
 ///   spins: the flow carries the tempo. No clock ever runs backwards.
 /// - A lift, when the music jumps from a quieter stretch to a loud one, a drop or a chorus
 ///   arriving: for a second or two the cover opens out, loosens and grows richer, then
-///   settles.
+///   settles. Only a rise well beyond the song's usual ups counts, so a new chord doesn't.
 /// - The bass is a slow swell, the cover leaning in as the low end rises above where it's
 ///   been and easing back as it falls: a ballad's chords bloom, a dance track's drop surges.
 ///   It follows the bass's rise and fall rather than its level, since the sound is heard
 ///   evened out, a quiet song as full as a loud one (see `AudioLevelMeter`).
 /// - The kick is a soft push outward from the middle, quick to land and slower to settle: a
 ///   short one for a punchy dance track, a long, gentle one for a ballad's soft drum.
-/// - A gentle song (see `Groove.gentleness`) glides and breathes: everything eases more
-///   slowly, its stir swings slower and its kicks don't surge the flow. The kick's surge and
-///   the snare's stir also only go as far as the song's hits surely land in time (see
-///   `Groove.lock`), so the cover never lurches at a moment that isn't in the song.
-/// - What's new in the middle of the sound, a snare, a clap, a strummed chord, stirs the
-///   colours round, as a spoon does ink in water. The stir carries on after the hit and
-///   unwinds, so a backbeat rocks the cover gently to and fro.
+/// - A gentle song (see `Groove.gentleness`, or `BeatFollower` for music that's heard) glides
+///   and breathes: everything eases more slowly, its stir swings slower and its kicks don't
+///   surge the flow. The kick's surge, the stir and the glints also only go as far as the
+///   song's beat is sure (see `Groove.lock`), so the cover never lurches at a moment that
+///   isn't in the song.
+/// - With a sure beat, the cover sways to and fro once a bar, in time with the song.
+/// - What's new in the middle of the sound, a snare, a clap, stirs the colours round, as a
+///   spoon does ink in water, and unwinds.
 /// - What's new up high, the hats and cymbals, glints in the highlights.
 /// - How loud the music is gives the colours their richness and depth: how loud the song is
 ///   mastered, and how much louder or softer than usual this part is, gathering over a second
 ///   or so and letting go over a couple more, so a chorus deepens and a verse softens.
 /// - How busy it is churns the flow: a crowded mix folds the colours more than a sparse one.
-/// - Still music, a ballad or a quiet passage, settles into slow, deep breaths, every seven
-///   seconds or so; deepest when it's also quieter than the song has been.
+/// - Still music, a ballad or a quiet passage, breathes: slowly, every seven seconds or so,
+///   and with the music's own swells, filling as a phrase grows and emptying as it fades.
 /// - The song's brightness warms or cools the highlights, slowly: amber for a dark, mellow
 ///   song, a cooler air for a bright one.
 ///
@@ -129,6 +130,8 @@ public nonisolated struct LivingCoverFeel: Equatable, Sendable {
     /// an attack, slow where it hears a mood.
     enum Pace {
         static let swell = (rise: 0.25, fall: 0.9)
+        /// How many times more slowly a gentle song with no sure beat swells.
+        static let swellGlide = 4.0
         static let thumpRise = 0.03
         /// A kick's push lets go this quickly for the punchiest song, and up to `thumpSoftness`
         /// more slowly for the gentlest.
@@ -157,14 +160,17 @@ public nonisolated struct LivingCoverFeel: Equatable, Sendable {
         static let surge = 0.4
         /// How each layer's part of the sound is followed, so its turn changes speed smoothly.
         static let layers = 0.3
-        /// How full the music is now, over the last few seconds, and over the song, which takes
-        /// in a full part quickly and lets go of it slowly, so it knows how full the song gets;
-        /// and how long the size of its usual rises takes to be forgotten.
-        static let lift = (now: 0.3, recent: 4.0, songRise: 2.0, song: 12.0, usualRise: 30.0)
+        /// How full the music is now and over the last few seconds, and how long the size of
+        /// its usual rises takes to be forgotten.
+        static let lift = (now: 0.3, recent: 4.0, usualRise: 20.0)
         /// A lift's bloom opens this quickly and settles this slowly.
         static let bloom = (rise: 0.15, fall: 0.7)
         /// Seconds after a lift before another can come.
         static let liftGap = 4.0
+        /// How long the sway takes to come in with a sure beat, and to go with it.
+        static let sway = (rise: 1.5, fall: 1.0)
+        /// How a phrase's swell is followed, for a quiet passage's breath.
+        static let phrase = (rise: 0.6, fall: 1.5)
     }
 
     public private(set) var frame = Frame.rest
@@ -172,8 +178,14 @@ public nonisolated struct LivingCoverFeel: Equatable, Sendable {
     private var usualBass: Double?
     private var usualAll: Double?
     private var highs = 0.0
-    /// The stir's speed.
+    private var hasHeard = false
+    /// The stir's place and speed.
+    private var stirred = 0.0
     private var spin = 0.0
+    /// How far the sway reaches, and where in the bar it was last.
+    private var sway = 0.0
+    private var swayBeats = 0.0
+    private var phrase: Double?
     private var calm = 0.0
     private var breathPhase = 0.0
     private var hasWarmth = false
@@ -182,13 +194,11 @@ public nonisolated struct LivingCoverFeel: Equatable, Sendable {
     private var surge = 0.0
     /// Each layer's part of the sound, followed: the bass, the mids, the highs.
     private var layerLevels: [Double]?
-    /// Loudness followed closely, over the last few seconds, and over the song.
+    /// Loudness followed closely, and over the last few seconds.
     private var loudness: [Double]?
-    /// How big the song's rises out of a quieter stretch have lately been, so a song that
-    /// thins and fills every few bars lifts once, not every time.
+    /// How big the song's rises have lately been, so a song that thins and fills every few
+    /// bars lifts once, not every time.
     private var usualRise = 0.0
-    /// The rise being followed to its peak, before deciding whether it lifts.
-    private var risePeak: Double?
     /// What a lift is opening toward, and how long since the last.
     private var bloom = 0.0
     private var sinceLift = Double.infinity
@@ -202,10 +212,10 @@ public nonisolated struct LivingCoverFeel: Equatable, Sendable {
     public init() {}
 
     /// Steps on by `elapsed` seconds, with this moment of the music: its bands, 0 to 1 low to
-    /// high, its kick, how busy it's been, and the song's pace, about 1 at 120 beats a minute
-    /// (see `StagePulse`).
+    /// high, its kick, how busy it's been, the song's pace, about 1 at 120 beats a minute, and
+    /// its beats counted, when there's a beat (see `StagePulse`).
     @discardableResult
-    public mutating func step(bands: [Float], kick: Float, activity: Float, pace: Double = 1, isPlaying: Bool, character: Character = .unknown, elapsed: Double) -> Frame {
+    public mutating func step(bands: [Float], kick: Float, activity: Float, pace: Double = 1, beats: Double? = nil, isPlaying: Bool, character: Character = .unknown, elapsed: Double) -> Frame {
         let dt = elapsed.isFinite ? min(max(elapsed, 0), 0.25) : 0
         let song = character.clamped
         func mean(_ range: Range<Int>) -> Double {
@@ -217,6 +227,10 @@ public nonisolated struct LivingCoverFeel: Equatable, Sendable {
         let kick = isPlaying ? unit(Double(kick), otherwise: 0) : 0
         let activity = isPlaying ? unit(Double(activity), otherwise: 0) : 0
 
+        // What's new is measured against what came before, so the first moment isn't all new.
+        if !hasHeard {
+            (mids, highs, hasHeard) = (mid, high, true)
+        }
         let midFresh = isPlaying ? max(0, mid - mids) : 0
         let highFresh = isPlaying ? max(0, high - highs) : 0
         mids = Self.ease(mids, toward: mid, elapsed: dt, rise: Pace.fresh.mids, fall: Pace.fresh.mids)
@@ -233,14 +247,17 @@ public nonisolated struct LivingCoverFeel: Equatable, Sendable {
             self.usualAll = Self.ease(usualAll, toward: all, elapsed: dt, rise: Pace.usual.all, fall: Pace.usual.all)
         }
 
+        // With no sure beat, the swell follows the music's slow envelope, not each chord.
         let swell = isPlaying ? unit(0.35 + (bass - usualBass) * 2.5) * (0.6 + 0.4 * song.intensity) : 0
-        next.swell = Self.ease(frame.swell, toward: swell, elapsed: dt, rise: Pace.swell.rise * glide, fall: fall(Pace.swell.fall))
+        let swellRise = Pace.swell.rise * (1 + Pace.swellGlide * (1 - song.emphasis) * song.gentleness)
+        next.swell = Self.ease(frame.swell, toward: swell, elapsed: dt, rise: swellRise, fall: fall(Pace.swell.fall))
 
         // A heard kick seldom reaches past half way, so it's lifted to use the whole range.
         let thump = unit(kick * 1.6) * (0.4 + 0.6 * song.punch)
         next.thump = Self.ease(frame.thump, toward: thump, elapsed: dt, rise: Pace.thumpRise, fall: fall(Pace.thumpFall + Pace.thumpSoftness * (1 - song.punch)))
 
-        let shimmer = isPlaying ? unit(highFresh * 4) : 0
+        // A ballad's piano glints less than a dance track's hats.
+        let shimmer = isPlaying ? unit(highFresh * 4) * (0.35 + 0.65 * song.emphasis) : 0
         next.shimmer = Self.ease(frame.shimmer, toward: shimmer, elapsed: dt, rise: Pace.shimmer.rise, fall: fall(Pace.shimmer.fall))
 
         // How loud it's mastered sets the depth; louder than it's been, a chorus, deepens it.
@@ -253,20 +270,30 @@ public nonisolated struct LivingCoverFeel: Equatable, Sendable {
         // Still, not merely quiet: a busy verse mixed low doesn't breathe.
         let stillness = max(unit((0.4 - activity) / 0.3), unit((song.gentleness - 0.4) / 0.5))
         let hush = max(unit((0.24 - all) / 0.16), unit((usualAll - all) / max(usualAll, 0.05) * 2))
-        let quiet = isPlaying ? stillness * (0.6 + 0.4 * hush) : 0
+        // Silence, between songs or before one starts, doesn't breathe: there's nothing to feel.
+        let audible = unit((all - 0.06) / 0.06)
+        let quiet = isPlaying ? stillness * (0.6 + 0.4 * hush) * audible : 0
         calm = Self.ease(calm, toward: quiet, elapsed: dt, rise: Pace.calm.rise, fall: fall(Pace.calm.fall))
         breathPhase = (breathPhase + dt * 2 * .pi / Pace.breath).truncatingRemainder(dividingBy: 2 * .pi)
-        next.breath = calm < 0.0005 ? 0 : sin(breathPhase) * calm
+        // In with the phrase as it grows and out as it fades, over the slow breath.
+        let phrase = Self.ease(self.phrase ?? all, toward: all, elapsed: dt, rise: Pace.phrase.rise, fall: Pace.phrase.fall)
+        self.phrase = phrase
+        let swelling = isPlaying ? (phrase - usualAll) * 2.5 : 0
+        next.breath = calm < 0.0005 ? 0 : max(-1, min(1, 0.6 * sin(breathPhase) + swelling)) * calm
 
         let warmth = max(-1, min(1, (0.5 - song.brightness) * 2))
         next.warmth = hasWarmth ? Self.ease(frame.warmth, toward: warmth, elapsed: dt, rise: Pace.warmth, fall: Pace.warmth) : warmth
         hasWarmth = true
 
-        next.twist = stir(from: frame.twist, push: midFresh * 40 * song.emphasis, swing: Pace.swing * (1 + 0.6 * song.gentleness), isPlaying: isPlaying, elapsed: dt)
+        stirred = stir(from: stirred, push: midFresh * 40 * song.emphasis, swing: Pace.swing * (1 + 0.6 * song.gentleness), isPlaying: isPlaying, elapsed: dt)
+        // Once a bar, to one side and back, on the song's own beat.
+        let swaying = isPlaying && beats != nil ? 0.45 * song.emphasis : 0
+        sway = Self.ease(sway, toward: swaying, elapsed: dt, rise: Pace.sway.rise, fall: min(Pace.sway.fall, fall(Pace.sway.fall)))
+        if let beats, beats.isFinite { swayBeats = beats }
+        next.twist = max(-1, min(1, stirred + sway * sin(2 * .pi * swayBeats / 4)))
 
-        // How full the music is, mostly by its bass: heard evened out, a drop shows most in
-        // the bass coming back.
-        next.lift = lift(fullness: 0.75 * bass + 0.25 * all, gentleness: song.gentleness, isPlaying: isPlaying, elapsed: dt)
+        // How full the music is across the whole sound: a new chord moves the bass alone.
+        next.lift = lift(fullness: all, gentleness: song.gentleness, isPlaying: isPlaying, elapsed: dt)
         flow(&next, pace: pace, activity: activity, bass: bass, mid: mid, high: high, kick: thump * song.emphasis, glide: glide, isPlaying: isPlaying, elapsed: dt)
         frame = next
         return next
@@ -298,37 +325,34 @@ public nonisolated struct LivingCoverFeel: Equatable, Sendable {
         next.top = Self.wrapped(frame.top + lean * turn(layer[2]) * elapsed)
     }
 
-    /// A lift: when the music, followed closely, rises well above the last few seconds, and
-    /// those were quieter than the song has been, a breakdown before a drop or a verse before
-    /// a chorus, the bloom opens as the rise peaks, then settles, more softly for a gentle
-    /// song. Steady music doesn't lift, however loud, and a rise no bigger than the song's
-    /// last few doesn't either, so a song that thins and fills every few bars lifts once.
+    /// A lift: when the music, followed closely, rises well above the last few seconds, a
+    /// breakdown before a drop or a verse before a chorus, the bloom opens as it rises, then
+    /// settles, more softly for a gentle song. Steady music doesn't lift, however loud, and a
+    /// rise no bigger than the song's usual ups doesn't either: a new chord, or a song that
+    /// thins and fills every few bars.
     private mutating func lift(fullness all: Double, gentleness: Double, isPlaying: Bool, elapsed: Double) -> Double {
         sinceLift += elapsed
         if isPlaying {
             heardFor += elapsed
-            let loud = loudness ?? [all, all, all]
+            let loud = loudness ?? [all, all]
             let now = Self.ease(loud[0], toward: all, elapsed: elapsed, rise: Pace.lift.now, fall: Pace.lift.now)
             let recent = Self.ease(loud[1], toward: all, elapsed: elapsed, rise: Pace.lift.recent, fall: Pace.lift.recent)
-            let song = Self.ease(loud[2], toward: all, elapsed: elapsed, rise: Pace.lift.songRise, fall: Pace.lift.song)
-            loudness = [now, recent, song]
-            usualRise *= exp(-elapsed / Pace.lift.usualRise)
+            loudness = [now, recent]
             let rise = now - recent
             if rise < 0.02 { isLiftArmed = true }
             // Not while it's still learning how full the song is, rising out of silence.
             let hasLearned = heardFor > Pace.lift.recent * 3
-            if isLiftArmed, hasLearned, recent < song - 0.025, rise > 0.07, now > 0.2 {
-                risePeak = max(risePeak ?? 0, rise)
+            if hasLearned {
+                // Only rises count: falling into a breakdown is what makes the drop stand out.
+                let squared = Self.ease(usualRise * usualRise, toward: pow(max(0, rise), 2), elapsed: elapsed, rise: Pace.lift.usualRise, fall: Pace.lift.usualRise)
+                usualRise = squared.squareRoot()
             }
-            // Once the rise has peaked: a lift if it's well beyond the song's usual.
-            if let peak = risePeak, rise < peak - 0.01 {
-                if peak > 1.5 * usualRise, sinceLift > Pace.liftGap {
+            if isLiftArmed, hasLearned, rise > max(0.1, 3 * usualRise), now > 0.2 {
+                isLiftArmed = false
+                if sinceLift > Pace.liftGap {
                     bloom = 1 - 0.5 * gentleness
                     sinceLift = 0
                 }
-                usualRise = max(usualRise, peak)
-                risePeak = nil
-                isLiftArmed = false
             }
         }
         bloom *= exp(-elapsed / 0.8)
@@ -344,7 +368,7 @@ public nonisolated struct LivingCoverFeel: Equatable, Sendable {
 
     /// Nothing left moving, so the drawing can stop.
     public var isAtRest: Bool {
-        let moving = [frame.swell, frame.thump, frame.twist, spin * 0.3, frame.shimmer, frame.body, frame.churn, frame.breath, calm, frame.lift, frame.speed]
+        let moving = [frame.swell, frame.thump, frame.twist, spin * 0.3, sway, frame.shimmer, frame.body, frame.churn, frame.breath, calm, frame.lift, frame.speed]
         return moving.allSatisfy { abs($0) < 0.003 }
     }
 

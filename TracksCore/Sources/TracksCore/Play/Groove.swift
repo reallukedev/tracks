@@ -397,25 +397,6 @@ public nonisolated struct PlaybackClock: Equatable, Sendable {
     }
 }
 
-/// A beat, felt from bands Tracks can hear: how far the bass has just jumped above where it's
-/// been, as a hit that falls away. 0 to 1.
-public nonisolated struct OnsetFollower: Equatable, Sendable {
-    private var settled: Float = 0
-    public private(set) var hit: Float = 0
-
-    public init() {}
-
-    @discardableResult
-    public mutating func step(_ value: Float, elapsed: Double) -> Float {
-        let elapsed = min(max(elapsed, 0), 0.25)
-        let value = value.isFinite ? value : 0
-        let jump = min(1, max(0, (value - settled) * 3.5))
-        settled += (value - settled) * Float(1 - exp(-elapsed / 0.25))
-        hit = max(jump, hit * Float(exp(-elapsed / 0.14)))
-        return hit
-    }
-}
-
 /// The caps over a meter's bars: up with a bar at once, a moment's hang, then a fall that
 /// gathers speed, as a hardware meter's do.
 public nonisolated struct PeakCaps: Equatable, Sendable {

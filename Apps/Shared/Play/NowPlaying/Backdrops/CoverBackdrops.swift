@@ -9,7 +9,8 @@ struct BackdropTimeline<Content: View>: View {
     var rate: Double = 1
     /// Where the time starts, in seconds.
     var start: Double = 0
-    var frameRate: Double = 30
+    /// Frames a second, or nil for every frame the display shows.
+    var frameRate: Double? = 30
     @ViewBuilder let content: (Double) -> Content
     @State private var clock: BackdropClock?
     @State private var isAtRest = false
@@ -17,8 +18,8 @@ struct BackdropTimeline<Content: View>: View {
 
     var body: some View {
         // Low Power Mode keeps the motion, at fewer frames: at these speeds it barely shows.
-        let frames = LowPowerMode.shared.isOn ? min(frameRate, 20) : frameRate
-        TimelineView(.animation(minimumInterval: 1 / frames, paused: isAtRest || !isOnScreen)) { context in
+        let interval = LowPowerMode.shared.isOn ? 1 / min(frameRate ?? 20, 20) : frameRate.map { 1 / $0 }
+        TimelineView(.animation(minimumInterval: interval, paused: isAtRest || !isOnScreen)) { context in
             content(clock?.phase(at: context.date.timeIntervalSinceReferenceDate) ?? start)
         }
         .task(id: speed) {
@@ -109,10 +110,12 @@ struct ArtworkBackdrop: View {
 ///
 /// Set to move with the music, as it is unless turned off in Settings, it feels the song as
 /// well as flowing with it (see ``LivingCoverFeel``): it leans in as the bass fills out, is
-/// pushed softly from the middle by each kick, stirs on the snare and glints with the
-/// cymbals; it deepens as the song gets loud, folds more as it gets busy, and breathes slowly
-/// through a quiet passage. Its flow keeps the music's tempo, speeding up through a chorus,
-/// surging on each kick and gliding down through a breakdown, and each of its layers turns
+/// pushed softly from the middle on each beat and sways once a bar in time with it, stirs on
+/// the snare and glints with the cymbals; it deepens as the song gets loud, folds more as it
+/// gets busy, and breathes with a quiet passage's swells. It pulses only on the song's own
+/// beat, found as it plays (see ``BeatFollower``), so a ballad with no sure beat never jolts:
+/// it glides and breathes. Its flow keeps the music's tempo, speeding up through a chorus,
+/// surging on each beat and gliding down through a breakdown, and each of its layers turns
 /// with its own part of the sound; when the music jumps to loud it opens out for a moment.
 /// Nothing in it flashes: every part eases in and out at a pace of its own. Turned off, it
 /// flows on its own, at a calm pace, and doesn't listen.
@@ -129,7 +132,8 @@ struct LivingCoverBackdrop: View {
     var body: some View {
         let energy = songEnergy(player?.current)
         ZStack {
-            BackdropTimeline(isMoving: isMoving, rate: FlowRate.of(player), start: art.start) { time in
+            // Every frame the display shows: a beat's push lands with the beat.
+            BackdropTimeline(isMoving: isMoving, rate: FlowRate.of(player), start: art.start, frameRate: nil) { time in
                 let frame = movesWithMusic ? felt(energy: energy) : Self.calm(at: time)
                 StretchedBackdrop(factor: 4) { size in
                     Rectangle().fill(Self.shader(size: size, cover: art.flowing, frame: frame))
@@ -159,7 +163,11 @@ struct LivingCoverBackdrop: View {
         let heard = AudioLevelMeter.shared.current()
         let pulse = (sharedLevels ?? ownLevels).next(heard: heard, time: now, song: song, isPlaying: isMoving)
         var character = LivingCoverFeel.Character(groove: song.groove, isHeard: heard != nil)
+        // As the sound itself has it, when it's heard or replayed.
         character.gentleness = Double(pulse.gentleness)
+        character.lock = Double(pulse.lock)
+        if let punch = pulse.punch { character.punch = punch }
+        if let brightness = pulse.brightness { character.brightness = brightness }
         var frame = feel.step(pulse, isPlaying: isMoving, character: character, time: now)
         // Specks of light make words harder to read; with Increase Contrast, none.
         if contrast == .increased { frame.shimmer = 0 }
@@ -202,7 +210,7 @@ private final class LivingCoverMotion {
         // Back after a while away, it picks up where the music is rather than catching up.
         let elapsed = min(max(lastTime.map { time - $0 } ?? 0, 0), 0.25)
         lastTime = time
-        return feel.step(bands: pulse.bands, kick: pulse.kick, activity: pulse.activity, pace: pulse.pace, isPlaying: isPlaying, character: character, elapsed: elapsed)
+        return feel.step(bands: pulse.bands, kick: pulse.kick, activity: pulse.activity, pace: pulse.pace, beats: pulse.beats, isPlaying: isPlaying, character: character, elapsed: elapsed)
     }
 }
 

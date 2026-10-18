@@ -6,6 +6,13 @@ import Observation
 /// speeds the eye can't tell. Reduce Motion's calmer movement needs fewer still, and so does
 /// Low Power Mode, which keeps the motion at fewer frames.
 enum BackdropFrameRate {
+    /// For what moves with the music, Living Cover and Stage: every frame the display shows,
+    /// as often as it refreshes, up to 120 times a second on ProMotion. Low Power Mode keeps
+    /// the motion at 20.
+    static var everyFrame: Double? {
+        LowPowerMode.shared.isOn ? 1 / 20 : nil
+    }
+
     static func interval(reduceMotion: Bool) -> Double {
         if reduceMotion || LowPowerMode.shared.isOn { return 1 / 20 }
         #if os(macOS)
