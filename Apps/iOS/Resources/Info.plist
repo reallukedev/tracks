@@ -93,6 +93,8 @@
 	<string>With Always, Louder at Speed starts whenever you drive with music playing, even with iPhone in a pocket or a bag. Tracks uses only your speed, only while you drive, and your location never leaves this iPhone.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>With Louder at Speed on, Tracks turns your music up as the car speeds up and back down as it slows. It uses only your speed, only while you drive, and your location never leaves this iPhone.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Identify Song listens for a few seconds to name the song playing near you. Only a fingerprint of the sound goes to Shazam, and nothing is recorded or kept.</string>
 	<key>NSMotionUsageDescription</key>
 	<string>Tracks notices when you're driving, so Tracks Radio can play the songs you like on the road and Louder at Speed can follow the car. Your drives stay on this iPhone.</string>
 	<key>NSSiriUsageDescription</key>

@@ -18,7 +18,7 @@ enum SearchScope: String, CaseIterable, Identifiable {
         switch self {
         case .appleMusic: Text("Artists, Songs, Stations and More")
         case .library: Text("Your Library")
-        case .history: Text("Songs, Artists and Albums")
+        case .history: Text("Songs, Artists, Dates and More")
         }
     }
 

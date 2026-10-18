@@ -46,6 +46,7 @@ struct MusicSearchResults: View {
                 } else if model.isShowingSampleData {
                     // Sample data never reaches Apple Music.
                 } else if !results.isEmpty {
+                    HistoryRecallHint(query: query) { model.search.scope = .history }
                     resultSections
                 }
             }
@@ -244,9 +245,10 @@ struct MusicSearchResults: View {
             ContentUnavailableView {
                 Label("Couldn't Search", systemImage: "wifi.exclamationmark")
             } description: {
-                Text("Check your connection and try again.")
+                Text("Check your connection and try again. Your history is on this device, so you can search it now.")
             } actions: {
                 Button("Try Again") { attempt += 1 }
+                Button("Search History") { model.search.scope = .history }
             }
         } else if !isBlank, state == .loaded, results.isEmpty {
             SearchNoResults(query: query)

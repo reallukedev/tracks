@@ -10,6 +10,7 @@ struct YourMusicSearchResults: View {
     var search: (String) -> Void = { _ in }
 
     @Environment(YourMusic.self) private var music
+    @Environment(AppModel.self) private var model
     @Environment(PlayerModel.self) private var player
     @Environment(\.openPlayRoute) private var openRoute
     @AppStorage("recentYourMusicSearches") private var recentStorage = ""
@@ -56,6 +57,7 @@ struct YourMusicSearchResults: View {
                 if isBlank {
                     blank
                 } else {
+                    HistoryRecallHint(query: query) { model.search.scope = .history }
                     results
                 }
             }

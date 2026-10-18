@@ -49,6 +49,10 @@
     <key>NSAudioCaptureUsageDescription</key>
     <string>Tracks listens to the music your Mac is playing so Stage and the backgrounds that move with the music follow every beat. Nothing is recorded or kept.</string>
 
+    <!-- Identify Song hears the room through the microphone, for Shazam. -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Identify Song listens for a few seconds to name the song playing near you. Only a fingerprint of the sound goes to Shazam, and nothing is recorded or kept.</string>
+
     <key>NSAppleEventsUsageDescription</key>
     <string>Tracks asks Music what is playing, and controls playback from the menu bar.</string>
 

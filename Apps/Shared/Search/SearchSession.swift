@@ -16,6 +16,9 @@ final class SearchSession {
     /// Set to put the cursor in the field once the page is showing.
     var wantsFocus = false
 
+    /// Whether Identify Song is listening or showing what it heard.
+    var isIdentifying = false
+
     #if os(iOS)
     /// The Search tab's stack, so starting a search can come back out of a page pushed on it.
     var path = NavigationPath()

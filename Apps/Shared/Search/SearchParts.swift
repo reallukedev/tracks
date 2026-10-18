@@ -8,11 +8,17 @@ struct RecentSearchesSection: View {
     let search: (String) -> Void
     var remove: ((String) -> Void)?
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     var body: some View {
+        // Clear goes under the title at the largest sizes, so the title keeps whole words.
+        let header = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+            : AnyLayout(HStackLayout(alignment: .firstTextBaseline))
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
+            header {
                 SearchSectionTitle("Recently Searched")
-                Spacer()
+                Spacer(minLength: 0)
                 Button("Clear") { withAnimation(.snappy) { clear() } }
                     .buttonStyle(.plain)
                     .font(.subheadline)
@@ -22,20 +28,9 @@ struct RecentSearchesSection: View {
             ScrollView(.horizontal) {
                 HStack(spacing: 8) {
                     ForEach(recents, id: \.self) { recent in
-                        Button {
+                        SearchChip(title: recent, systemImage: "clock.arrow.circlepath") {
                             search(recent)
-                        } label: {
-                            Label(recent, systemImage: "clock.arrow.circlepath")
-                                .font(.subheadline.weight(.medium))
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 7)
-                                .frame(minHeight: 34)
-                                .background(.quaternary, in: .capsule)
-                                // A full-height target around the chip.
-                                .frame(minHeight: 44)
-                                .contentShape(.rect)
                         }
-                        .buttonStyle(.pressable)
                         .contextMenu {
                             if let remove {
                                 Button("Remove from Recent Searches", systemImage: "minus.circle") {
@@ -49,6 +44,28 @@ struct RecentSearchesSection: View {
             .contentMargins(.horizontal, PlayMetrics.margin, for: .scrollContent)
             .scrollIndicators(.hidden)
         }
+    }
+}
+
+/// A search to run again or try, as a chip.
+struct SearchChip: View {
+    let title: String
+    let systemImage: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.subheadline.weight(.medium))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
+                .frame(minHeight: 34)
+                .background(.quaternary, in: .capsule)
+                // A full-height target around the chip.
+                .frame(minHeight: 44)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.pressable)
     }
 }
 
@@ -136,6 +153,7 @@ struct SearchSectionTitle: View {
 /// the other where the window's too narrow for both, and always on iPhone.
 struct SearchLead<SongsTitle: View, Songs: View>: View {
     let top: SearchTopResult?
+    var topTitle: LocalizedStringKey = "Top Result"
     let hasSongs: Bool
     @ViewBuilder var songsTitle: SongsTitle
     @ViewBuilder var songs: Songs
@@ -178,7 +196,7 @@ struct SearchLead<SongsTitle: View, Songs: View>: View {
     private var topBlock: some View {
         if let top {
             VStack(alignment: .leading, spacing: 10) {
-                SearchSectionTitle("Top Result")
+                SearchSectionTitle(topTitle)
                 TopResultCard(result: top)
             }
         }

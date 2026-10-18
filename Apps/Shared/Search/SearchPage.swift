@@ -24,13 +24,40 @@ struct SearchPage: View {
             .toolbar(removing: .title)
             .toolbar {
                 ToolbarItem(placement: .navigation) { scopePicker }
+                ToolbarItem(placement: .primaryAction) {
+                    identifyButton
+                        .popover(isPresented: $session.isIdentifying, arrowEdge: .bottom) {
+                            IdentifySongView()
+                                .padding(20)
+                                .frame(width: 320)
+                        }
+                }
             }
             #else
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { identifyButton }
+            }
             .safeAreaBar(edge: .top) {
                 scopePicker
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, PlayMetrics.margin)
                     .padding(.bottom, 8)
+            }
+            .sheet(isPresented: $session.isIdentifying) {
+                NavigationStack {
+                    ScrollView {
+                        IdentifySongView()
+                            .padding(.horizontal, PlayMetrics.margin)
+                            .padding(.bottom, 24)
+                    }
+                    .scrollBounceBehavior(.basedOnSize)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Close", systemImage: "xmark", role: .close) { session.isIdentifying = false }
+                        }
+                    }
+                }
+                .presentationDetents([.medium, .large])
             }
             #endif
             .onAppear {
@@ -73,6 +100,12 @@ struct SearchPage: View {
         case .appleMusic:
             MusicSearchResults(query: session.query, scope: .appleMusic, search: search)
         }
+    }
+
+    /// Names the song playing nearby, as Control Center's Music Recognition does.
+    private var identifyButton: some View {
+        Button("Identify Song", systemImage: "shazam.logo") { model.search.isIdentifying = true }
+            .help("Identify the song playing near you")
     }
 
     private var scopePicker: some View {

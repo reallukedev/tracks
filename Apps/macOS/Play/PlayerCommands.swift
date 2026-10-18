@@ -147,6 +147,14 @@ struct ControlsCommands: Commands {
             Button("Search", systemImage: "magnifyingglass") { window?.beginSearch() }
                 .keyboardShortcut("f", modifiers: .command)
                 .disabled(window == nil)
+            Button("Identify Song", systemImage: "shazam.logo") {
+                // The Search page, listening rather than typing.
+                window?.beginSearch()
+                model.search.wantsFocus = false
+                model.search.isIdentifying = true
+            }
+            .keyboardShortcut("f", modifiers: [.command, .option])
+            .disabled(window == nil)
         }
 
         CommandMenu("Go") {

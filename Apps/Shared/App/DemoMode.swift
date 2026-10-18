@@ -16,8 +16,20 @@ enum DemoMode {
     @MainActor
     static func makeStore() throws -> TracksStore {
         let store = try TracksStore(inMemory: true, sync: false)
-        try store.seedDemoData(DemoLibrary.plays(endingAt: .now, days: days))
+        if !isEmptyRequested {
+            try store.seedDemoData(DemoLibrary.plays(endingAt: .now, days: days))
+        }
         return store
+    }
+
+    /// `-TracksDemoEmpty YES` alongside `-TracksDemoData YES`, in a Debug build: nothing played
+    /// yet, to see the screens as someone opening Tracks for the first time does.
+    private static var isEmptyRequested: Bool {
+        #if DEBUG
+        UserDefaults.standard.bool(forKey: "TracksDemoEmpty")
+        #else
+        false
+        #endif
     }
 
     /// `-TracksDemoDays 1800` alongside `-TracksDemoData YES`, in a Debug build: years of sample

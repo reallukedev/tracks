@@ -33,6 +33,10 @@
         </array>
     </dict>
 
+    <!-- Identify Song: a few seconds of the room, for Shazam. -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+
     <key>com.apple.security.network.client</key>
     <true/>
 

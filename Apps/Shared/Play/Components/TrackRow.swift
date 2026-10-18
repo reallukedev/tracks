@@ -47,6 +47,8 @@ struct TrackRow: View {
     var localTrack: LocalTrack?
     /// Dimmed when it can't play: not downloaded and its server out of reach.
     var isPlayable = true
+    /// A short fact in place of the plays, like when it played.
+    var detail: String?
 
     @Environment(PlayerModel.self) private var player
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -83,6 +85,10 @@ struct TrackRow: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
+                // At the largest sizes the fact goes under the name, which needs the width.
+                if let detail, plays == nil, dynamicTypeSize.isAccessibilitySize {
+                    detailText(detail)
+                }
             }
             // Separators start at the title, as in Music, not under the cover or number.
             .alignmentGuide(.listRowSeparatorLeading) { $0[.leading] }
@@ -98,11 +104,22 @@ struct TrackRow: View {
                     .lineLimit(1)
                     .fixedSize()
                     .accessibilityLabel(PlayCountText.spoken(plays))
+            } else if let detail, !dynamicTypeSize.isAccessibilitySize {
+                detailText(detail)
+                    .fixedSize()
             }
         }
         .frame(minHeight: Self.minimumHeight)
         .opacity(isPlayable ? 1 : 0.45)
         .contentShape(.rect)
+    }
+
+    private func detailText(_ detail: String) -> some View {
+        Text(detail)
+            .font(.subheadline)
+            .monospacedDigit()
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
     }
 
     @ViewBuilder
