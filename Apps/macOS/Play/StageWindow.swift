@@ -37,7 +37,7 @@ private struct StageWindowContent: View {
             .environment(chrome)
             .frame(minWidth: 640, minHeight: 400)
             .background { WindowReader(window: $window) }
-            .onChange(of: window) { _, window in
+            .onChange(of: window, initial: true) { _, window in
                 guard let window else { return }
                 chrome.attach(window)
                 guard !window.styleMask.contains(.fullScreen) else { return }

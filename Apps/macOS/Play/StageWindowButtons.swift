@@ -37,8 +37,13 @@ final class StageWindowChrome {
         }
     }
 
+    /// The window the click came from, if Stage's own was never picked up: the button then
+    /// still works rather than doing nothing.
     func toggleFullScreen() {
-        window?.toggleFullScreen(nil)
+        guard let target = window ?? NSApp.currentEvent?.window ?? NSApp.keyWindow else { return }
+        if target !== window { attach(target) }
+        target.collectionBehavior.insert(.fullScreenPrimary)
+        target.toggleFullScreen(nil)
     }
 
     /// Whether the pointer is still over the window, for a hover that ends over something
