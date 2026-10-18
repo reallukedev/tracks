@@ -220,9 +220,13 @@ struct NowPlayingMenu: View {
             // At the top, where Music has it.
             SharePlayMenuItem()
             Button("Stage", systemImage: "tv") { StagePresenter.shared.isShowing = true }
+            SleepTimerMenu()
             Divider()
-            #endif
+            // The star beside the controls has Favorite.
+            NowPlayingMenuItems(track: track, onNavigate: onNavigate, onTuneRadio: openRadioTuner.map { open in { open() } }, showsFavorite: false)
+            #else
             NowPlayingMenuItems(track: track, onNavigate: onNavigate, onTuneRadio: openRadioTuner.map { open in { open() } })
+            #endif
         } label: {
             Image(systemName: "ellipsis")
                 .font(.body.weight(.bold))
@@ -242,6 +246,8 @@ struct NowPlayingMenuItems: View {
     var onNavigate: ((NowPlayingDestination) -> Void)?
     /// Opens Tracks Radio's tuning, where the menu can show it. Nil leaves Tune out.
     var onTuneRadio: (() -> Void)?
+    /// False where Favorite has a button of its own.
+    var showsFavorite = true
     @Environment(PlayerModel.self) private var player
     @Environment(\.openPlayRoute) private var openPlayRoute
 
@@ -261,6 +267,7 @@ struct NowPlayingMenuItems: View {
             SongActions(suggestLess: track.songIdentity, block: track.artistName)
         }
         addNowPlaying(&actions)
+        if !showsFavorite { actions.favorite = nil }
         return actions
     }
 
@@ -298,43 +305,26 @@ struct NowPlayingMenuItems: View {
     }
 }
 
-/// Stop playing after a while, or at the end of the song. Shows the time left while it runs.
-struct SleepTimerButton: View {
+/// The sleep timer as a submenu, for the player's More menu. Says the time left while it runs.
+struct SleepTimerMenu: View {
     @Environment(PlayerModel.self) private var player
-    @Environment(\.isOnScreen) private var isOnScreen
 
     var body: some View {
         Menu {
             SleepTimerItems(player: player)
         } label: {
-            HStack(spacing: 4) {
-                Image(systemName: player.sleepTimer == nil ? "moon.zzz" : "moon.zzz.fill")
-                    .font(.title3)
-                if player.sleepTimer != nil {
-                    TimelineView(.animation(minimumInterval: 1, paused: !isOnScreen || player.sleepTimer == .endOfSong)) { context in
-                        let label = label(at: context.date)
-                        // Sized by its digits as zeros with the ticking time drawn over it, so
-                        // the row isn't laid out again every second.
-                        Text(verbatim: label.replacing(/\d/, with: "0"))
-                            .hidden()
-                            .overlay(alignment: .leading) { Text(verbatim: label) }
-                            .font(.caption.weight(.semibold))
-                            .monospacedDigit()
-                    }
-                }
+            Label("Sleep Timer", systemImage: player.sleepTimer == nil ? "moon.zzz" : "moon.zzz.fill")
+            if let remaining {
+                Text(remaining)
             }
-            .foregroundStyle(.white.opacity(player.sleepTimer == nil ? 0.7 : 1))
-            .frame(minWidth: 44, minHeight: 44)
-            .contentShape(.rect)
         }
-        .accessibilityLabel(player.sleepTimer == nil ? "Sleep Timer" : "Sleep Timer On")
-        .sensoryFeedback(.selection, trigger: player.sleepTimer)
     }
 
-    private func label(at date: Date) -> String {
-        if player.sleepTimer == .endOfSong { return String(localized: "End of Song") }
-        guard let remaining = player.sleepRemaining(at: date) else { return "" }
-        return Scrubber.format(remaining)
+    private var remaining: String? {
+        guard let timer = player.sleepTimer else { return nil }
+        if timer == .endOfSong { return String(localized: "End of Song") }
+        guard let left = player.sleepRemaining(at: .now) else { return nil }
+        return String(localized: "\(Scrubber.format(left)) left")
     }
 }
 

@@ -259,7 +259,7 @@ struct NowPlayingView: View {
             }
 
             HStack {
-                SleepTimerButton()
+                NowPlayingFavoriteButton(track: track)
                 Spacer()
                 pageToggle(isOn: showsBack && !showsQueue, systemImage: "clock.arrow.circlepath", label: showsBack ? "Show the Cover" : "Your History") {
                     if showsQueue {
@@ -282,16 +282,19 @@ struct NowPlayingView: View {
         }
     }
 
-    /// One of the bottom row's page buttons: lit white while its page is up, as Music's
-    /// Lyrics and Up Next buttons are.
+    /// One of the bottom row's page buttons: lit in a white circle while its page is up, as
+    /// Music's Lyrics and Up Next buttons are. A circle sits with the screen's round corners
+    /// and the round More button, where a square looked boxed in.
     private func pageToggle(isOn: Bool, systemImage: String, label: LocalizedStringKey, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.title3)
                 .foregroundStyle(isOn ? .black : .white.opacity(0.7))
+                .frame(width: 40, height: 40)
+                .background(isOn ? AnyShapeStyle(.white) : AnyShapeStyle(.clear), in: .circle)
                 .frame(width: 44, height: 44)
-                .background(isOn ? AnyShapeStyle(.white) : AnyShapeStyle(.clear), in: .rect(cornerRadius: 10, style: .continuous))
-                .contentShape(.rect)
+                .contentShape(.circle)
+                .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: isOn)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(Text(label))

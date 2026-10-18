@@ -604,6 +604,25 @@ final class PlayerModel {
         }
     }
 
+    #if os(iOS)
+    /// Adds a song to one of your Apple Music playlists, or to a new one by that name.
+    func add(_ song: Song, toPlaylist playlist: Playlist?, named name: String) {
+        Task {
+            do {
+                try await MusicKitPlayerEngine.checkAccess()
+                if let playlist {
+                    _ = try await MusicLibrary.shared.add(song, to: playlist)
+                } else {
+                    _ = try await MusicLibrary.shared.createPlaylist(name: name, items: [song])
+                }
+                confirm(String(localized: "Added to \u{201C}\(name)\u{201D}"))
+            } catch {
+                report(error, couldnt: String(localized: "Couldn't Add to Playlist"))
+            }
+        }
+    }
+    #endif
+
     /// A short confirmation, shown over everything for a moment, like Music's.
     private(set) var confirmation: String?
     @ObservationIgnored private var confirmationTask: Task<Void, Never>?
