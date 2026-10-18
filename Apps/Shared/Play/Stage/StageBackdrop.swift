@@ -97,28 +97,70 @@ private struct FlowBackdrop: View {
     @Environment(PlayerModel.self) private var player: PlayerModel?
 
     var body: some View {
+        moving
+            .overlay {
+                LinearGradient(colors: [.black.opacity(0.1), .black.opacity(0.4)], startPoint: .top, endPoint: .bottom)
+            }
+            .settles(isPlaying: isPlaying, into: $isSettled)
+    }
+
+    /// This moment of the music, and where the mesh's points are in it.
+    private struct Moment {
+        let points: [SIMD2<Float>]
+        /// How far the middle's colour goes toward white, and how bright the light from the
+        /// middle is.
+        let glow: Double
+        let light: Double
+    }
+
+    private static func moment(_ pulse: StagePulse, reduceMotion: Bool) -> Moment {
+        let bass = pulse.bass
+        let mid = Float(pulse.bands[6..<14].reduce(0, +) / 8)
+        // The drift keeps the song's pace, hurrying for a busy track and gliding for a
+        // ballad, and glides to a stop on pause; the bass and the mids push it about.
+        let t = Float(reduceMotion ? 0 : pulse.motion.truncatingRemainder(dividingBy: 10_000))
+        let wander: Float = 0.11 + 0.05 * pulse.activity
+        let points: [SIMD2<Float>] = [
+            [0, 0], [0.5 + wander * sin(t * 0.21), 0], [1, 0],
+            [0, 0.5 + wander * cos(t * 0.17)],
+            [0.5 + (wander + mid * 0.12) * sin(t * 0.31), 0.5 + (wander + bass * 0.18) * cos(t * 0.27)],
+            [1, 0.5 + wander * sin(t * 0.19 + 1)],
+            [0, 1], [0.5 + wander * cos(t * 0.23), 1], [1, 1],
+        ]
+        return Moment(points: points, glow: Double(0.08 + bass * 0.4 + pulse.kick * 0.1), light: Double(bass) * 0.2 + Double(pulse.kick) * 0.2)
+    }
+
+    private static func pulse(_ levels: SmoothedLevels, at time: Double, player: PlayerModel?, energy: Double, isPlaying: Bool, reduceMotion: Bool) -> StagePulse {
+        reduceMotion ? .still(isPlaying: isPlaying) : levels.next(heard: AudioLevelMeter.shared.current(), time: time, song: SongMoment(player: player, energy: energy), isPlaying: isPlaying)
+    }
+
+    #if os(macOS)
+    private var moving: some View {
+        let (deep, middle, light) = (colors[0], colors[1], colors[2])
+        let (d, m, l) = (deep.shaderComponents, middle.shaderComponents, light.shaderComponents)
+        // Smooth colour looks the same drawn at a quarter of the size.
+        return BackdropCanvas(isMoving: !(reduceMotion || isSettled), factor: 4) { [levels, player, energy, isPlaying, reduceMotion] frame in
+            let moment = Self.moment(Self.pulse(levels, at: frame.time, player: player, energy: energy, isPlaying: isPlaying, reduceMotion: reduceMotion), reduceMotion: reduceMotion)
+            let glow = light.mix(with: .white, by: moment.glow).shaderComponents
+            let colours = [d, m, l, m, glow, d, l, d, m]
+            return BackdropDrawing(
+                function: "flowFragment",
+                shape: .mesh(columns: 3, rows: 3, steps: 32, m: MeshInputs.make(columns: 3, rows: 3, points: moment.points, colours: colours)),
+                // The kick, as light from the middle.
+                inputs: [SIMD4(Float(moment.light), 700, 0, 0)]
+            )
+        }
+    }
+    #else
+    private var moving: some View {
         TimelineView(.animation(minimumInterval: BackdropFrameRate.everyFrame, paused: reduceMotion || isSettled || !isOnScreen)) { context in
-            let time = context.date.timeIntervalSinceReferenceDate
-            let pulse = reduceMotion ? .still(isPlaying: isPlaying) : levels.next(heard: AudioLevelMeter.shared.current(), time: time, song: SongMoment(player: player, energy: energy), isPlaying: isPlaying)
-            let bass = pulse.bass
-            let mid = Float(pulse.bands[6..<14].reduce(0, +) / 8)
-            // The drift keeps the song's pace, hurrying for a busy track and gliding for a
-            // ballad, and glides to a stop on pause; the bass and the mids push it about.
-            let t = Float(reduceMotion ? 0 : pulse.motion.truncatingRemainder(dividingBy: 10_000))
-            let wander: Float = 0.11 + 0.05 * pulse.activity
-            let points: [SIMD2<Float>] = [
-                [0, 0], [0.5 + wander * sin(t * 0.21), 0], [1, 0],
-                [0, 0.5 + wander * cos(t * 0.17)],
-                [0.5 + (wander + mid * 0.12) * sin(t * 0.31), 0.5 + (wander + bass * 0.18) * cos(t * 0.27)],
-                [1, 0.5 + wander * sin(t * 0.19 + 1)],
-                [0, 1], [0.5 + wander * cos(t * 0.23), 1], [1, 1],
-            ]
+            let moment = Self.moment(Self.pulse(levels, at: context.date.timeIntervalSinceReferenceDate, player: player, energy: energy, isPlaying: isPlaying, reduceMotion: reduceMotion), reduceMotion: reduceMotion)
             let (deep, middle, light) = (colors[0], colors[1], colors[2])
-            let glow = light.mix(with: .white, by: Double(0.08 + bass * 0.4 + pulse.kick * 0.1))
+            let glow = light.mix(with: .white, by: moment.glow)
             MeshGradient(
                 width: 3,
                 height: 3,
-                points: points,
+                points: moment.points,
                 colors: [
                     deep, middle, light,
                     middle, glow, deep,
@@ -128,15 +170,12 @@ private struct FlowBackdrop: View {
             )
             .overlay {
                 // The kick, as light from the middle.
-                RadialGradient(colors: [.white.opacity(Double(bass) * 0.2 + Double(pulse.kick) * 0.2), .clear], center: .center, startRadius: 0, endRadius: 700)
+                RadialGradient(colors: [.white.opacity(moment.light), .clear], center: .center, startRadius: 0, endRadius: 700)
                     .blendMode(.plusLighter)
             }
-            .overlay {
-                LinearGradient(colors: [.black.opacity(0.1), .black.opacity(0.4)], startPoint: .top, endPoint: .bottom)
-            }
         }
-        .settles(isPlaying: isPlaying, into: $isSettled)
     }
+    #endif
 }
 
 /// The cover, far larger than the screen and heavily blurred, turning slowly and breathing
@@ -162,42 +201,80 @@ private struct BloomBackdrop: View {
     @Environment(PlayerModel.self) private var player: PlayerModel?
 
     var body: some View {
+        moving
+            .background(art?.field ?? CoverStage.fallback)
+            .overlay {
+                LinearGradient(colors: [.black.opacity(0.15), .black.opacity(0.5)], startPoint: .top, endPoint: .bottom)
+            }
+            .clipped()
+            .settles(isPlaying: isPlaying, into: $isSettled)
+            .task(id: cover) {
+                guard let cover else { return }
+                let found = await BackdropArtStore.shared.art(for: cover)
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeInOut(duration: 0.6)) { art = found }
+            }
+    }
+
+    /// How the cover sits for this moment of the music: how much larger, turned how far, and
+    /// how much brighter.
+    private static func pose(_ pulse: StagePulse, reduceMotion: Bool) -> (scale: CGFloat, degrees: Double, brightness: Double) {
+        let bass = CGFloat(pulse.bass)
+        let kick = CGFloat(pulse.kick)
+        return (
+            1.1 + bass * 0.14 + kick * 0.045,
+            reduceMotion ? 0 : (pulse.motion * 3).truncatingRemainder(dividingBy: 360),
+            Double(bass) * 0.14 + Double(kick) * 0.08 - 0.1
+        )
+    }
+
+    #if os(macOS)
+    private var moving: some View {
+        // Filling the screen with or without the cover, so its field shows while it's readied.
+        ZStack {
+            if let art {
+                // A picture this soft looks the same drawn at a quarter of the size.
+                BackdropCanvas(isMoving: !(reduceMotion || isSettled), factor: 4, isOpaque: false) { [levels, player, energy, isPlaying, reduceMotion] frame in
+                    let pulse = reduceMotion ? .still(isPlaying: isPlaying) : levels.next(heard: AudioLevelMeter.shared.current(), time: frame.time, song: SongMoment(player: player, energy: energy), isPlaying: isPlaying)
+                    let pose = Self.pose(pulse, reduceMotion: reduceMotion)
+                    return BackdropDrawing(function: "bloomFragment", inputs: [
+                        SIMD4(Float(pose.scale), Float(pose.degrees * .pi / 180), 0, 0),
+                        SIMD4(),
+                        SIMD4(1.5, 0, 0, 0),
+                        SIMD4(Float(pose.brightness), 1.35, 0, 0),
+                    ], picture: art.soft)
+                }
+                .transition(.opacity)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+    #else
+    private var moving: some View {
         GeometryReader { proxy in
             let side = max(proxy.size.width, proxy.size.height) * 1.5
             TimelineView(.animation(minimumInterval: BackdropFrameRate.everyFrame, paused: reduceMotion || isSettled || !isOnScreen)) { context in
                 let time = context.date.timeIntervalSinceReferenceDate
                 let pulse = reduceMotion ? .still(isPlaying: isPlaying) : levels.next(heard: AudioLevelMeter.shared.current(), time: time, song: SongMoment(player: player, energy: energy), isPlaying: isPlaying)
-                let bass = CGFloat(pulse.bass)
-                let kick = CGFloat(pulse.kick)
+                let pose = Self.pose(pulse, reduceMotion: reduceMotion)
                 ZStack {
                     if let art {
                         Image(decorative: art.soft, scale: 1)
                             .resizable()
                             .interpolation(.high)
                             .frame(width: side, height: side)
-                            .scaleEffect(1.1 + bass * 0.14 + kick * 0.045)
-                            .rotationEffect(.degrees(reduceMotion ? 0 : (pulse.motion * 3).truncatingRemainder(dividingBy: 360)))
+                            .scaleEffect(pose.scale)
+                            .rotationEffect(.degrees(pose.degrees))
                             .saturation(1.35)
-                            .brightness(Double(bass) * 0.14 + Double(kick) * 0.08 - 0.1)
+                            .brightness(pose.brightness)
                             .transition(.opacity)
                     }
                 }
                 .frame(width: proxy.size.width, height: proxy.size.height)
             }
         }
-        .background(art?.field ?? CoverStage.fallback)
-        .overlay {
-            LinearGradient(colors: [.black.opacity(0.15), .black.opacity(0.5)], startPoint: .top, endPoint: .bottom)
-        }
-        .clipped()
-        .settles(isPlaying: isPlaying, into: $isSettled)
-        .task(id: cover) {
-            guard let cover else { return }
-            let found = await BackdropArtStore.shared.art(for: cover)
-            guard !Task.isCancelled else { return }
-            withAnimation(.easeInOut(duration: 0.6)) { art = found }
-        }
     }
+    #endif
 }
 
 extension View {

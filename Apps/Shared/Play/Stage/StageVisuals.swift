@@ -16,44 +16,54 @@ struct GlowVisual: View {
     let phase: Double
 
     var body: some View {
-        let (a, b, c, d) = (colors[0], colors[1 % colors.count], colors[2 % colors.count], colors[3 % colors.count])
-        MeshGradient(
-            width: 4,
-            height: 4,
-            points: [
-                [0, 0], [0.33, 0], [0.67, 0], [1, 0],
-                [0, 0.33], inner(0.33, 0.36, 0.23, 0), inner(0.67, 0.33, 0.19, 2.1), [1, 0.33],
-                [0, 0.67], inner(0.31, 0.66, 0.17, 4.2), inner(0.66, 0.67, 0.21, 1.3), [1, 0.67],
-                [0, 1], [0.33, 1], [0.67, 1], [1, 1],
-            ],
-            colors: [
-                .clear, b.opacity(0), c.opacity(0), .clear,
-                a.opacity(0), a, b, d.opacity(0),
-                c.opacity(0), d, c, b.opacity(0),
-                .clear, a.opacity(0), d.opacity(0), .clear,
-            ],
-            smoothsColors: true
-        )
-        .mask {
-            EllipticalGradient(
-                stops: [.init(color: .white, location: 0.15), .init(color: .clear, location: 0.5)],
-                startRadiusFraction: 0,
-                endRadiusFraction: 1
-            )
-        }
-        // A quiet song's cloud sits small and dim; a loud one's fills out and glows.
-        .scaleEffect(0.9 + 0.14 * level + 0.04 * bloom)
-        // Brighter by opacity alone: a brightness filter lifts the clear corners too, which
-        // shows as an edge over the background.
-        .opacity(0.35 + 0.55 * level + 0.1 * bloom)
-        .blendMode(.plusLighter)
+        MeshGradient(width: 4, height: 4, points: Self.points(phase: phase, level: level), colors: Self.colors(colors), smoothsColors: true)
+            .mask {
+                EllipticalGradient(
+                    stops: [.init(color: .white, location: Self.mask.lowerBound), .init(color: .clear, location: Self.mask.upperBound)],
+                    startRadiusFraction: 0,
+                    endRadiusFraction: 1
+                )
+            }
+            // A quiet song's cloud sits small and dim; a loud one's fills out and glows.
+            .scaleEffect(Self.scale(level: level, bloom: bloom))
+            // Brighter by opacity alone: a brightness filter lifts the clear corners too, which
+            // shows as an edge over the background.
+            .opacity(Self.opacity(level: level, bloom: bloom))
+            .blendMode(.plusLighter)
     }
 
-    /// An inner point of the mesh near `x`, `y`, wandering on a slow path of its own.
-    private func inner(_ x: Float, _ y: Float, _ speed: Float, _ offset: Float) -> SIMD2<Float> {
-        let t = Float(phase.truncatingRemainder(dividingBy: 10_000))
-        let reach = Float(0.07 + 0.03 * level)
-        return [x + reach * sin(t * speed + offset), y + reach * cos(t * speed * 0.83 + offset * 1.7)]
+    /// Where the cloud fades out, as parts of the size from its middle.
+    static let mask = 0.15...0.5
+
+    static func scale(level: Double, bloom: Double) -> Double { 0.9 + 0.14 * level + 0.04 * bloom }
+    static func opacity(level: Double, bloom: Double) -> Double { 0.35 + 0.55 * level + 0.1 * bloom }
+
+    /// The mesh's points: the outer ones still, the inner four wandering.
+    static func points(phase: Double, level: Double) -> [SIMD2<Float>] {
+        /// An inner point of the mesh near `x`, `y`, wandering on a slow path of its own.
+        func inner(_ x: Float, _ y: Float, _ speed: Float, _ offset: Float) -> SIMD2<Float> {
+            let t = Float(phase.truncatingRemainder(dividingBy: 10_000))
+            let reach = Float(0.07 + 0.03 * level)
+            return [x + reach * sin(t * speed + offset), y + reach * cos(t * speed * 0.83 + offset * 1.7)]
+        }
+        return [
+            [0, 0], [0.33, 0], [0.67, 0], [1, 0],
+            [0, 0.33], inner(0.33, 0.36, 0.23, 0), inner(0.67, 0.33, 0.19, 2.1), [1, 0.33],
+            [0, 0.67], inner(0.31, 0.66, 0.17, 4.2), inner(0.66, 0.67, 0.21, 1.3), [1, 0.67],
+            [0, 1], [0.33, 1], [0.67, 1], [1, 1],
+        ]
+    }
+
+    /// The mesh's colours: the inner four the cover's, the outer ones clear, so the cloud has
+    /// no edge.
+    static func colors(_ colors: [Color]) -> [Color] {
+        let (a, b, c, d) = (colors[0], colors[1 % colors.count], colors[2 % colors.count], colors[3 % colors.count])
+        return [
+            .clear, b.opacity(0), c.opacity(0), .clear,
+            a.opacity(0), a, b, d.opacity(0),
+            c.opacity(0), d, c, b.opacity(0),
+            .clear, a.opacity(0), d.opacity(0), .clear,
+        ]
     }
 }
 

@@ -1,5 +1,6 @@
 import CoreAudio
 import AVFoundation
+import Accelerate
 import Synchronization
 import os
 
@@ -118,7 +119,7 @@ nonisolated final class SystemAudioListener: @unchecked Sendable {
                 let samples = data.assumingMemoryBound(to: Float.self)
                 let count = Int(first.mDataByteSize) / MemoryLayout<Float>.size
                 var loudest: Float = 0
-                for index in stride(from: 0, to: count, by: 4) { loudest = max(loudest, abs(samples[index])) }
+                vDSP_maxmgv(samples, 4, &loudest, vDSP_Length((count + 3) / 4))
                 if loudest > 1e-4 { self.lastHeard.store(UInt64(host * 1e9), ordering: .relaxed) }
             }
             sound.hear(UnsafeMutablePointer(mutating: input), frames: frames, at: CMTime(seconds: host, preferredTimescale: 1_000_000_000))

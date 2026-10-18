@@ -23,9 +23,11 @@ import Foundation
 /// - A gentle song (see `Groove.gentleness`, or `BeatFollower` for music that's heard) glides
 ///   and breathes: everything eases more slowly, its stir swings slower and its kicks don't
 ///   surge the flow. The kick's surge, the stir and the glints also only go as far as the
-///   song's beat is sure (see `Groove.lock`), so the cover never lurches at a moment that
-///   isn't in the song.
-/// - With a sure beat, the cover sways to and fro once a bar, in time with the song.
+///   song's hits surely land where they're drawn (see `Groove.lock`): always, for sound that's
+///   heard; for a replay, as surely as it's placed in the song. So the cover never lurches at a
+///   moment that isn't in the song.
+/// - With a sure beat, the cover sways to and fro once a bar, in time with the song, as far as
+///   the beat is sure, and in the song's fuller parts.
 /// - What's new in the middle of the sound, a snare, a clap, stirs the colours round, as a
 ///   spoon does ink in water, and unwinds.
 /// - What's new up high, the hats and cymbals, glints in the highlights.
@@ -54,13 +56,17 @@ public nonisolated struct LivingCoverFeel: Equatable, Sendable {
         public var lock: Double
         /// How gently it moves, 0 to 1: a slow, soft ballad near 1 (see `Groove.gentleness`).
         public var gentleness: Double
+        /// How sure its beat is, 0 to 1, for what keeps time with the bar: hits can land where
+        /// they're heard with no tempo found (see `BeatFollower`).
+        public var sureness: Double
 
-        public init(punch: Double, brightness: Double, intensity: Double, lock: Double = 1, gentleness: Double = 0.3) {
+        public init(punch: Double, brightness: Double, intensity: Double, lock: Double = 1, gentleness: Double = 0.3, sureness: Double = 1) {
             self.punch = punch
             self.brightness = brightness
             self.intensity = intensity
             self.lock = lock
             self.gentleness = gentleness
+            self.sureness = sureness
         }
 
         /// The song's groove, or a middling song while it isn't known. `isHeard` when the
@@ -86,7 +92,8 @@ public nonisolated struct LivingCoverFeel: Equatable, Sendable {
                 brightness: unit(brightness, otherwise: 0.5),
                 intensity: unit(intensity, otherwise: 0.75),
                 lock: unit(lock, otherwise: 0),
-                gentleness: unit(gentleness, otherwise: 0.3)
+                gentleness: unit(gentleness, otherwise: 0.3),
+                sureness: unit(sureness, otherwise: 0)
             )
         }
     }
@@ -180,10 +187,10 @@ public nonisolated struct LivingCoverFeel: Equatable, Sendable {
     private var highs = 0.0
     private var hasHeard = false
     /// The stir's place and speed.
-    private var stirred = 0.0
+    private(set) var stirred = 0.0
     private var spin = 0.0
     /// How far the sway reaches, and where in the bar it was last.
-    private var sway = 0.0
+    private(set) var sway = 0.0
     private var swayBeats = 0.0
     private var phrase: Double?
     private var calm = 0.0
@@ -257,7 +264,7 @@ public nonisolated struct LivingCoverFeel: Equatable, Sendable {
         next.thump = Self.ease(frame.thump, toward: thump, elapsed: dt, rise: Pace.thumpRise, fall: fall(Pace.thumpFall + Pace.thumpSoftness * (1 - song.punch)))
 
         // A ballad's piano glints less than a dance track's hats.
-        let shimmer = isPlaying ? unit(highFresh * 4) * (0.35 + 0.65 * song.emphasis) : 0
+        let shimmer = isPlaying ? unit(highFresh * 4) * (0.25 + 0.75 * song.emphasis) : 0
         next.shimmer = Self.ease(frame.shimmer, toward: shimmer, elapsed: dt, rise: Pace.shimmer.rise, fall: fall(Pace.shimmer.fall))
 
         // How loud it's mastered sets the depth; louder than it's been, a chorus, deepens it.
@@ -285,9 +292,11 @@ public nonisolated struct LivingCoverFeel: Equatable, Sendable {
         next.warmth = hasWarmth ? Self.ease(frame.warmth, toward: warmth, elapsed: dt, rise: Pace.warmth, fall: Pace.warmth) : warmth
         hasWarmth = true
 
-        stirred = stir(from: stirred, push: midFresh * 40 * song.emphasis, swing: Pace.swing * (1 + 0.6 * song.gentleness), isPlaying: isPlaying, elapsed: dt)
-        // Once a bar, to one side and back, on the song's own beat.
-        let swaying = isPlaying && beats != nil ? 0.45 * song.emphasis : 0
+        stirred = stir(from: stirred, push: midFresh * 36 * song.emphasis, swing: Pace.swing * (1 + 0.6 * song.gentleness), isPlaying: isPlaying, elapsed: dt)
+        // Once a bar, to one side and back, on the song's own beat: in its fuller parts, a
+        // chorus or a drop, so it comes and goes with the song rather than rocking throughout.
+        let fuller = unit((all - usualAll) * 8 + 0.1)
+        let swaying = isPlaying && beats != nil ? 0.45 * song.emphasis * song.sureness * fuller : 0
         sway = Self.ease(sway, toward: swaying, elapsed: dt, rise: Pace.sway.rise, fall: min(Pace.sway.fall, fall(Pace.sway.fall)))
         if let beats, beats.isFinite { swayBeats = beats }
         next.twist = max(-1, min(1, stirred + sway * sin(2 * .pi * swayBeats / 4)))

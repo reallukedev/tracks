@@ -45,28 +45,18 @@ struct HaloBackdrop: View {
     @Environment(\.isOnScreen) private var isOnScreen
 
     var body: some View {
-        let energy = songEnergy(player?.current)
+        let moment = moment
         GeometryReader { proxy in
             let light = Light(focus: focus, in: proxy.size)
+            #if os(macOS)
+            HaloCanvas(light: light, colors: colors, isMoving: !(reduceMotion || isSettled), moment: moment)
+                .animation(.smooth(duration: 0.6), value: light)
+            #else
             TimelineView(.animation(minimumInterval: BackdropFrameRate.interval(reduceMotion: false), paused: reduceMotion || isSettled || !isOnScreen)) { context in
-                let now = context.date
-                let pulse = reduceMotion
-                    ? StagePulse(bands: [Float](repeating: 0.3, count: AudioLevelMeter.bandCount), kick: 0, motion: 0)
-                    : levels.next(
-                        heard: AudioLevelMeter.shared.current(),
-                        time: now.timeIntervalSinceReferenceDate,
-                        song: SongMoment(player: player, energy: energy),
-                        isPlaying: isPlaying
-                    )
-                let frame = HaloFrame(
-                    bands: pulse.bands,
-                    kick: Double(pulse.kick),
-                    turn: turn.phase(at: now.timeIntervalSinceReferenceDate),
-                    bloom: reduceMotion ? 0 : max(0, 1 - now.timeIntervalSince(arrivedAt) / 1.8)
-                )
-                HaloLight(frame: frame, colors: colors, light: light, scale: Self.scale)
+                HaloLight(frame: moment(context.date), colors: colors, light: light, scale: Self.scale)
             }
             .animation(.smooth(duration: 0.6), value: light)
+            #endif
         }
         .overlay {
             // Quiet at the foot, where the controls are.
@@ -89,6 +79,27 @@ struct HaloBackdrop: View {
             isSettled = true
         }
         .listensToAudio()
+    }
+
+    /// The music at a moment, and where the colours' turn and a new song's bloom are.
+    private var moment: (Date) -> HaloFrame {
+        let energy = songEnergy(player?.current)
+        return { [levels, player, isPlaying, reduceMotion, turn, arrivedAt] now in
+            let pulse = reduceMotion
+                ? StagePulse(bands: [Float](repeating: 0.3, count: AudioLevelMeter.bandCount), kick: 0, motion: 0)
+                : levels.next(
+                    heard: AudioLevelMeter.shared.current(),
+                    time: now.timeIntervalSinceReferenceDate,
+                    song: SongMoment(player: player, energy: energy),
+                    isPlaying: isPlaying
+                )
+            return HaloFrame(
+                bands: pulse.bands,
+                kick: Double(pulse.kick),
+                turn: turn.phase(at: now.timeIntervalSinceReferenceDate),
+                bloom: reduceMotion ? 0 : max(0, 1 - now.timeIntervalSince(arrivedAt) / 1.8)
+            )
+        }
     }
 
     private var colors: [Color] {
@@ -115,6 +126,9 @@ private struct AudioListening: ViewModifier {
     @State private var isShown = false
     /// Whether this has asked the meter to listen, so every start has its one stop.
     @State private var isListening = false
+    /// Paused for a few seconds: what moves with the music has settled, and there's nothing
+    /// to hear. On the Mac, hearing the Mac's own sound costs as much as drawing.
+    @State private var isResting = false
 
     func body(content: Content) -> some View {
         content
@@ -128,6 +142,17 @@ private struct AudioListening: ViewModifier {
             }
             .onChange(of: isOnScreen) { update() }
             .onChange(of: isOn) { update() }
+            .task(id: player?.isPlaying ?? true) {
+                guard player?.isPlaying == false else {
+                    isResting = false
+                    update()
+                    return
+                }
+                try? await Task.sleep(for: .seconds(3))
+                guard !Task.isCancelled else { return }
+                isResting = true
+                update()
+            }
             // By the song as well as the queue entry: a station's entry is often in the queue
             // before its song is known.
             .task(id: GrooveRequest(track: player?.current?.id, song: player?.current?.song?.id.rawValue, isListening: isListening)) {
@@ -143,7 +168,7 @@ private struct AudioListening: ViewModifier {
     }
 
     private func update() {
-        let wants = isOn && isShown && isOnScreen
+        let wants = isOn && isShown && isOnScreen && !isResting
         guard wants != isListening else { return }
         isListening = wants
         if wants {
@@ -188,6 +213,56 @@ private struct HaloFrame {
     /// 1 as a song arrives, to 0.
     let bloom: Double
 }
+
+#if os(macOS)
+/// The halo drawn by Metal, for the Mac (see ``BackdropCanvas``): the same light as
+/// ``HaloLight``, gliding after the cover the same way.
+private struct HaloCanvas: View, Animatable {
+    var light: Light
+    let colors: [Color]
+    let isMoving: Bool
+    let moment: (Date) -> HaloFrame
+
+    var animatableData: AnimatablePair<AnimatablePair<CGFloat, CGFloat>, CGFloat> {
+        get { AnimatablePair(AnimatablePair(light.x, light.y), light.radius) }
+        set { (light.x, light.y, light.radius) = (newValue.first.first, newValue.first.second, newValue.second) }
+    }
+
+    var body: some View {
+        // The colours as the light takes them, worked out once rather than every frame.
+        let field = colors[0].mix(with: .black, by: 0.62).shaderComponents
+        let wash = [colors[1].shaderComponents, colors[2].opacity(0.18).shaderComponents]
+        let rays = colors.dropFirst().map { $0.mix(with: .white, by: 0.1).shaderComponents }
+        let glowLight = (0...4).map { colors[3].mix(with: .white, by: 0.2 + 0.05 * Double($0)).shaderComponents }
+        let bloomLight = colors[1].mix(with: .white, by: 0.3).shaderComponents
+        return BackdropCanvas(isMoving: isMoving, frameRate: 1 / BackdropFrameRate.interval(reduceMotion: false), factor: 3) { [light, moment] frame in
+            let halo = moment(Date(timeIntervalSinceReferenceDate: frame.time))
+            let size = CGSize(width: frame.size.width / 3, height: frame.size.height / 3)
+            let side = min(size.width, size.height)
+            let edge = side * light.radius
+            let bands = halo.bands
+            let bass = Double(bands.prefix(4).reduce(0, +)) / 4
+            let loudness = Double(bands.reduce(0, +)) / Double(max(1, bands.count))
+            let kick = halo.kick
+            var inner = wash[0]
+            inner.w = Float(0.45 + 0.1 * kick)
+            // The glow whitens with the kick: between the two nearest of five steps.
+            let step = min(3.999, kick * 4)
+            let (low, high) = (glowLight[Int(step)], glowLight[Int(step) + 1])
+            var glow = low + (high - low) * Float(step - step.rounded(.down))
+            glow.w = Float(0.25 + 0.35 * bass + 0.2 * kick)
+            var bloom = bloomLight
+            bloom.w = Float(0.45 * halo.bloom)
+            return BackdropDrawing(function: "haloBackdropFragment", inputs: [
+                SIMD4(Float(size.width * light.x), Float(size.height * light.y), Float(edge), Float(side)),
+                SIMD4(Float(loudness), Float(bass), Float(kick), Float(halo.bloom)),
+                SIMD4(Float(halo.turn * 0.04), Float(rays.count), Float(side * 0.02), 0),
+                field, inner, wash[1], glow, bloom,
+            ] + rays, values: bands.count == 24 ? bands : [Float](repeating: SmoothedLevels.resting, count: 24))
+        }
+    }
+}
+#endif
 
 private struct HaloLight: View, Animatable {
     let frame: HaloFrame

@@ -381,23 +381,45 @@ nonisolated final class HeardSound: @unchecked Sendable {
             let channels = ring.channels
             let isInterleaved = ring.isInterleaved
             let written = ring.written
+            // Plain loops over pointers: this runs for every buffer of sound, even in a Debug
+            // build, where a range's iterator costs more than the copying.
             ring.samples.withUnsafeMutableBufferPointer { out in
+                guard let out = out.baseAddress else { return }
                 if isInterleaved, let data = list.first?.mData {
                     let input = data.assumingMemoryBound(to: Float.self)
                     let share = 1 / Float(channels)
-                    for frame in 0..<frames {
+                    var frame = 0
+                    while frame < frames {
                         var sum: Float = 0
-                        for channel in 0..<channels { sum += input[frame * channels + channel] }
+                        var channel = 0
+                        while channel < channels {
+                            sum += input[frame * channels + channel]
+                            channel += 1
+                        }
                         out[(written + frame) & mask] = sum * share
+                        frame += 1
                     }
                 } else {
                     let present = list.reduce(0) { $0 + ($1.mData == nil ? 0 : 1) }
                     let share = 1 / Float(max(1, present))
-                    for frame in 0..<frames { out[(written + frame) & mask] = 0 }
+                    var isFirst = true
                     for buffer in list {
                         guard let data = buffer.mData else { continue }
                         let input = data.assumingMemoryBound(to: Float.self)
-                        for frame in 0..<frames { out[(written + frame) & mask] += input[frame] * share }
+                        var frame = 0
+                        while frame < frames {
+                            let index = (written + frame) & mask
+                            out[index] = (isFirst ? 0 : out[index]) + input[frame] * share
+                            frame += 1
+                        }
+                        isFirst = false
+                    }
+                    if isFirst {
+                        var frame = 0
+                        while frame < frames {
+                            out[(written + frame) & mask] = 0
+                            frame += 1
+                        }
                     }
                 }
             }
@@ -424,9 +446,15 @@ nonisolated final class HeardSound: @unchecked Sendable {
             }
             guard heard > oldest - Int(ring.sampleRate / 4), heard < ring.written + Int(ring.sampleRate / 4) else { return false }
             let mask = capacity - 1
+            // In at most two runs, as the ring wraps: copied whole, since this is asked for
+            // every frame something moves with the music.
+            let start = first & mask
+            let head = min(size, capacity - start)
             ring.samples.withUnsafeBufferPointer { samples in
                 window.withUnsafeMutableBufferPointer { out in
-                    for index in 0..<size { out[index] = samples[(first + index) & mask] }
+                    guard let from = samples.baseAddress, let to = out.baseAddress else { return }
+                    to.update(from: from + start, count: head)
+                    if head < size { (to + head).update(from: from, count: size - head) }
                 }
             }
             return true

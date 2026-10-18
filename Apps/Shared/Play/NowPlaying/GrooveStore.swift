@@ -31,14 +31,20 @@ final class GrooveStore {
     private(set) var groove: Groove?
     private(set) var key: String?
     @ObservationIgnored private var work: Task<Void, Never>?
+    /// The last track asked about and its key: asked every frame something moves with the
+    /// music. By its song too, which a station's entry may learn later.
+    @ObservationIgnored private var asked: (track: String, song: MusicItemID?, key: String?)?
     nonisolated static let log = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Tracks", category: "Groove")
 
     private init() {}
 
     /// The groove of `track`, if it's the song this has learned.
     func groove(for track: PlayerTrack?) -> Groove? {
-        guard let track, let groove, key == Self.key(for: track) else { return nil }
-        return groove
+        guard let track, let groove else { return nil }
+        if asked?.track != track.id || asked?.song != track.song?.id {
+            asked = (track.id, track.song?.id, Self.key(for: track))
+        }
+        return key == asked?.key ? groove : nil
     }
 
     /// Learns `track`'s groove, if it isn't known yet, and stops learning the last one's.

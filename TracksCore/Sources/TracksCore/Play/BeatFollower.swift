@@ -13,11 +13,17 @@ import Foundation
 /// is sure and keeps landing. A piano ballad, a held pad or a breakdown has no sure beat and
 /// never pulses.
 ///
+/// Real music often keeps no tempo it can be sure of: a swung groove, a busy mix, a beat that
+/// shifts. While it's unsure, music that keeps arriving hard still pulses, on its strongest
+/// arrivals as they come, so an energetic song is never still; a ballad's few soft arrivals
+/// don't.
+///
 /// It also says how hard the beats land, and from both how driven the music is: a dance track
 /// near 1, a ballad near 0. And where the sound sits, dark to bright, over the last few seconds.
 public nonisolated struct BeatFollower: Equatable, Sendable {
     public struct Reading: Equatable, Sendable {
-        /// Full as a sure beat lands, then falling away; 0 with no sure beat.
+        /// Full as a sure beat lands, then falling away; with no sure beat, up on a strong
+        /// arrival in music that keeps arriving hard, and 0 otherwise.
         public var pulse: Float = 0
         /// Beats a minute, while there's a sure beat.
         public var tempo: Double?
@@ -25,10 +31,14 @@ public nonisolated struct BeatFollower: Equatable, Sendable {
         public var confidence = 0.0
         /// How hard the beats land, 0 to 1.
         public var punch = 0.0
-        /// How driven the music is, 0 to 1: a sure beat that lands hard.
+        /// How driven the music is, 0 to 1: a sure beat that lands hard, or music that keeps
+        /// arriving hard.
         public var drive = 0.0
         /// Where the sound sits, 0 dark to 1 bright.
         public var brightness = 0.5
+        /// How much keeps arriving, 0 to 1, whatever the tempo: drums and a busy mix near 1, a
+        /// ballad's piano or a held pad near 0.
+        public var vigour = 0.0
         /// Beats counted, the fraction how far into the current one, once a tempo's been found.
         public var beats: Double?
 
@@ -42,6 +52,11 @@ public nonisolated struct BeatFollower: Equatable, Sendable {
 
     /// An expected tempo, from what's known of the song, which the search leans toward.
     public var tempoHint: Double?
+    /// Beats counted, when where they fall is already known, such as a replay of a song's
+    /// preview placed on its bars, and how sure that is, 0 to 1. The pulse then keeps to them,
+    /// at `tempoHint`, rather than to a beat found in what's heard.
+    public var knownBeats: Double?
+    public var knownSureness = 0.0
     public private(set) var reading = Reading()
 
     private var envelope = [Float](repeating: 0, count: BeatFollower.length)
@@ -73,6 +88,13 @@ public nonisolated struct BeatFollower: Equatable, Sendable {
     private var hardest = 0.0
     private var brightness = 0.5
     private var hasBrightness = false
+    /// How strongly the music usually arrives, lately: most moments arrive no harder.
+    private var typical: Float = 0
+    private var vigour = 0.0
+    /// The strongest arrival waiting to pulse, and the last moment's, to catch it rising.
+    private var onset: Float = 0
+    private var lastSample: Float = 0
+    private var sinceOnset = Double.infinity
 
     public init(tempoHint: Double? = nil) {
         self.tempoHint = tempoHint
@@ -87,12 +109,21 @@ public nonisolated struct BeatFollower: Equatable, Sendable {
         followBrightness(levels, elapsed: dt)
         pending = max(pending, arriving)
         clock += dt
+        var isSampled = false
         while nextSample <= clock {
+            listen(pending)
             envelope[head] = pending
             head = (head + 1) % Self.length
             filled += 1
             pending = 0
             nextSample += 1 / Self.rate
+            isSampled = true
+        }
+        // What arrives is measured against the sound a moment or two ago at the same pace
+        // whatever the frame rate, so a beat found at 120 frames a second is the one at 30.
+        if isSampled || last.isEmpty, levels.allSatisfy(\.isFinite) {
+            beforeLast = last.count == levels.count ? last : levels
+            last = levels
         }
         judge()
         sinceEstimate += dt
@@ -103,23 +134,46 @@ public nonisolated struct BeatFollower: Equatable, Sendable {
         // Sure takes a beat or two of evidence; unsure is quicker, so a breakdown stops pulsing.
         sureness = Self.ease(sureness, toward: clarity, elapsed: dt, rise: 1.2, fall: 0.8)
         hardest = max(landed, hardest * exp(-dt / 20))
-        let punch = Self.smoothstep(0.03, 0.18, hardest)
+        vigour = Self.ease(vigour, toward: Self.smoothstep(0.02, 0.04, Double(typical)), elapsed: dt, rise: 1, fall: 2.5)
+        // Beats that land hard, or music whose arrivals are mostly strong.
+        let punch = max(Self.smoothstep(0.02, 0.09, hardest), Self.smoothstep(0.03, 0.08, Double(typical)))
         // A beat is only sure if something arrives on it: a pad's faint drift can repeat too.
         let lands = Self.smoothstep(0.004, 0.02, landed)
-        let confidence = Self.smoothstep(0.28, 0.5, sureness) * lands
+        var confidence = Self.smoothstep(0.28, 0.5, sureness) * lands
+        let known = knownBeats.flatMap { beats in tempoHint.map { (beats: beats, period: 60 / $0) } }
+        if let known, known.beats.isFinite, known.period.isFinite, known.period > 0 {
+            // Sure where the beats fall, if not yet how hard they land.
+            confidence = max(confidence, Self.unit(knownSureness) * (0.5 + 0.5 * lands))
+            period = known.period
+        }
         // Each beat as strong as the beats are landing now against the song's hardest, so a
         // breakdown's faint hats pulse faintly and the drop's kick fully.
         let accent = hardest > 0 ? pow(Self.unit(landed / hardest), 0.7) : 0
 
         var fired: Float = 0
         sinceBeat += dt
+        sinceOnset += dt
+        // Unsure of the beat, music that keeps arriving hard pulses on its strongest arrivals.
+        if onset > 0 {
+            // Only music that clearly keeps arriving: a ballad's busier moments don't.
+            let strength = Float(Self.smoothstep(0.3, 0.7, vigour) * (1 - confidence)) * onset
+            if strength > 0.05, sinceOnset > 0.2, sinceBeat > 0.2 {
+                fired = strength
+                sinceOnset = 0
+            }
+            onset = 0
+        }
         if let period {
             let before = beat
-            beat += dt / period
+            if let known, known.beats.isFinite {
+                beat = known.beats
+            } else {
+                beat += dt / period
+            }
             if beat.rounded(.down) != before.rounded(.down), sinceBeat > period * 0.6 {
                 sinceBeat = 0
                 judging = filled + 2
-                fired = Float(confidence * accent)
+                fired = max(fired, Float(confidence * accent))
             }
         }
         // A beat's pulse falls away over a part of the beat: short at a dance tempo, longer
@@ -130,7 +184,10 @@ public nonisolated struct BeatFollower: Equatable, Sendable {
         next.confidence = confidence
         next.tempo = confidence > 0 ? period.map { 60 / $0 } : nil
         next.punch = punch
-        next.drive = Self.ease(reading.drive, toward: confidence * (0.35 + 0.65 * punch), elapsed: dt, rise: 1.5, fall: 2.5)
+        // Driven by a sure beat that lands hard, or by music that keeps arriving hard.
+        let driven = max(confidence * (0.35 + 0.65 * punch), vigour * (0.5 + 0.5 * punch))
+        next.drive = Self.ease(reading.drive, toward: driven, elapsed: dt, rise: 1.5, fall: 2.5)
+        next.vigour = vigour
         next.brightness = brightness
         next.beats = period == nil ? nil : beat
         reading = next
@@ -142,10 +199,6 @@ public nonisolated struct BeatFollower: Equatable, Sendable {
     private mutating func arrival(_ levels: [Float]) -> Float {
         let count = levels.count
         guard count > 0, levels.allSatisfy(\.isFinite) else { return 0 }
-        defer {
-            beforeLast = last.count == count ? last : levels
-            last = levels
-        }
         guard last.count == count, beforeLast.count == count else { return 0 }
         var total: Float = 0
         for band in 0..<count {
@@ -170,6 +223,26 @@ public nonisolated struct BeatFollower: Equatable, Sendable {
         hasBrightness = true
     }
 
+    /// Each moment as it's kept: an arrival well above the music's usual, rising, waits to pulse.
+    private mutating func listen(_ sample: Float) {
+        let floor = max(0.03, 1.6 * typical)
+        if sample > floor, sample > lastSample {
+            let x = Float(Self.smoothstep(Double(floor), Double(floor) * 2.5, Double(sample)))
+            onset = max(onset, 0.4 + 0.6 * x)
+        }
+        lastSample = sample
+    }
+
+    /// How strongly the music usually arrives: the last four seconds' ninetieth percentile.
+    private mutating func followTypical() {
+        let count = min(filled, Int(4 * Self.rate))
+        guard count > 0 else { return }
+        var recent = [Float](repeating: 0, count: count)
+        for back in 0..<count { recent[back] = envelope[(head - 1 - back + Self.length) % Self.length] }
+        recent.sort()
+        typical = recent[count * 9 / 10]
+    }
+
     /// The arrivals into `values`, oldest first, mean taken away. How many there are.
     private mutating func history() -> Int {
         let count = min(filled, Self.length)
@@ -187,6 +260,7 @@ public nonisolated struct BeatFollower: Equatable, Sendable {
     /// The tempo, how surely there's a beat, and where it is.
     private mutating func estimate() {
         let count = history()
+        followTypical()
         guard count >= 90 else { return }
         // How alike the arrivals are to themselves each lag later, for every lag looked at.
         let lags = Self.lags.lowerBound - 1...2 * Self.lags.upperBound + 1

@@ -36,63 +36,150 @@ struct StageVisualizerView: View {
 
     var body: some View {
         let lights = Self.lights(palette, whiteness: style == .glow ? 0.06 : style == .bars ? 0.35 : 0.18)
-        GeometryReader { proxy in
-            TimelineView(.animation(minimumInterval: interval, paused: style == .off || reduceMotion || isSettled || !isOnScreen)) { context in
-                let time = context.date.timeIntervalSinceReferenceDate
-                let pulse = reduceMotion ? .still(isPlaying: isPlaying) : levels.next(
-                    heard: AudioLevelMeter.shared.current(),
-                    time: time,
-                    song: SongMoment(player: player, energy: energy),
-                    isPlaying: isPlaying
+        visual(lights)
+            .accessibilityHidden(true)
+            // Again on coming back on screen, so light caught mid-fall finishes settling.
+            .task(id: [isPlaying, isOnScreen]) {
+                isSettled = false
+                guard !isPlaying else { return }
+                // The glow's light and the drift take a few seconds to settle.
+                try? await Task.sleep(for: .seconds(3))
+                guard !Task.isCancelled else { return }
+                isSettled = true
+            }
+    }
+
+    /// What a frame needs, from the view: kept apart from it so the Mac's display link can
+    /// draw each frame without SwiftUI.
+    private struct Drawing {
+        let style: StageVisualizer
+        let energy: Double
+        let isPlaying: Bool
+        let reduceMotion: Bool
+        let cover: CGFloat
+        let levels: SmoothedLevels
+        let player: PlayerModel?
+        let glow: SoftPulse
+        let halo: SoftPulse
+        let history: WaveHistory
+        let springs: BarSprings
+
+        func pulse(at time: Double) -> StagePulse {
+            reduceMotion ? .still(isPlaying: isPlaying) : levels.next(
+                heard: AudioLevelMeter.shared.current(),
+                time: time,
+                song: SongMoment(player: player, energy: energy),
+                isPlaying: isPlaying
+            )
+        }
+
+        func bars(_ pulse: StagePulse, time: Double, width: CGFloat) -> [Float] {
+            let bars = BarsVisual.resampled(pulse.bands, count: BarsVisual.count(for: width))
+            return reduceMotion
+                ? bars
+                : springs.step(toward: bars, kick: pulse.kick, time: time, liveliness: Double(pulse.activity), gentleness: Double(pulse.gentleness))
+        }
+
+        func eased(_ soft: SoftPulse, _ pulse: StagePulse, time: Double) -> (level: Double, bloom: Double) {
+            if reduceMotion { return (isPlaying ? 0.5 : 0.2, 0) }
+            soft.step(bands: pulse.bands, kick: pulse.kick, time: time)
+            return (soft.level, soft.bloom)
+        }
+
+        func wave(_ pulse: StagePulse, time: Double, width: CGFloat) -> (samples: [Float], shift: Double) {
+            let capacity = WaveformVisual.capacity(for: width)
+            if reduceMotion { return (StageVisualizerView.stillWave(capacity: capacity, isPlaying: isPlaying), 0) }
+            return history.step(WaveHistory.loudness(bands: pulse.bands, kick: pulse.kick), time: time, isPlaying: isPlaying, capacity: capacity)
+        }
+    }
+
+    private var drawing: Drawing {
+        Drawing(
+            style: style, energy: energy, isPlaying: isPlaying, reduceMotion: reduceMotion, cover: cover,
+            levels: levels, player: player, glow: glow, halo: halo, history: history, springs: springs
+        )
+    }
+
+    private var isStill: Bool { style == .off || reduceMotion || isSettled }
+
+    #if os(macOS)
+    private func visual(_ lights: [Color]) -> some View {
+        let drawing = drawing
+        let light = lights[0].shaderComponents
+        let glowColours = GlowVisual.colors(lights).map(\.shaderComponents)
+        let ring = (lights + [lights[0]]).map(\.shaderComponents)
+        // Every frame the display shows, so a drum lands the moment it's heard.
+        // Soft light looks the same drawn at half the size; the bars and the waveform need
+        // every pixel.
+        let factor: CGFloat = style == .halo || style == .glow ? 2 : 1
+        return BackdropCanvas(isMoving: !isStill, factor: factor, isOpaque: false) { frame in
+            let pulse = drawing.pulse(at: frame.time)
+            switch drawing.style {
+            case .bars:
+                let heights = drawing.bars(pulse, time: frame.time, width: frame.size.width)
+                let kick = Float(drawing.reduceMotion ? 0 : pulse.kick)
+                return BackdropDrawing(function: "barsFragment", inputs: [SIMD4(Float(heights.count), kick, 0, 0), light], values: heights)
+            case .glow:
+                let (level, bloom) = drawing.eased(drawing.glow, pulse, time: frame.time)
+                let phase = drawing.reduceMotion ? 0 : pulse.motion
+                let m = MeshInputs.make(
+                    columns: 4, rows: 4,
+                    points: GlowVisual.points(phase: phase, level: level),
+                    colours: glowColours,
+                    scale: Float(GlowVisual.scale(level: level, bloom: bloom))
                 )
+                return BackdropDrawing(
+                    function: "glowFragment",
+                    shape: .mesh(columns: 4, rows: 4, steps: 24, m: m),
+                    inputs: [SIMD4(Float(GlowVisual.mask.lowerBound), Float(GlowVisual.mask.upperBound), Float(GlowVisual.opacity(level: level, bloom: bloom)), 0)]
+                )
+            case .halo:
+                let (level, bloom) = drawing.eased(drawing.halo, pulse, time: frame.time)
+                let phase = drawing.reduceMotion ? 0 : pulse.motion
+                return BackdropDrawing(function: "haloFragment", inputs: [
+                    SIMD4(Float(drawing.cover), Float(CoverImage.radius(for: drawing.cover)), Float(level), Float(bloom)),
+                    SIMD4(Float(phase), Float(ring.count), 0, 0),
+                ] + ring)
+            case .waveform:
+                let wave = drawing.wave(pulse, time: frame.time, width: frame.size.width)
+                return BackdropDrawing(function: "waveformFragment", inputs: [
+                    SIMD4(Float(wave.samples.count), Float(wave.shift), Float(WaveformVisual.width), Float(WaveformVisual.pitch)),
+                ], values: wave.samples.isEmpty ? [0] : wave.samples)
+            case .off:
+                return nil
+            }
+        }
+        .blendMode(.plusLighter)
+    }
+    #else
+    private func visual(_ lights: [Color]) -> some View {
+        let drawing = drawing
+        return GeometryReader { proxy in
+            // Every frame the display shows, so a drum lands the moment it's heard (see
+            // ``BackdropFrameRate``).
+            TimelineView(.animation(minimumInterval: BackdropFrameRate.everyFrame, paused: isStill || !isOnScreen)) { context in
+                let time = context.date.timeIntervalSinceReferenceDate
+                let pulse = drawing.pulse(at: time)
                 let phase = reduceMotion ? 0 : pulse.motion
                 switch style {
                 case .bars:
-                    let bars = BarsVisual.resampled(pulse.bands, count: BarsVisual.count(for: proxy.size.width))
-                    let heights = reduceMotion
-                        ? bars
-                        : springs.step(toward: bars, kick: pulse.kick, time: time, liveliness: Double(pulse.activity), gentleness: Double(pulse.gentleness))
-                    BarsVisual(heights: heights, light: lights[0], kick: Double(reduceMotion ? 0 : pulse.kick))
+                    BarsVisual(heights: drawing.bars(pulse, time: time, width: proxy.size.width), light: lights[0], kick: Double(reduceMotion ? 0 : pulse.kick))
                 case .glow:
-                    let (level, bloom) = eased(glow, pulse, time: time)
+                    let (level, bloom) = drawing.eased(glow, pulse, time: time)
                     GlowVisual(colors: lights, level: level, bloom: bloom, phase: phase)
                 case .halo:
-                    let (level, bloom) = eased(halo, pulse, time: time)
+                    let (level, bloom) = drawing.eased(halo, pulse, time: time)
                     HaloVisual(colors: lights, level: level, bloom: bloom, phase: phase, cover: cover, radius: CoverImage.radius(for: cover))
                 case .waveform:
-                    let capacity = WaveformVisual.capacity(for: proxy.size.width)
-                    if reduceMotion {
-                        WaveformVisual(samples: Self.stillWave(capacity: capacity, isPlaying: isPlaying), shift: 0)
-                    } else {
-                        let drawn = history.step(WaveHistory.loudness(bands: pulse.bands, kick: pulse.kick), time: time, isPlaying: isPlaying, capacity: capacity)
-                        WaveformVisual(samples: drawn.samples, shift: drawn.shift)
-                    }
+                    let wave = drawing.wave(pulse, time: time, width: proxy.size.width)
+                    WaveformVisual(samples: wave.samples, shift: wave.shift)
                 case .off:
                     Color.clear
                 }
             }
         }
-        .accessibilityHidden(true)
-        // Again on coming back on screen, so light caught mid-fall finishes settling.
-        .task(id: [isPlaying, isOnScreen]) {
-            isSettled = false
-            guard !isPlaying else { return }
-            // The glow's light and the drift take a few seconds to settle.
-            try? await Task.sleep(for: .seconds(3))
-            guard !Task.isCancelled else { return }
-            isSettled = true
-        }
     }
-
-    /// Every frame the display shows, so a drum lands the moment it's heard (see
-    /// ``BackdropFrameRate``).
-    private var interval: Double? { BackdropFrameRate.everyFrame }
-
-    private func eased(_ soft: SoftPulse, _ pulse: StagePulse, time: Double) -> (level: Double, bloom: Double) {
-        if reduceMotion { return (isPlaying ? 0.5 : 0.2, 0) }
-        soft.step(bands: pulse.bands, kick: pulse.kick, time: time)
-        return (soft.level, soft.bloom)
-    }
+    #endif
 
     /// The cover's colours as light, four at least.
     private static func lights(_ palette: [Color], whiteness: Double) -> [Color] {
@@ -103,7 +190,7 @@ struct StageVisualizerView: View {
 
     /// A waveform that doesn't move, for Reduce Motion: a gentle, even rhythm while playing,
     /// a line of dots otherwise.
-    private static func stillWave(capacity: Int, isPlaying: Bool) -> [Float] {
+    fileprivate static func stillWave(capacity: Int, isPlaying: Bool) -> [Float] {
         guard isPlaying else { return [Float](repeating: 0, count: capacity) }
         return (0..<capacity).map { index in
             let beat = Float(index % 6) / 6
@@ -129,8 +216,11 @@ struct StagePulse {
     /// How gently the song moves, 0 to 1 (see `Groove.gentleness`): what's drawn glides for
     /// a ballad and springs for a dance track.
     var gentleness: Float = 0
-    /// How surely `kick` lands on the song's own beat, 0 to 1.
+    /// How surely `kick` lands where the song's own hits are, 0 to 1: heard, it lands where it's
+    /// heard, beat or no beat.
     var lock: Float = 0
+    /// How sure the song's beat is, 0 to 1, for what keeps time with its bars.
+    var sureness: Float = 0
     /// Beats counted, the fraction how far into the current one, while there's a beat.
     var beats: Double?
     /// How hard the beats land and where the sound sits, dark to bright, when they're heard
@@ -245,6 +335,7 @@ final class SmoothedLevels {
         var target: [Float]
         var found: BeatFollower.Reading?
         var lock: Float = 0
+        var sureness: Float = 0
         var beats: Double?
         switch source {
         case .resting:
@@ -254,7 +345,8 @@ final class SmoothedLevels {
             target = heard?.bands ?? []
             found = heard?.beat
             hit = found?.pulse ?? 0
-            lock = Float(found?.confidence ?? 0)
+            lock = 1
+            sureness = Float(found?.confidence ?? 0)
         case .texture:
             let groove = song.groove ?? .calm
             let position = position(of: song, at: time)
@@ -286,19 +378,29 @@ final class SmoothedLevels {
             // preview didn't hear, ease in and out.
             let strength = Float(0.6 + 0.4 * groove.intensity) * GrooveLevels.ease(time: position, duration: song.duration)
             target = fresh.map { Self.resting + max(0, $0 - Self.resting) * strength }
-            // The replay's beat, found as if heard, near the tempo the preview was heard at;
-            // only as sure as the replay lands on the song.
-            beat.tempoHint = groove.confidence >= GrooveLevels.leastConfidence ? groove.tempo : nil
+            // The replay's beat: on the preview's own bars, which each chunk is, when it has a
+            // beat; otherwise found as if heard. Only as sure as the replay lands on the song.
+            let hasBeat = groove.confidence >= GrooveLevels.leastConfidence
+            beat.tempoHint = hasBeat ? groove.tempo : nil
+            if hasBeat, let texture = groove.texture, texture.chunkSeconds != GrooveTexture.freeChunk {
+                beat.knownBeats = (position - (origin ?? 0)) / texture.chunkSeconds * 4
+                let sure = min(1, max(0, (groove.confidence - 0.2) / 0.3))
+                beat.knownSureness = groove.lock * sure * sure * (3 - 2 * sure)
+            } else {
+                beat.knownBeats = nil
+            }
             let reading = beat.step(replayed, elapsed: elapsed)
             found = reading
             hit = reading.pulse * Float(groove.lock)
-            lock = Float(reading.confidence * groove.lock)
+            lock = Float(groove.lock)
+            sureness = Float(reading.confidence * groove.lock)
         case .groove:
             let groove = song.groove ?? .calm
             let hits = GrooveLevels.hits(playbackTime: position(of: song, at: time), groove: groove, duration: song.duration)
             target = GrooveLevels.levels(hits: hits, groove: groove, count: count)
             hit = hits.kick
             lock = Float(groove.lock)
+            sureness = Float(groove.lock)
             beats = hits.bars * 4
         case .feel:
             target = AmbientLevels.levels(at: time, energy: song.energy, count: count)
@@ -359,6 +461,7 @@ final class SmoothedLevels {
         gentleness += (gentle - gentleness) * (1 - exp(-elapsed / 1.5))
         var pulse = StagePulse(bands: bands, kick: kick, motion: motion, activity: activity, pace: pace, gentleness: Float(gentleness))
         pulse.lock = lock
+        pulse.sureness = sureness
         pulse.beats = beats
         pulse.punch = found?.punch
         pulse.brightness = found?.brightness
