@@ -1,5 +1,5 @@
 import SwiftUI
-import MotifCore
+import TracksCore
 
 /// Plays per week or month on a detail page, with the selected bar read out in the header.
 struct PlaysOverTimeCard: View {

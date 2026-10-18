@@ -1,6 +1,6 @@
 # Code of Conduct
 
-Motif follows the [Contributor Covenant, version 2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct/). It applies to everyone taking part in this project: in issues, pull requests, discussions, and anywhere else you represent it.
+Tracks follows the [Contributor Covenant, version 2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct/). It applies to everyone taking part in this project: in issues, pull requests, discussions, and anywhere else you represent it.
 
 ## In short
 
@@ -13,7 +13,7 @@ The full text of the Covenant is the authority; this summary doesn't replace it.
 
 ## Reporting
 
-If you experience or witness unacceptable behaviour, report it privately to the maintainer, either by opening a [private security advisory](https://github.com/reallukedev/motif/security/advisories/new) or by email via the maintainer's [GitHub profile](https://github.com/reallukedev). Please don't report conduct problems in a public issue.
+If you experience or witness unacceptable behaviour, report it privately to the maintainer, either by opening a [private security advisory](https://github.com/reallukedev/tracks/security/advisories/new) or by email via the maintainer's [GitHub profile](https://github.com/reallukedev). Please don't report conduct problems in a public issue.
 
 Every report will be reviewed and handled promptly and fairly, and the reporter's privacy will be respected.
 

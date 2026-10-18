@@ -1,6 +1,6 @@
 import Foundation
 import WidgetKit
-import MotifCore
+import TracksCore
 
 /// One capture, reduced to what a widget can draw.
 ///

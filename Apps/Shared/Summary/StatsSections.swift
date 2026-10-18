@@ -1,5 +1,5 @@
 import SwiftUI
-import MotifCore
+import TracksCore
 
 // The Summary's deeper sections, shared by the iPhone and Mac layouts. Each hides
 // itself when the range has too little in it to say anything.
@@ -20,7 +20,7 @@ struct NewFavoritesSection: View {
     }
 }
 
-/// The genres played most beside the decades the songs came from. Fills in as Motif looks
+/// The genres played most beside the decades the songs came from. Fills in as Tracks looks
 /// songs up in Apple Music, so it's missing until enough plays have a genre or a year.
 struct GenresSection: View {
     let summary: StatsSummary
@@ -60,16 +60,19 @@ struct RhythmDetailsRow: View {
 /// Listening per weekday and per weekend day, under the week chart.
 struct DayTypeFootnotes: View {
     let summary: StatsSummary
+    /// Whether a weekday chart is above, whose weekend bars are lighter: then each figure
+    /// shows its bars' colour, so the lighter ones read as weekends rather than as less.
+    var keysWeekdayChart = false
 
     var body: some View {
         if summary.weekdayAverageSeconds != nil || summary.weekendAverageSeconds != nil {
             AdaptiveStack(spacing: 8) {
                 if let weekday = summary.weekdayAverageSeconds {
-                    StatFootnote(title: "Weekdays", value: Text("\(Format.listening(weekday)) a day"))
+                    StatFootnote(title: "Weekdays", value: Text("\(Format.listening(weekday)) a day"), swatch: keysWeekdayChart ? WeekdayChart.weekdayStyle : nil)
                     Spacer(minLength: 0)
                 }
                 if let weekend = summary.weekendAverageSeconds {
-                    StatFootnote(title: "Weekends", value: Text("\(Format.listening(weekend)) a day"))
+                    StatFootnote(title: "Weekends", value: Text("\(Format.listening(weekend)) a day"), swatch: keysWeekdayChart ? WeekdayChart.weekendStyle : nil)
                     Spacer(minLength: 0)
                 }
             }
@@ -168,7 +171,7 @@ extension StatsSummary {
             }
             .padding()
         }
-        .background(GroupedBackground())
+        .background { GroupedBackground() }
     }
 }
 
@@ -179,7 +182,7 @@ extension StatsSummary {
             TrendsSection(summary: summary)
                 .padding()
         }
-        .background(GroupedBackground())
+        .background { GroupedBackground() }
     }
 }
 
@@ -209,7 +212,7 @@ extension StatsSummary {
             GenresSection(summary: summary)
                 .padding()
         }
-        .background(GroupedBackground())
+        .background { GroupedBackground() }
     }
 }
 
@@ -223,7 +226,7 @@ extension StatsSummary {
             }
             .padding()
         }
-        .background(GroupedBackground())
+        .background { GroupedBackground() }
     }
 }
 #endif

@@ -1,5 +1,5 @@
 import SwiftUI
-import MotifCore
+import TracksCore
 
 /// Top songs, artists and albums, one list at a time.
 struct ChartsScreen: View {

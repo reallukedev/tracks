@@ -1,5 +1,5 @@
 import SwiftUI
-import MotifCore
+import TracksCore
 
 /// Four small numbers under the listening card.
 struct GlanceGrid: View {

@@ -5,7 +5,11 @@ import SwiftUI
 /// with a colour vision deficiency, or when the solid one is dimmed.
 ///
 /// Works as a `foregroundStyle` for Charts marks and as a legend swatch.
-enum HatchPattern {
+///
+/// `nonisolated` because SwiftUI draws the tile on its async render thread. Under the
+/// target's main-actor default the renderer closure inherited main-actor isolation, and
+/// Swift's runtime isolation check trapped when SwiftUI called it off the main thread.
+nonisolated enum HatchPattern {
     /// The tile, which repeats seamlessly: one stripe corner to corner and the ends of its
     /// neighbours in the opposite corners.
     private static let tile: CGFloat = 6
@@ -24,7 +28,7 @@ enum HatchPattern {
         let stripeOpacity = increasedContrast ? 1.0 : 0.75
         let lineWidth: CGFloat = increasedContrast ? 2 : 1.5
         let side = tile
-        let image = Image(size: CGSize(width: side, height: side)) { context in
+        let image = Image(size: CGSize(width: side, height: side)) { @Sendable context in
             context.fill(Path(CGRect(x: 0, y: 0, width: side, height: side)), with: .color(resolved.opacity(washOpacity)))
             var stripes = Path()
             for offset in [-side, 0, side] {

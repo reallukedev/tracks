@@ -26,30 +26,32 @@ from sample data:
 ./Tools/screenshots.sh            # writes to build/screenshots, and the README's to images/
 ```
 
-It launches each app with `-MotifDemoData YES`, which fills an in-memory store with invented
+It launches each app with `-TracksDemoData YES`, which fills an in-memory store with invented
 listening and never touches real history, iCloud or Last.fm, plus the Debug-only launch
 arguments in `Apps/Shared/App/LaunchScene.swift` that open a given tab, section or page.
 iPhone images come out at App Store sizes. The Mac shots need Screen Recording
 permission for your terminal (System Settings › Privacy & Security)
 
-Add `-MotifDemoLive YES` to a Debug demo launch and a sample song finishes every five
+Add `-TracksDemoLive YES` to a Debug demo launch and a sample song finishes every five
 seconds, which is the quickest way to see how the screens animate as listening arrives.
 
 ## App Store frames
 
-`AppStoreScreenshots/` turns raw captures into the framed App Store sets: a headline over
-Motif red, the capture in an iPhone or a Mac window, and the icon's record as the one
-graphic element. The hero record slides out of the device like a sleeve, its grooves run
-faintly through every frame, and the closing frame completes the ring.
+`AppStoreScreenshots/` turns raw captures into the framed App Store sets, laid out the way
+Apple lays out its own: on iPhone, a plain light field, a two-line caption in the app's accent
+(the idea in Semibold, the specifics in Regular) and one natural titanium iPhone in the lower
+four fifths, the same size and place in every frame; on Mac, the window full bleed under a thin
+caption band. The one flourish is the first iPhone frame, where the Play page's Cover Flow crate
+carries on past the phone in the app's own mix tiles, redrawn from its cover recipe.
 
 ```
-./Tools/AppStoreScreenshots/capture.sh           # raw screens into build/raw
+./Tools/AppStoreScreenshots/capture.sh           # raw screens into build/raw2 and build/raw3
 python3 Tools/AppStoreScreenshots/render.py      # framed PNGs into build/app-store
 ```
 
-Each set is drawn as one wide page (`iphone.html`, `mac.html`) and cut into frames, so
-anything that crosses a seam lines up when the App Store shows screenshots side by side.
-Headlines and layout live in the `frames` list at the top of each page. The output is
+Each set is drawn as one wide page (`iphone.html`, `mac.html`) and cut into frames, so the
+whole set can be judged side by side. Copy, scenes and layout live in the `frames` list in
+each page. The output is
 1320 × 2868 for iPhone, the 6.9" size App Store Connect asks for, and 2880 × 1800 for the
 Mac, flattened to RGB. A 1284 × 2778 copy of each iPhone frame also goes to
 `build/app-store/iphone-6.5`, for the optional 6.5" slot, which rejects the 6.9" size.

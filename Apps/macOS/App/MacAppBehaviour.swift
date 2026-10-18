@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import OSLog
 import ServiceManagement
 
 /// Whether the app shows in the Dock, and whether it starts at login.
@@ -32,7 +33,7 @@ final class MacAppBehaviour {
         NSApp.setActivationPolicy(showsDockIcon ? .regular : .accessory)
     }
 
-    /// Whether Motif is set to open at login. Waiting for approval in System Settings counts:
+    /// Whether Tracks is set to open at login. Waiting for approval in System Settings counts:
     /// the choice has been made, and showing the switch off would invite a second attempt.
     var launchesAtLogin: Bool {
         loginItemStatus == .enabled || loginItemStatus == .requiresApproval
@@ -61,8 +62,23 @@ final class MacAppBehaviour {
             launchAtLoginError = nil
         } catch {
             // Fails for unsigned or unnotarised builds, such as development copies.
-            launchAtLoginError = error.localizedDescription
+            Self.log.error("Couldn't change the login item: \(error, privacy: .public)")
+            launchAtLoginError = Self.loginItemMessage(for: error)
         }
         refreshLoginItemStatus()
+    }
+
+    private static let log = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Tracks", category: "Login Item")
+
+    /// Why Open at Login couldn't change, and what to do, in place of the system's words.
+    nonisolated static func loginItemMessage(for error: any Error) -> String {
+        switch (error as NSError).code {
+        case kSMErrorLaunchDeniedByUser:
+            String(localized: "Couldn’t change Open at Login. Allow Tracks under Login Items in System Settings.")
+        case kSMErrorInvalidSignature:
+            String(localized: "This copy of Tracks isn’t signed, so it can’t open at login.")
+        default:
+            String(localized: "Couldn’t change Open at Login. Try again, or change it under Login Items in System Settings.")
+        }
     }
 }

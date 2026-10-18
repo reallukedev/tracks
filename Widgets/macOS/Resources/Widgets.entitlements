@@ -9,7 +9,7 @@
          writes, read-only. -->
     <key>com.apple.security.application-groups</key>
     <array>
-        <string>$(MOTIF_APP_GROUP)</string>
+        <string>$(TRACKS_APP_GROUP)</string>
     </array>
 
     <!-- Album artwork is fetched by URL in the timeline provider, because a widget cannot

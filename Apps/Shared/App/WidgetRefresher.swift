@@ -1,30 +1,30 @@
 import Foundation
 import SwiftData
 import WidgetKit
-import MotifCore
+import TracksCore
 
 /// Reloads the widgets when a save changes what they show.
 ///
 /// Listens for the main context's saves instead of being called from each write, since the
-/// writes live in MotifCore, which doesn't import WidgetKit. Every write goes through
-/// `MotifStore.shared()`, so this sees all of them.
+/// writes live in TracksCore, which doesn't import WidgetKit. Every write goes through
+/// `TracksStore.shared()`, so this sees all of them.
 @MainActor
 final class WidgetRefresher {
     /// One per process. Shared so a background intent can flush it before it's suspended.
-    static let shared: WidgetRefresher? = (try? MotifStore.shared()).map { WidgetRefresher(store: $0) }
+    static let shared: WidgetRefresher? = (try? TracksStore.shared()).map { WidgetRefresher(store: $0) }
 
     /// How long to collect saves before checking. A Mac capture saves the row, then its
     /// catalog id and cover a second or two later, then the playlist write and scrobble.
     /// Waiting a few seconds usually turns that into one reload.
     private static let settle: Duration = .seconds(5)
 
-    private let store: MotifStore
+    private let store: TracksStore
     private let settings: CaptureSettings
     /// What the widgets showed at the last reload, or nil if unknown.
     private var faces: WidgetFaces?
     private var pendingCheck: Task<Void, Never>?
 
-    private init(store: MotifStore, settings: CaptureSettings = CaptureSettings()) {
+    private init(store: TracksStore, settings: CaptureSettings = CaptureSettings()) {
         self.store = store
         self.settings = settings
         // Starting from the current state means a launch doesn't cost a reload by itself.

@@ -1,5 +1,6 @@
 import SwiftUI
 import AppIntents
+import TracksCore
 
 /// Plays back today's radio songs. Sits on Up Next when it's showing, otherwise on Today.
 ///
@@ -33,5 +34,13 @@ struct PlayBackButton: View {
         .padding(.vertical, -verticalInset)
         // "Play" alone doesn't say what will play when read out.
         .accessibilityLabel("Play Back Today")
+    }
+}
+
+extension PlayBackTodayIntent {
+    /// The intent runs in the app, which opens for it; this half only keeps the extension,
+    /// which has no app model, building.
+    @MainActor static func playbackController() throws -> PlaybackController {
+        PlaybackController(store: try TracksStore.shared(), service: PlatformPlaybackService.make())
     }
 }

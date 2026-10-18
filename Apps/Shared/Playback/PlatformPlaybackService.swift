@@ -1,6 +1,6 @@
 import Foundation
-import MotifCore
-import MotifMusic
+import TracksCore
+import TracksMusic
 
 /// The player each platform uses.
 ///

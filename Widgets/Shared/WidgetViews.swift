@@ -1,6 +1,6 @@
 import WidgetKit
 import SwiftUI
-import MotifCore
+import TracksCore
 
 /// Artwork, or a placeholder when there is none.
 ///
@@ -103,7 +103,7 @@ struct WidgetEmptyState: View {
             if !compact {
                 Text(isStoreReadable
                      ? "Play an Apple Music radio station."
-                     : "Open Motif once to set it up.")
+                     : "Open Tracks once to set it up.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }

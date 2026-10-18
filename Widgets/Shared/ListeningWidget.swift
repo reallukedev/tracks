@@ -2,14 +2,14 @@ import WidgetKit
 import SwiftUI
 import SwiftData
 import Charts
-import MotifCore
+import TracksCore
 
 /// The last seven days of listening at a glance: time, a bar per day, and the streak.
 struct ListeningWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: WidgetKind.listening, provider: ListeningProvider()) { entry in
             ListeningWidgetView(entry: entry)
-                .tint(.motif)
+                .tint(.tracks)
                 .containerBackground(.fill.tertiary, for: .widget)
         }
         .configurationDisplayName("Listening")
@@ -92,7 +92,7 @@ struct ListeningProvider: TimelineProvider {
     @MainActor
     private func read(now: Date, alsoAt later: Date?, calendar: Calendar) -> [ListeningEntry] {
         let dayCount = 7
-        guard let store = try? MotifStore(readOnly: true), case .appGroup = store.backing,
+        guard let store = try? TracksStore(readOnly: true), case .appGroup = store.backing,
               let recent = try? ListeningReading.recentHistory(
                   days: dayCount, in: store.context, calendar: calendar, now: now
               )
@@ -144,7 +144,7 @@ struct ListeningWidgetView: View {
         Group {
             switch family {
             case .accessoryInline:
-                Label(Self.duration(entry.todaySeconds) + " " + String(localized: "today"), systemImage: "headphones")
+                Label("\(Self.duration(entry.todaySeconds)) today", systemImage: "headphones")
                     .privacySensitive()
             case .accessoryCircular:
                 circular
@@ -223,7 +223,7 @@ struct ListeningWidgetView: View {
     @ViewBuilder
     private func bars(showsLabels: Bool) -> some View {
         if entry.days.isEmpty {
-            Text(entry.isStoreReadable ? "Nothing yet this week" : "Open Motif once to set it up.")
+            Text(entry.isStoreReadable ? "Nothing yet this week" : "Open Tracks once to set it up.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         } else {
@@ -232,7 +232,7 @@ struct ListeningWidgetView: View {
                     x: .value("Day", day.start, unit: .day),
                     y: .value("Minutes", max(day.seconds / 60, 0.001))
                 )
-                .foregroundStyle(Calendar.current.isDateInToday(day.start) ? AnyShapeStyle(Color.motif) : AnyShapeStyle(Color.motif.opacity(0.45)))
+                .foregroundStyle(Calendar.current.isDateInToday(day.start) ? AnyShapeStyle(Color.tracks) : AnyShapeStyle(Color.tracks.opacity(0.45)))
                 .cornerRadius(2)
             }
             .chartYAxis(.hidden)
@@ -257,7 +257,7 @@ struct ListeningWidgetView: View {
             // Lock Screen accessories are the likeliest to be seen by someone else, so the
             // numbers are redacted when the device is locked and that's asked for. The label
             // above stays, so the widget still says what it is.
-            Text(Self.duration(entry.todaySeconds) + " " + String(localized: "today"))
+            Text("\(Self.duration(entry.todaySeconds)) today")
                 .font(.headline)
                 .privacySensitive()
             Text(entry.streak > 1 ? "^[\(entry.streak) day](inflect: true) in a row" : "^[\(entry.todaySongs) song](inflect: true)")
@@ -295,7 +295,7 @@ struct ListeningWidgetView: View {
 extension Color {
     /// The app's accent. Named explicitly because a widget doesn't pick up the global
     /// accent colour the way the app does.
-    static let motif = Color("AccentColor")
+    static let tracks = Color("AccentColor")
 }
 
 private extension String {

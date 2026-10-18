@@ -3,14 +3,14 @@
 
     python3 Tools/AppStoreScreenshots/render.py [iphone|mac ...]
 
-Reads the raw captures in build/raw/{iphone,mac} (see capture.sh) and writes flattened RGB
+Reads the raw captures in build/raw2 and build/raw3 (see capture.sh) and writes flattened RGB
 PNGs, one per frame, to build/app-store/{iphone,mac}, ready to upload, plus the whole set
 side by side as build/app-store/{iphone,mac}-overview.png. Needs Playwright with Chromium:
 pip install playwright && playwright install chromium.
 
-The iPhone pages are laid out at the 6.9" size, 1320 × 2868, and each frame is then scaled
-to the 6.5" size, 1284 × 2778, which is what gets uploaded. The two are not quite the same
-shape, so the frames are scaled to width and then trimmed by six pixels top and bottom.
+The iPhone pages are laid out at the 6.9" size, 1320 x 2868, and each frame is also scaled
+to the 6.5" size, 1284 x 2778, into build/app-store/iphone-6.5. The two are not quite the
+same shape, so those frames are scaled to width and then trimmed by six pixels top and bottom.
 """
 
 import io
@@ -25,11 +25,10 @@ ROOT = HERE.parent.parent
 OUT = ROOT / "build" / "app-store"
 
 SETS = {
-    "iphone": {"page": "iphone.html", "size": (1320, 2868), "frames": 7,
-               "export": (1284, 2778)},
-    "mac": {"page": "mac.html", "size": (2880, 1800), "frames": 5},
+    "iphone": {"page": "iphone.html", "size": (1320, 2868), "frames": 9,
+               "export": ("iphone-6.5", (1284, 2778))},
+    "mac": {"page": "mac.html", "size": (2880, 1800), "frames": 10},
 }
-
 
 def render(browser, name):
     spec = SETS[name]
@@ -39,20 +38,25 @@ def render(browser, name):
     page.goto((HERE / spec["page"]).as_uri())
     page.wait_for_selector("body[data-ready='1']")
     page.wait_for_load_state("networkidle")
-    page.wait_for_timeout(300)
+    page.wait_for_timeout(400)
 
     out = OUT / name
     out.mkdir(parents=True, exist_ok=True)
-    export = spec.get("export")
+    # Clear the last render's frames, so a set that loses a frame doesn't leave a stale one.
+    for folder in [out] + ([OUT / spec["export"][0]] if "export" in spec else []):
+        for old in folder.glob(f"{name}-*.png"):
+            old.unlink()
     strip = Image.open(io.BytesIO(page.screenshot(full_page=False))).convert("RGB")
     strip.save(OUT / f"{name}-overview.png")
     for index in range(count):
         tile = strip.crop((index * width, 0, (index + 1) * width, height))
-        if export:
-            tile = resize(tile, *export)
         path = out / f"{name}-{index + 1}.png"
         tile.save(path)
-        print(f"  {path.relative_to(ROOT)}  {tile.size[0]} × {tile.size[1]}")
+        print(f"  {path.relative_to(ROOT)}  {tile.size[0]} x {tile.size[1]}")
+        if "export" in spec:
+            folder, size = spec["export"]
+            (OUT / folder).mkdir(parents=True, exist_ok=True)
+            resize(tile, *size).save(OUT / folder / f"{name}-{index + 1}.png")
     page.close()
 
 

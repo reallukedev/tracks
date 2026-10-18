@@ -1,12 +1,13 @@
 import SwiftUI
 import Charts
-import MotifCore
+import TracksCore
 
 /// Listening added up across the range, over last period's line for the same days, so
 /// being ahead or behind is something you can see. Drag or hover to read a day.
 struct RunningTotalCard: View {
     let summary: StatsSummary
     @State private var selection: Date?
+    @Environment(\.statsPaging) private var paging
     private let calendar = Calendar.current
 
     var body: some View {
@@ -21,8 +22,8 @@ struct RunningTotalCard: View {
 
                 if hasComparison {
                     HStack(spacing: 16) {
-                        ChartKey(title: summary.range.currentTitle, swatch: .line(dashed: false))
-                        ChartKey(title: summary.range.previousTitle, swatch: .line(dashed: true))
+                        ChartKey(title: "\(summary.currentKeyTitle)", swatch: .line(dashed: false))
+                        ChartKey(title: "\(summary.previousKeyTitle)", swatch: .line(dashed: true))
                     }
                     .accessibilityHidden(true)
                 }
@@ -41,7 +42,7 @@ struct RunningTotalCard: View {
                         ListeningTotal(seconds: current, numberFont: StatValue.font)
                     }
                     if let previous = point.previous {
-                        Text("\(Text(summary.range.previousTitle)): \(Format.listening(previous))")
+                        Text("\(summary.previousKeyTitle): \(Format.listening(previous))")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -51,13 +52,13 @@ struct RunningTotalCard: View {
             // Against the same stretch of last period, to the minute, not to the day.
             let difference = summary.listeningSeconds - previous
             if abs(difference) < 5 * 60 {
-                StatHeadline(detail: Text("Level with \(Text(summary.range.previousPhrase))")) {
+                StatHeadline(detail: Text("Level with \(summary.previousPhrase)")) {
                     StatValue(Text("On Pace"))
                 }
             } else {
                 StatHeadline(detail: difference > 0
-                    ? Text("Ahead of \(Text(summary.range.previousPhrase))")
-                    : Text("Behind \(Text(summary.range.previousPhrase))")
+                    ? Text("Ahead of \(summary.previousPhrase)")
+                    : Text("Behind \(summary.previousPhrase)")
                 ) {
                     ListeningTotal(seconds: abs(difference), numberFont: StatValue.font)
                 }
@@ -65,7 +66,7 @@ struct RunningTotalCard: View {
         } else {
             StatHeadline(detail: summary.range == .allTime
                 ? Text("Since your first song")
-                : Text("So far \(Text(summary.range.phrase))")
+                : summary.isCurrentPeriod ? Text("So far \(summary.phrase)") : Text("In \(summary.periodTitle)")
             ) {
                 ListeningTotal(seconds: summary.listeningSeconds, numberFont: StatValue.font)
             }
@@ -91,7 +92,7 @@ struct RunningTotalCard: View {
                         .foregroundStyle(Color.secondary)
                         .lineStyle(StrokeStyle(lineWidth: 1.5, lineCap: .round, dash: [4, 3]))
                         .interpolationMethod(.monotone)
-                        .accessibilityLabel(Text("\(ActivityChart.dateLabel(point.start, unit: unit)), \(Text(summary.range.previousTitle))"))
+                        .accessibilityLabel(Text("\(ActivityChart.dateLabel(point.start, unit: unit)), \(summary.previousKeyTitle)"))
                         .accessibilityValue(Format.listening(previous))
                     }
                 }
@@ -145,11 +146,12 @@ struct RunningTotalCard: View {
         }
         .chartXScale(domain: domain)
         .chartYScale(domain: 0...max(ceiling, 1))
-        .chartXSelection(value: $selection)
+        .periodSwipe(paging, selection: $selection)
         .chartXAxis { ActivityChart.dateAxis(unit: unit, count: summary.pace.count) }
         .chartYAxis { ActivityChart.amountAxis(ceiling: ceiling, measure: .listening) }
         .chartLegend(.hidden)
         .frame(minHeight: 150, maxHeight: .infinity)
+        .chartTextSize()
         .sensoryFeedback(.selection, trigger: selected?.start)
     }
 

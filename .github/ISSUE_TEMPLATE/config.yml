@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Questions and ideas
-    url: https://github.com/reallukedev/motif/discussions
+    url: https://github.com/reallukedev/tracks/discussions
     about: Ask a question or talk through an idea before opening an issue.
   - name: Report a security vulnerability
-    url: https://github.com/reallukedev/motif/security/advisories/new
+    url: https://github.com/reallukedev/tracks/security/advisories/new
     about: Please report security problems privately, not in a public issue.

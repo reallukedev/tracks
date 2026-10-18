@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.app-sandbox</key>
+    <true/>
+
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>$(TRACKS_APP_GROUP)</string>
+        <string>$(TRACKS_MOTIF_APP_GROUP)</string>
+    </array>
+
+    <!-- The hardened runtime / TCC check for sending Apple events. The sandbox check
+         below is separate, and both must pass. -->
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
+
+    <!-- The sandbox check for Apple events. Used instead of
+         `com.apple.security.temporary-exception.apple-events`, which the Mac App Store
+         rejects. Music declares these access groups in its scripting dictionary.
+         `com.apple.Music.playback` covers transport, `current track`, `current stream title`
+         and `current stream URL`; `library.read` is only for artwork.
+
+         The sandbox check runs before TCC, so a misspelled access group gives no prompt,
+         only -1743, which looks exactly like the user saying no. -->
+    <key>com.apple.security.scripting-targets</key>
+    <dict>
+        <key>com.apple.Music</key>
+        <array>
+            <string>com.apple.Music.playback</string>
+            <string>com.apple.Music.library.read</string>
+        </array>
+    </dict>
+
+    <!-- Identify Song: a few seconds of the room, for Shazam. -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+
+    <key>com.apple.security.network.client</key>
+    <true/>
+
+    <!-- Your Music: songs and folders chosen in the import panel are read, then copied into
+         Tracks’ own Music folder. -->
+    <key>com.apple.security.files.user-selected.read-only</key>
+    <true/>
+
+    <!-- Listening for Tracks on your other devices nearby, which connect to this Mac to show
+         and control what Music is playing. Only your devices can: see NearbyDevices. -->
+    <key>com.apple.security.network.server</key>
+    <true/>
+
+    <!-- iCloud sync, which is also the backup. Automatic signing creates the container on
+         the first build; see Config/Tracks.xcconfig. -->
+    <key>com.apple.developer.icloud-container-identifiers</key>
+    <array>
+        <string>$(TRACKS_ICLOUD_CONTAINER)</string>
+    </array>
+    <key>com.apple.developer.icloud-services</key>
+    <array>
+        <string>CloudKit</string>
+    </array>
+
+    <!-- CloudKit tells the mirror about another device's changes with a silent push. Without
+         this the store only fetches when it opens, so a change made on the Mac doesn't reach
+         an iPhone that's already running. Signing switches it to production for
+         distribution. -->
+    <key>com.apple.developer.aps-environment</key>
+    <string>development</string>
+
+    <!-- Settings and song statuses ride in iCloud's key-value store rather than the CloudKit
+         container, because widgets and intents read them straight out of the App Group's
+         defaults without opening the model container. See TracksCore's SettingsSync.
+
+         Both apps resolve this to the same string (they share a bundle id), which is what
+         lets the Mac and the iPhone see each other's settings. Without the entitlement
+         NSUbiquitousKeyValueStore accepts writes and syncs nothing. -->
+    <key>com.apple.developer.ubiquity-kvstore-identifier</key>
+    <string>$(TeamIdentifierPrefix)$(CFBundleIdentifier)</string>
+</dict>
+</plist>

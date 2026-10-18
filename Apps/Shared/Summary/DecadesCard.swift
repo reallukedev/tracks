@@ -1,6 +1,6 @@
 import SwiftUI
 import Charts
-import MotifCore
+import TracksCore
 
 /// Plays by the decade each song came out, the favourite decade picked out, with how much
 /// was brand new and the oldest song underneath.
@@ -88,5 +88,6 @@ struct DecadesCard: View {
         }
         .chartYAxis(.hidden)
         .frame(minHeight: 120, maxHeight: .infinity)
+        .chartTextSize()
     }
 }

@@ -1,7 +1,7 @@
 import WidgetKit
 import Foundation
 import SwiftData
-import MotifCore
+import TracksCore
 
 /// Reads today's captures for the widget.
 ///
@@ -90,7 +90,7 @@ struct CaptureTimelineProvider: TimelineProvider {
     /// empty day. The app runs the same reading to decide when to reload.
     @MainActor
     private func read(_ capacity: WidgetCapacity, now: Date) -> WidgetReading? {
-        guard let store = try? MotifStore(readOnly: true) else { return nil }
+        guard let store = try? TracksStore(readOnly: true) else { return nil }
         // In-memory means the real database wasn't reached.
         guard case .appGroup = store.backing else { return nil }
         return try? store.widgetReading(todayLimit: capacity.today, upNextLimit: capacity.upNext, now: now)

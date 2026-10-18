@@ -1,18 +1,19 @@
 import SwiftUI
 import Charts
-import MotifCore
+import TracksCore
 
 /// Plays over the range split into songs heard for the first time and songs heard before.
 /// The new ones sit on the baseline in the full accent, so days of discovery stand out and
 /// can be compared. Drag or hover to read a day.
 ///
-/// Heard-before plays are hatched as well as paler, so the two read apart without colour,
-/// and a selection greys out the other days rather than fading them, which would make a
-/// faded new bar look like a heard-before one.
+/// Heard-before plays are paler, and hatched as well with Differentiate Without Color on, so
+/// the two read apart without colour. A selection greys out the other days rather than
+/// fading them, which would make a faded new bar look like a heard-before one.
 struct DiscoveryCard: View {
     let summary: StatsSummary
     @State private var selection: Date?
     @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiatesWithoutColor
     @Environment(\.self) private var environment
     private let calendar = Calendar.current
 
@@ -68,7 +69,7 @@ struct DiscoveryCard: View {
 
     private func chart(days: [Day], selected: Day?) -> some View {
         let unit = summary.timelineUnit
-        // Made once here, not per bar: each hatch is a small drawn image.
+        // Made once here, not per bar: a hatch is a small drawn image.
         let familiar = familiarStyle(isDimmed: false)
         let familiarDimmed = familiarStyle(isDimmed: true)
         return Chart {
@@ -104,6 +105,7 @@ struct DiscoveryCard: View {
         .chartYAxis { ActivityChart.amountAxis(ceiling: ceiling, measure: .plays) }
         .chartLegend(.hidden)
         .frame(minHeight: 150, maxHeight: .infinity)
+        .chartTextSize()
         .sensoryFeedback(.selection, trigger: selected?.start)
     }
 
@@ -115,13 +117,13 @@ struct DiscoveryCard: View {
         return AnyShapeStyle(Self.dimmedColor.opacity(contrast == .increased ? 0.8 : 0.55))
     }
 
-    /// Hatched, in the same colour as the new plays under it.
+    /// A paler shade of the new plays' colour, hatched when colour alone mustn't tell them apart.
     private func familiarStyle(isDimmed: Bool) -> AnyShapeStyle {
-        AnyShapeStyle(HatchPattern.paint(
-            isDimmed ? Self.dimmedColor : .accentColor,
-            increasedContrast: contrast == .increased,
-            in: environment
-        ))
+        let color = isDimmed ? Self.dimmedColor : .accentColor
+        guard differentiatesWithoutColor else {
+            return AnyShapeStyle(color.opacity(contrast == .increased ? 0.5 : 0.32))
+        }
+        return AnyShapeStyle(HatchPattern.paint(color, increasedContrast: contrast == .increased, in: environment))
     }
 
     private static let dimmedColor = Color.gray

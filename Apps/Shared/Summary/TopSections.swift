@@ -1,10 +1,13 @@
 import SwiftUI
-import MotifCore
+import TracksCore
 
 /// A horizontal shelf of artists, like the Music app's.
 struct TopArtistsShelf: View {
     let artists: [ArtistTally]
     var artworkSize: CGFloat = 96
+    /// Songs under each name rather than plays, for collaborators, whose tallies count only
+    /// what they share.
+    var countsSongs = false
 
     var body: some View {
         ScrollView(.horizontal) {
@@ -17,10 +20,16 @@ struct TopArtistsShelf: View {
                                 Text(artist.name)
                                     .font(.subheadline.weight(.medium))
                                     .lineLimit(1)
-                                Text("^[\(artist.count) play](inflect: true)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .contentTransition(.numericText(value: Double(artist.count)))
+                                Group {
+                                    if countsSongs {
+                                        Text("^[\(artist.songCount) song](inflect: true)")
+                                    } else {
+                                        Text("^[\(artist.count) play](inflect: true)")
+                                    }
+                                }
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .contentTransition(.numericText(value: Double(countsSongs ? artist.songCount : artist.count)))
                             }
                         }
                         .frame(width: artworkSize + 8)
@@ -28,7 +37,7 @@ struct TopArtistsShelf: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityElement(children: .combine)
-                    .accessibilityLabel("\(artist.name), \(artist.count) plays")
+                    .accessibilityLabel(countsSongs ? Text("\(artist.name), ^[\(artist.songCount) song](inflect: true) together") : Text("\(artist.name), \(artist.count) plays"))
                 }
             }
             .scrollTargetLayout()
@@ -36,6 +45,7 @@ struct TopArtistsShelf: View {
         }
         .scrollIndicators(.hidden)
         .scrollTargetBehavior(.viewAligned)
+        .shelfBleed()
     }
 }
 
@@ -48,7 +58,7 @@ struct TopSongsCard: View {
         let shown = Array(songs.prefix(limit))
         Card(padding: 0) {
             VStack(spacing: 0) {
-                ForEach(Array(shown.enumerated()), id: \.element.id) { index, song in
+                ForEach(shown.enumerated(), id: \.element.id) { index, song in
                     NavigationLink(value: Route.song(song.id)) {
                         SongRow(song: song, rank: index + 1, widestRank: shown.count)
                             .padding(.horizontal, Metrics.cardPadding)
@@ -56,6 +66,8 @@ struct TopSongsCard: View {
                             .contentShape(.rect)
                     }
                     .buttonStyle(.plain)
+                    // Where a collaboration's other artists are a press away on iPhone.
+                    .contextMenu { ChartSongMenu(song: MixSong(tally: song)) }
                     if index < shown.count - 1 {
                         SongRowSeparator(widestRank: shown.count)
                     }
@@ -123,7 +135,7 @@ struct SongRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 ArtworkView(url: song.artworkURL, seed: song.albumTitle ?? song.title, size: 44)
                 Text(rank.map { "\($0). \(song.title)" } ?? song.title)
-                Text(song.artistName)
+                CreditedText(text: song.artistName, credits: song.credits, linkStyle: .row)
                     .foregroundStyle(.secondary)
                 if showsCount {
                     Text("^[\(song.count) play](inflect: true)")
@@ -147,7 +159,7 @@ struct SongRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(song.title)
                     .lineLimit(1)
-                Text(song.artistName)
+                CreditedText(text: song.artistName, credits: song.credits, linkStyle: .row)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -199,5 +211,18 @@ struct TopAlbumsShelf: View {
         }
         .scrollIndicators(.hidden)
         .scrollTargetBehavior(.viewAligned)
+        .shelfBleed()
+    }
+}
+
+extension View {
+    /// On iPhone a shelf runs out to the screen's edges, as Music's do, rather than stopping
+    /// at the page's margin. The Mac keeps it inside the column, clear of the sidebar.
+    func shelfBleed() -> some View {
+        #if os(iOS)
+        scrollClipDisabled()
+        #else
+        self
+        #endif
     }
 }

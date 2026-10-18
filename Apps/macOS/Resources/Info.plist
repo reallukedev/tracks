@@ -5,7 +5,7 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleDisplayName</key>
-    <string>Motif</string>
+    <string>Tracks</string>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.music</string>
     <!-- Only HTTPS to Apple Music and Last.fm, which is exempt from export documentation.
@@ -17,14 +17,14 @@
     <key>CFBundleIdentifier</key>
     <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
     <key>CFBundleName</key>
-    <string>$(PRODUCT_NAME)</string>
+    <string>Tracks</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
     <string>$(MARKETING_VERSION)</string>
     <key>CFBundleVersion</key>
     <string>$(CURRENT_PROJECT_VERSION)</string>
-    <!-- motif:// links from the widgets. See DeepLink.swift. -->
+    <!-- tracks:// links from the widgets. See DeepLink.swift. -->
     <key>CFBundleURLTypes</key>
     <array>
         <dict>
@@ -32,7 +32,7 @@
             <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
             <key>CFBundleURLSchemes</key>
             <array>
-                <string>motif</string>
+                <string>tracks</string>
             </array>
         </dict>
     </array>
@@ -40,26 +40,81 @@
     <string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 
     <key>NSAppleMusicUsageDescription</key>
-    <string>Motif reads what Apple Music is playing so it can keep your listening history, scrobble it to Last.fm, and save songs you hear on the radio to your library.</string>
+    <string>Tracks plays Apple Music in Listen Now, and reads what Music is playing, so it can keep your listening history, scrobble it to Last.fm, and save songs you hear on the radio to your library.</string>
 
     <!-- Required for Apple events to Music.app. Without it sends fail with
          errAEEventNotPermitted (-1743) and no prompt is shown. -->
+    <!-- Stage's visualizer and the backgrounds that move with the music hear what the Mac
+         plays, Apple Music included, through a private Core Audio tap. -->
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>Tracks listens to the music your Mac is playing so Stage and the backgrounds that move with the music follow every beat. Nothing is recorded or kept.</string>
+
+    <!-- Identify Song hears the room through the microphone, for Shazam. -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Identify Song listens for a few seconds to name the song playing near you. Only a fingerprint of the sound goes to Shazam, and nothing is recorded or kept.</string>
+
     <key>NSAppleEventsUsageDescription</key>
-    <string>Motif asks Music what is playing, and controls playback from the menu bar.</string>
+    <string>Tracks asks Music what is playing, and controls playback from the menu bar.</string>
 
-    <key>MotifAppGroupIdentifier</key>
-    <string>$(MOTIF_APP_GROUP)</string>
+    <key>TracksAppGroupIdentifier</key>
+    <string>$(TRACKS_APP_GROUP)</string>
+    <key>TracksMotifAppGroupIdentifier</key>
+    <string>$(TRACKS_MOTIF_APP_GROUP)</string>
 
-    <!-- Resolved from Config/Motif.xcconfig. MotifCore treats an empty or unresolved
+    <!-- Resolved from Config/Tracks.xcconfig. TracksCore treats an empty or unresolved
          value as no container. -->
-    <key>MotifCloudContainerIdentifier</key>
-    <string>$(MOTIF_ICLOUD_CONTAINER)</string>
+    <key>TracksCloudContainerIdentifier</key>
+    <string>$(TRACKS_ICLOUD_CONTAINER)</string>
 
-    <!-- Last.fm application credentials from Config/Motif.xcconfig, so the repository
+    <!-- Last.fm application credentials from Config/Tracks.xcconfig, so the repository
          carries no secret. Empty is fine: Last.fm is then reported as not set up. -->
-    <key>MotifLastFMAPIKey</key>
-    <string>$(MOTIF_LASTFM_API_KEY)</string>
-    <key>MotifLastFMSecret</key>
-    <string>$(MOTIF_LASTFM_SECRET)</string>
+    <key>TracksLastFMAPIKey</key>
+    <string>$(TRACKS_LASTFM_API_KEY)</string>
+    <key>TracksLastFMSecret</key>
+    <string>$(TRACKS_LASTFM_SECRET)</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Tracks reaches your own music server on your network, and finds Tracks on your other devices nearby to show what your Mac is playing on them and let them control it.</string>
+    <!-- Your Music connects to servers people add themselves, which often serve plain HTTP on
+         a home network, a VPN or their own domain. Matches iOS. -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+    </dict>
+    <key>NSUserActivityTypes</key>
+    <array>
+        <string>$(PRODUCT_BUNDLE_IDENTIFIER).playing</string>
+    </array>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_tracks._tcp</string>
+    </array>
+    <!-- Songs dragged inside Tracks, from a list to Up Next (see SongDrag), and a playlist's
+         rows dragged to a new place in it (see CollectionRowDrag). -->
+    <key>UTExportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.luke.tracks.songs</string>
+            <key>UTTypeDescription</key>
+            <string>Songs from Tracks</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.data</string>
+            </array>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.luke.tracks.collection-rows</string>
+            <key>UTTypeDescription</key>
+            <string>Playlist Rows from Tracks</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.data</string>
+            </array>
+        </dict>
+    </array>
 </dict>
 </plist>

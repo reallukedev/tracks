@@ -1,5 +1,5 @@
 import SwiftUI
-import MotifCore
+import TracksCore
 
 /// Finds covers that no longer load and fetches them again.
 ///
@@ -11,33 +11,60 @@ struct ArtworkRepairSection: View {
     @State private var isRepairing = false
     @State private var report: ArtworkRepairReport?
 
+    private var isAvailable: Bool {
+        !model.isShowingSampleData && model.capture != nil
+    }
+
     var body: some View {
         Section {
+            #if os(macOS)
+            SettingsDetailRow(title: Text("Repair Artwork"), detail: detail) {
+                if isRepairing {
+                    // Where the button was, at a fixed width, so the row doesn't reflow.
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(width: 70)
+                } else {
+                    Button("Repair", action: repair)
+                        .disabled(!isAvailable)
+                }
+            }
+            #else
             Button(action: repair) {
                 // An `HStack` rather than `LabeledContent`, which would style the row as a
                 // read-out and lose the button's tint. The spinner sits where a disclosure
                 // would, so the title doesn't move when it appears.
                 HStack {
-                    Text("Repair Artwork")
+                    Text(isRepairing ? "Repairing Artwork…" : "Repair Artwork")
                     Spacer()
                     if isRepairing {
-                        ProgressView().controlSize(.small)
+                        ProgressView()
                     }
                 }
             }
-            .disabled(isRepairing || model.isShowingSampleData || model.capture == nil)
-
-            if let report {
-                Text(summary(report))
-                    .font(.callout)
-                    .foregroundStyle(report.foundNothingWrong ? .secondary : .primary)
-                    .accessibilityAddTraits(.updatesFrequently)
-            }
+            .disabled(isRepairing || !isAvailable)
+            #endif
         } header: {
             Text("Artwork")
         } footer: {
-            Text("Checks every cover in your history and asks Apple Music again for the ones that no longer load. It leaves the covers that are fine alone, and can take a minute over a long history.")
+            #if os(iOS)
+            detail
+            #endif
         }
+    }
+
+    /// What the button does, then what it found once it has run.
+    private var detail: Text {
+        if model.isShowingSampleData {
+            return Text("Not available while Tracks shows sample data.")
+        }
+        guard let report else {
+            return Text("Checks every cover in your history and asks Apple Music again for the ones that no longer load. It can take a minute over a long history.")
+        }
+        guard !report.foundNothingWrong else {
+            return Text("Checked ^[\(report.checked) cover](inflect: true). They all load.")
+        }
+        return Text("Replaced ^[\(report.restored) cover](inflect: true) of the ^[\(report.cleared) song](inflect: true) that had a broken one.")
     }
 
     private func repair() {
@@ -53,12 +80,5 @@ struct ArtworkRepairSection: View {
             report = result
             isRepairing = false
         }
-    }
-
-    private func summary(_ report: ArtworkRepairReport) -> LocalizedStringKey {
-        guard !report.foundNothingWrong else {
-            return "Checked ^[\(report.checked) cover](inflect: true). They all load."
-        }
-        return "Replaced ^[\(report.restored) cover](inflect: true) of the ^[\(report.cleared) song](inflect: true) that had a broken one."
     }
 }

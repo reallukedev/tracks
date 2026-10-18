@@ -16,6 +16,10 @@ enum MainWindow {
         windows.allObjects.first { $0.isVisible || $0.isMiniaturized }
     }
 
+    static func isMain(_ window: NSWindow) -> Bool {
+        windows.contains(window)
+    }
+
     fileprivate static func register(_ window: NSWindow) {
         windows.add(window)
     }
@@ -44,6 +48,13 @@ enum MainWindow {
 }
 
 extension View {
+    /// Hands SwiftUI's `openWindow` to ``MacAppDelegate`` as soon as this view appears, so
+    /// Search from Siri or Spotlight and the Dock can open the main window while Tracks lives
+    /// only in the menu bar.
+    func keepsOpenWindow() -> some View {
+        modifier(KeepsOpenWindow())
+    }
+
     /// Marks this view's window as a main window, and calls `onLastClose` once the last of
     /// them has closed.
     func tracksMainWindow(onLastClose: @escaping @MainActor () -> Void) -> some View {
@@ -98,6 +109,16 @@ private struct MainWindowReader: NSViewRepresentable {
             // Still visible while it closes, so it has to be taken out before asking.
             MainWindow.forget(window)
             if MainWindow.open == nil { onLastClose() }
+        }
+    }
+}
+
+private struct KeepsOpenWindow: ViewModifier {
+    @Environment(\.openWindow) private var openWindow
+
+    func body(content: Content) -> some View {
+        content.onAppear {
+            if MacAppDelegate.openWindow == nil { MacAppDelegate.openWindow = openWindow }
         }
     }
 }

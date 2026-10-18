@@ -5,7 +5,7 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleDisplayName</key>
-    <string>Motif</string>
+    <string>Tracks</string>
     <key>CFBundleExecutable</key>
     <string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleIdentifier</key>
@@ -23,7 +23,7 @@
         <key>NSExtensionPointIdentifier</key>
         <string>com.apple.widgetkit-extension</string>
     </dict>
-    <key>MotifAppGroupIdentifier</key>
-    <string>$(MOTIF_APP_GROUP)</string>
+    <key>TracksAppGroupIdentifier</key>
+    <string>$(TRACKS_APP_GROUP)</string>
 </dict>
 </plist>

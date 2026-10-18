@@ -1,6 +1,6 @@
 import SwiftUI
 import Charts
-import MotifCore
+import TracksCore
 
 /// Bars over time with a dashed average line, like Screen Time. Drag or hover to read a bar.
 struct ActivityChart: View {
@@ -21,6 +21,7 @@ struct ActivityChart: View {
     @Binding var selected: TimeBucket?
 
     @State private var selection: Date?
+    @Environment(\.statsPaging) private var paging
     private let calendar = Calendar.current
 
     init(
@@ -62,9 +63,7 @@ struct ActivityChart: View {
                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
                     .foregroundStyle(.secondary)
                     .annotation(position: .top, alignment: .trailing, spacing: 2) {
-                        Text("avg")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.secondary)
+                        AverageTag()
                     }
                     .accessibilityHidden(true)
             }
@@ -78,10 +77,11 @@ struct ActivityChart: View {
         }
         .chartXScale(domain: domain)
         .chartYScale(domain: 0...max(yCeiling, 1))
-        .chartXSelection(value: $selection)
+        .periodSwipe(paging, selection: $selection)
         .chartXAxis { Self.dateAxis(unit: unit, count: buckets.count) }
         .chartYAxis { Self.amountAxis(ceiling: yCeiling, measure: measure) }
         .frame(minHeight: height, maxHeight: fillsHeight ? .infinity : height)
+        .chartTextSize()
         .sensoryFeedback(.selection, trigger: selectedBucket?.start)
         .onChange(of: selectedBucket) { _, bucket in selected = bucket }
     }
@@ -226,4 +226,22 @@ struct ChartReadout: View {
         .font(.subheadline)
         .transition(.opacity)
     }
+}
+
+/// "avg" over a chart's average line, on a plate of what's behind the chart so it still
+/// reads where the line runs into a tall bar. Charts sit in a card by default.
+struct AverageTag<Plate: View>: View {
+    @ViewBuilder var plate: Plate
+
+    var body: some View {
+        Text("avg")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 3)
+            .background { plate.clipShape(.rect(cornerRadius: 3)) }
+    }
+}
+
+extension AverageTag where Plate == CardFill {
+    init() { plate = CardFill() }
 }

@@ -5,7 +5,7 @@ import SwiftUI
 struct UpNextEmptyState: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Label("All caught up", systemImage: "checkmark.circle")
+            Label("All Caught Up", systemImage: "checkmark.circle")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Text("Radio songs you haven't played back yet appear here.")

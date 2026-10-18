@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>$(TRACKS_APP_GROUP)</string>
+        <string>$(TRACKS_MOTIF_APP_GROUP)</string>
+    </array>
+
+    <!-- iCloud sync, which is also the backup. Automatic signing creates the container on
+         the first build; see Config/Tracks.xcconfig. -->
+    <key>com.apple.developer.icloud-container-identifiers</key>
+    <array>
+        <string>$(TRACKS_ICLOUD_CONTAINER)</string>
+    </array>
+    <key>com.apple.developer.icloud-services</key>
+    <array>
+        <string>CloudKit</string>
+    </array>
+
+    <!-- CloudKit tells the mirror about another device's changes with a silent push. Without
+         this the store only fetches when it opens, so a change made on the Mac doesn't reach
+         an iPhone that's already running. Signing switches it to production for
+         distribution. -->
+    <key>aps-environment</key>
+    <string>development</string>
+
+    <!-- Settings and song statuses ride in iCloud's key-value store rather than the CloudKit
+         container, because widgets and intents read them straight out of the App Group's
+         defaults without opening the model container. See TracksCore's SettingsSync.
+
+         Both apps resolve this to the same string (they share a bundle id), which is what
+         lets the Mac and the iPhone see each other's settings. Without the entitlement
+         NSUbiquitousKeyValueStore accepts writes and syncs nothing. -->
+    <!-- Siri's "play" requests, which Tracks handles in the app. Automatic signing adds the
+         capability to the App ID. -->
+    <key>com.apple.developer.siri</key>
+    <true/>
+
+    <!-- SharePlay, so passengers can add songs to the queue from their own iPhones. Automatic
+         signing adds Group Activities to the App ID. -->
+    <key>com.apple.developer.group-session</key>
+    <true/>
+
+    <!-- Tracks’ App Clip needs no key here. Xcode adds
+         com.apple.developer.associated-appclip-app-identifiers itself when it archives the app
+         with the Clip embedded. Written by hand, automatic signing asks the portal to put it
+         in the profile as a capability, and provisioning fails. -->
+
+    <key>com.apple.developer.ubiquity-kvstore-identifier</key>
+    <string>$(TeamIdentifierPrefix)$(CFBundleIdentifier)</string>
+</dict>
+</plist>

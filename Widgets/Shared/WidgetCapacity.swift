@@ -1,5 +1,5 @@
 import WidgetKit
-import MotifCore
+import TracksCore
 
 /// The most songs each part of a widget could fit.
 ///

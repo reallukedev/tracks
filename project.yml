@@ -1,4 +1,4 @@
-name: Motif
+name: Tracks
 options:
   bundleIdPrefix: dev.luke
   deploymentTarget:
@@ -20,78 +20,119 @@ settings:
     CLANG_ENABLE_MODULES: YES
 
 configFiles:
-  Debug: Config/Motif.xcconfig
-  Release: Config/Motif.xcconfig
+  Debug: Config/Tracks.xcconfig
+  Release: Config/Tracks.xcconfig
 
 # Declared here because XcodeGen doesn't create schemes, and the ones Xcode autocreates live
 # in `xcuserdata`, which isn't committed and is wiped by `xcodegen generate`. Without these,
 # build.sh fails with "does not contain a scheme named …".
 schemes:
-  Motif (macOS):
+  Tracks (macOS):
     build:
       targets:
-        Motif (macOS): all
+        Tracks (macOS): all
     run:
       config: Debug
     test:
       config: Debug
       targets:
-        - package: MotifCore/MotifCoreTests
-        - package: MotifCore/MotifMusicTests
+        - package: TracksCore/TracksCoreTests
+        - package: TracksCore/TracksMusicTests
     archive:
       config: Release
-  Motif (iOS):
+  Tracks (iOS):
     build:
       targets:
-        Motif (iOS): all
+        Tracks (iOS): all
     run:
       config: Debug
-    # The same package tests, run in the Simulator. MotifMusicTests has iOS-only suites.
+    # The same package tests, run in the Simulator. TracksMusicTests has iOS-only suites.
     test:
       config: Debug
       targets:
-        - package: MotifCore/MotifCoreTests
-        - package: MotifCore/MotifMusicTests
+        - package: TracksCore/TracksCoreTests
+        - package: TracksCore/TracksMusicTests
+    archive:
+      config: Release
+  # Runs the App Clip on its own. `_XCAppClipURL` in the environment opens it with a code.
+  TracksClip (iOS):
+    build:
+      targets:
+        TracksClip (iOS): all
+    run:
+      config: Debug
     archive:
       config: Release
 
 packages:
-  MotifCore:
-    path: MotifCore
+  TracksCore:
+    path: TracksCore
 
 targets:
-  Motif (iOS):
+  Tracks (iOS):
     type: application
     platform: iOS
     sources:
       - path: Apps/iOS
       - path: Apps/Shared
     dependencies:
-      - target: MotifWidgets (iOS)
-      - package: MotifCore
-        product: MotifCore
-      - package: MotifCore
-        product: MotifMusic
+      - target: TracksWidgets (iOS)
+      # SharePlay for passengers without Tracks, embedded as its App Clip.
+      - target: TracksClip (iOS)
+      - package: TracksCore
+        product: TracksCore
+      - package: TracksCore
+        product: TracksMusic
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: $(MOTIF_BUNDLE_ID)
-        PRODUCT_NAME: Motif
+        PRODUCT_BUNDLE_IDENTIFIER: $(TRACKS_BUNDLE_ID)
+        PRODUCT_NAME: Tracks
         INFOPLIST_FILE: Apps/iOS/Resources/Info.plist
-        CODE_SIGN_ENTITLEMENTS: Apps/iOS/Resources/Motif.entitlements
-        # The app is main-actor by default. MotifCore isn't, so callers decide where work runs.
+        # Tracks-CarPlay.entitlements, which adds CarPlay Audio to Tracks.entitlements. Set in
+        # Config/Tracks.xcconfig, so a copy built without the grant can switch back.
+        CODE_SIGN_ENTITLEMENTS: $(TRACKS_IOS_ENTITLEMENTS)
+        # The app is main-actor by default. TracksCore isn't, so callers decide where work runs.
         SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
-        # iPhone only. Motif ships for iPhone and the Mac; there's no iPad layout to stand
+        # iPhone only. Tracks ships for iPhone and the Mac; there's no iPad layout to stand
         # behind, so the App Store doesn't offer it there and it isn't listed as an iPad app.
         TARGETED_DEVICE_FAMILY: "1"
         GENERATE_INFOPLIST_FILE: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         # There's a native Mac app. Left on, Apple Silicon offers "My Mac (Designed for iPad)"
-        # and macOS treats the iOS build as a second Motif with the same bundle id.
+        # and macOS treats the iOS build as a second Tracks with the same bundle id.
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
         SUPPORTS_MACCATALYST: NO
 
-  MotifWidgets (macOS):
+  # Tracks’ App Clip: SharePlay's code opens it for a passenger without Tracks, to pick songs
+  # for the host's Up Next. Only TracksCore, no MusicKit, so it stays small and needs no sign-in.
+  TracksClip (iOS):
+    type: application.on-demand-install-capable
+    platform: iOS
+    sources:
+      - path: Apps/Clip
+      # Tracks’ own icon, which the App Clip card and the App Clips list show.
+      - path: Apps/Shared/Resources/AppIcon.icon
+    dependencies:
+      - package: TracksCore
+        product: TracksCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(TRACKS_BUNDLE_ID).Clip
+        PRODUCT_NAME: TracksClip
+        INFOPLIST_FILE: Apps/Clip/Resources/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Apps/Clip/Resources/TracksClip.entitlements
+        SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+        SUPPORTS_MACCATALYST: NO
+        # Kept small, since an App Clip has to download in a moment.
+        DEAD_CODE_STRIPPING: YES
+
+  TracksWidgets (macOS):
     type: app-extension
     platform: macOS
     sources:
@@ -104,14 +145,14 @@ targets:
       # The widgets build the links the apps open; the apps' half is DeepLink+Routing.swift.
       - path: Apps/Shared/App/DeepLink.swift
     dependencies:
-      - package: MotifCore
-        product: MotifCore
-      - package: MotifCore
-        product: MotifMusic
+      - package: TracksCore
+        product: TracksCore
+      - package: TracksCore
+        product: TracksMusic
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: $(MOTIF_BUNDLE_ID).Widgets
-        PRODUCT_NAME: MotifWidgets
+        PRODUCT_BUNDLE_IDENTIFIER: $(TRACKS_BUNDLE_ID).Widgets
+        PRODUCT_NAME: TracksWidgets
         INFOPLIST_FILE: Widgets/macOS/Resources/Info.plist
         CODE_SIGN_ENTITLEMENTS: Widgets/macOS/Resources/Widgets.entitlements
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
@@ -119,7 +160,7 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         SKIP_INSTALL: YES
 
-  MotifWidgets (iOS):
+  TracksWidgets (iOS):
     type: app-extension
     platform: iOS
     sources:
@@ -131,14 +172,14 @@ targets:
       # The widgets build the links the apps open; the apps' half is DeepLink+Routing.swift.
       - path: Apps/Shared/App/DeepLink.swift
     dependencies:
-      - package: MotifCore
-        product: MotifCore
-      - package: MotifCore
-        product: MotifMusic
+      - package: TracksCore
+        product: TracksCore
+      - package: TracksCore
+        product: TracksMusic
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: $(MOTIF_BUNDLE_ID).Widgets
-        PRODUCT_NAME: MotifWidgets
+        PRODUCT_BUNDLE_IDENTIFIER: $(TRACKS_BUNDLE_ID).Widgets
+        PRODUCT_NAME: TracksWidgets
         INFOPLIST_FILE: Widgets/iOS/Resources/Info.plist
         CODE_SIGN_ENTITLEMENTS: Widgets/iOS/Resources/Widgets.entitlements
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
@@ -151,24 +192,51 @@ targets:
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
         SUPPORTS_MACCATALYST: NO
 
-  Motif (macOS):
+  # Reopens the Mac app when it stops without being quit. Embedded in the app, which starts
+  # it at launch; see Watchdog/WatchdogMain.swift.
+  TracksWatchdog:
+    type: application
+    platform: macOS
+    sources:
+      - path: Watchdog
+    dependencies:
+      - package: TracksCore
+        product: TracksCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(TRACKS_BUNDLE_ID).Watchdog
+        PRODUCT_NAME: TracksWatchdog
+        INFOPLIST_FILE: Watchdog/Resources/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Watchdog/Resources/Watchdog.entitlements
+        SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+        GENERATE_INFOPLIST_FILE: NO
+        SKIP_INSTALL: YES
+
+  Tracks (macOS):
     type: application
     platform: macOS
     sources:
       - path: Apps/macOS
       - path: Apps/Shared
     dependencies:
-      - target: MotifWidgets (macOS)
-      - package: MotifCore
-        product: MotifCore
-      - package: MotifCore
-        product: MotifMusic
+      - target: TracksWidgets (macOS)
+      # Where helper apps live in a Mac app. Not registered as a login item: the app opens it.
+      - target: TracksWatchdog
+        embed: true
+        codeSign: true
+        copy:
+          destination: wrapper
+          subpath: Contents/Library/LoginItems
+      - package: TracksCore
+        product: TracksCore
+      - package: TracksCore
+        product: TracksMusic
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: $(MOTIF_BUNDLE_ID)
-        PRODUCT_NAME: Motif
+        PRODUCT_BUNDLE_IDENTIFIER: $(TRACKS_BUNDLE_ID)
+        PRODUCT_NAME: Tracks
         INFOPLIST_FILE: Apps/macOS/Resources/Info.plist
-        CODE_SIGN_ENTITLEMENTS: Apps/macOS/Resources/Motif.entitlements
+        CODE_SIGN_ENTITLEMENTS: Apps/macOS/Resources/Tracks.entitlements
         SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
         GENERATE_INFOPLIST_FILE: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

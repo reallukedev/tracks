@@ -5,11 +5,11 @@
 #
 # The ones the README shows are then copied into images/ under the names it uses.
 # Builds the Debug apps (the launch arguments that pick a screen only exist in Debug), then
-# runs each on sample data with -MotifDemoData YES, which uses an in-memory store and never
+# runs each on sample data with -TracksDemoData YES, which uses an in-memory store and never
 # touches real history, iCloud or Last.fm. iPhone shots come out at the size App Store
 # Connect wants (1320 × 2868). Mac shots are the main window at its default size; for
 # 2880 × 1800 use a Retina display set to "Looks like 1440 × 900". The Mac
-# window is found by the demo process's PID, so a copy of Motif you already have running is
+# window is found by the demo process's PID, so a copy of Tracks you already have running is
 # never captured, and -AppleAccentColor 0 draws the demo in red whatever the Mac's accent is.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -17,7 +17,7 @@ cd "$(dirname "$0")/.."
 out="${1:-build/screenshots}"
 derived="build/screenshots-derived-data"
 iphone="${IPHONE_SIMULATOR:-iPhone 18 Pro Max}"
-bundle_id="$(xcodebuild -project Motif.xcodeproj -scheme "Motif (iOS)" -showBuildSettings 2>/dev/null | awk -F' = ' '/ PRODUCT_BUNDLE_IDENTIFIER /{print $2; exit}')"
+bundle_id="$(xcodebuild -project Tracks.xcodeproj -scheme "Tracks (iOS)" -showBuildSettings 2>/dev/null | awk -F' = ' '/ PRODUCT_BUNDLE_IDENTIFIER /{print $2; exit}')"
 mkdir -p "$out"
 
 command -v xcodegen >/dev/null && xcodegen generate >/dev/null
@@ -33,24 +33,24 @@ capture_ios() {
     --wifiBars 3 --cellularMode active --cellularBars 4 --batteryState charged --batteryLevel 100
   xcrun simctl ui "$udid" appearance light
 
-  xcodebuild -project Motif.xcodeproj -scheme "Motif (iOS)" -configuration Debug \
+  xcodebuild -project Tracks.xcodeproj -scheme "Tracks (iOS)" -configuration Debug \
     -destination "id=$udid" -derivedDataPath "$derived" build -quiet
-  xcrun simctl install "$udid" "$derived/Build/Products/Debug-iphonesimulator/Motif.app"
+  xcrun simctl install "$udid" "$derived/Build/Products/Debug-iphonesimulator/Tracks.app"
 
   shot() {
     local name="$1"; shift
     xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true
-    xcrun simctl launch "$udid" "$bundle_id" -MotifDemoData YES -statsRange month "$@" >/dev/null
+    xcrun simctl launch "$udid" "$bundle_id" -TracksDemoData YES -statsRange month "$@" >/dev/null
     sleep 5
     xcrun simctl io "$udid" screenshot "$out/$prefix-$name.png" >/dev/null
     echo "  $prefix-$name.png"
   }
   shot 1-summary
-  shot 2-charts -MotifTab charts -chartKind songs
-  shot 3-rhythm -MotifScroll rhythm
-  shot 4-history -MotifTab history
-  shot 5-artist -MotifOpen "artist:mara solis"
-  shot 6-highlights -MotifScroll highlights
+  shot 2-charts -TracksTab charts -chartKind songs
+  shot 3-rhythm -TracksScroll rhythm
+  shot 4-history -TracksTab history
+  shot 5-artist -TracksOpen "artist:mara solis"
+  shot 6-highlights -TracksScroll highlights
   xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true
 }
 
@@ -58,9 +58,9 @@ echo "iPhone"
 capture_ios "$iphone" iphone
 
 echo "Mac"
-xcodebuild -project Motif.xcodeproj -scheme "Motif (macOS)" -configuration Debug \
+xcodebuild -project Tracks.xcodeproj -scheme "Tracks (macOS)" -configuration Debug \
   -derivedDataPath "$derived" -allowProvisioningUpdates build -quiet
-app="$derived/Build/Products/Debug/Motif.app/Contents/MacOS/Motif"
+app="$derived/Build/Products/Debug/Tracks.app/Contents/MacOS/Tracks"
 window_id() {
   swift -e 'import CoreGraphics
 let pid = Int(CommandLine.arguments[1])!
@@ -71,7 +71,7 @@ for w in list where (w[kCGWindowOwnerPID as String] as? Int) == pid && (w[kCGWin
 }
 mac_shot() {
   local name="$1"; shift
-  "$app" -MotifDemoData YES -MotifActivate YES -AppleAccentColor 0 -statsRange month "$@" \
+  "$app" -TracksDemoData YES -TracksActivate YES -AppleAccentColor 0 -statsRange month "$@" \
     >/dev/null 2>&1 &
   local pid=$!
   sleep 7
@@ -87,9 +87,9 @@ mac_shot() {
   wait "$pid" 2>/dev/null || true
 }
 mac_shot 1-summary
-mac_shot 2-artists -MotifSidebar topArtists
-mac_shot 3-history -MotifSidebar history
-mac_shot 4-rhythm -MotifScroll rhythm
+mac_shot 2-artists -TracksSidebar topArtists
+mac_shot 3-history -TracksSidebar history
+mac_shot 4-rhythm -TracksScroll rhythm
 
 echo "Saved to $out"
 

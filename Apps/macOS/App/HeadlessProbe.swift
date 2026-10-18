@@ -1,8 +1,8 @@
 #if DEBUG
 import Foundation
 import AppKit
-import MotifCore
-import MotifMusic
+import TracksCore
+import TracksMusic
 import MusicKit
 
 /// Runs the probe from the command line, with no window and no Dock icon. Output goes to
@@ -16,9 +16,9 @@ enum HeadlessProbe {
 
     static func usage() -> String {
         """
-        Motif headless probe
+        Tracks headless probe
 
-          Motif.app/Contents/MacOS/Motif --headless <command>
+          Tracks.app/Contents/MacOS/Tracks --headless <command>
 
         Commands:
           env               Print environment: authorization, subscription, store backing.
@@ -42,7 +42,7 @@ enum HeadlessProbe {
                             `recent`, then run `recent` afterwards.
           sample [seconds]  Observe Music.app for N seconds (default 30) and dump every
                             playerInfo notification and scripting read.
-          cleanup           List the "Motif Probe …" playlists so you can delete them
+          cleanup           List the "Tracks Probe …" playlists so you can delete them
                             in Music. The Apple Music API cannot delete playlists.
           playlists         List every library playlist with its id.
           captures          Dump stored captures: catalog id, artwork, playlist state.
@@ -162,8 +162,8 @@ enum HeadlessProbe {
             // Checks a second process can read the store while the app has it open, which
             // widgets depend on.
             do {
-                let store = try MotifStore(readOnly: true)
-                let captures = try store.context.fetch(MotifStore.radioCaptures(limit: 5))
+                let store = try TracksStore(readOnly: true)
+                let captures = try store.context.fetch(TracksStore.radioCaptures(limit: 5))
                 model.log.append(.environment, "Read-only open", fields: [
                     ("backing", store.backing.description),
                     ("captures readable", String(captures.count)),
@@ -187,12 +187,12 @@ enum HeadlessProbe {
             // Starts audio, and pauses it again after reporting.
             do {
                 let index = arguments.first.flatMap(Int.init) ?? 0
-                let store = try MotifStore(readOnly: true)
-                let recent = try store.context.fetch(MotifStore.allCaptures(limit: index + 1))
+                let store = try TracksStore(readOnly: true)
+                let recent = try store.context.fetch(TracksStore.allCaptures(limit: index + 1))
                 guard index < recent.count else { print("no capture \(index)"); return 1 }
                 let capture = recent[index]
                 let item = PlaybackItem(songID: capture.songID, title: capture.title, artistName: capture.artistName)
-                print("playing: \(item.title) — \(item.artistName) [\(item.songID)]")
+                print("playing: \(item.title) · \(item.artistName) [\(item.songID)]")
                 let service = PlatformPlaybackService.make()
                 do {
                     try await service.play([item])
@@ -202,7 +202,7 @@ enum HeadlessProbe {
                 }
                 try? await Task.sleep(for: .seconds(3))
                 let now = await ScriptingQueue.run { MusicLibraryPlayback.currentTrack() }
-                print("Music is playing: \(now.map { "\($0.name) — \($0.artist)" } ?? "nothing")")
+                print("Music is playing: \(now.map { "\($0.name) · \($0.artist)" } ?? "nothing")")
                 if now != nil { await service.pause() }
                 return 0
             } catch {
@@ -222,14 +222,14 @@ enum HeadlessProbe {
         case "playable":
             // Read-only: what Play would find for each recent song, without playing anything.
             do {
-                let store = try MotifStore(readOnly: true)
+                let store = try TracksStore(readOnly: true)
                 let playlist = CaptureSettings().playlistName
-                for capture in try store.context.fetch(MotifStore.allCaptures(limit: 12)) {
+                for capture in try store.context.fetch(TracksStore.allCaptures(limit: 12)) {
                     var fields: [(String, String)] = [("songID", capture.songID.isEmpty ? "‹none›" : capture.songID)]
                     if MusicItemIdentity.isCatalogID(capture.songID) {
                         let request = MusicCatalogResourceRequest<Song>(matching: \.id, equalTo: MusicItemID(capture.songID))
                         if let song = try? await request.response().items.first {
-                            fields.append(("catalog", "\(song.title) — \(song.artistName)"))
+                            fields.append(("catalog", "\(song.title) · \(song.artistName)"))
                             let catalogTrack = MusicLibraryPlayback.Track(name: song.title, artist: song.artistName)
                             let byCatalog = await ScriptingQueue.run {
                                 MusicLibraryPlayback.locate(catalogTrack, inPlaylist: playlist)
@@ -244,10 +244,10 @@ enum HeadlessProbe {
                         MusicLibraryPlayback.locate(captured, inPlaylist: playlist)
                     }
                     fields.append(("Music, captured name", String(describing: byCapture)))
-                    model.log.append(.environment, "\(capture.title) — \(capture.artistName) [\(capture.kind.rawValue)]", fields: fields)
+                    model.log.append(.environment, "\(capture.title) · \(capture.artistName) [\(capture.kind.rawValue)]", fields: fields)
                 }
                 // The popover's batch check, which should agree with the answers above.
-                let recent = try store.context.fetch(MotifStore.allCaptures(limit: 12))
+                let recent = try store.context.fetch(TracksStore.allCaptures(limit: 12))
                 let tracks = recent.map { MusicLibraryPlayback.Track(name: $0.title, artist: $0.artistName) }
                 let batch = await ScriptingQueue.run { MusicLibraryPlayback.locateAll(tracks, inPlaylist: playlist) }
                 model.log.append(.environment, "Batch", fields: [("locateAll", String(describing: batch))])
@@ -260,8 +260,8 @@ enum HeadlessProbe {
         case "artists":
             // Read-only, so it can run while the app is open. Ignores what's already cached.
             do {
-                let store = try MotifStore(readOnly: true)
-                let history = ListeningHistory(try store.context.fetch(MotifStore.allCaptures()).map(\.stat))
+                let store = try TracksStore(readOnly: true)
+                let history = ListeningHistory(try store.context.fetch(TracksStore.allCaptures()).map(\.stat))
                 let requests = ArtistArtworkLookup.pending(in: history, lookedUp: [], limit: 25)
                 let found = try await CatalogLookup().artistArtworkURLs(for: requests)
                 for request in requests {
@@ -279,8 +279,8 @@ enum HeadlessProbe {
         case "genres":
             // Read-only like `artists`, and leaves the app's cache alone.
             do {
-                let store = try MotifStore(readOnly: true)
-                let history = ListeningHistory(try store.context.fetch(MotifStore.allCaptures()).map(\.stat))
+                let store = try TracksStore(readOnly: true)
+                let history = ListeningHistory(try store.context.fetch(TracksStore.allCaptures()).map(\.stat))
                 let requests = SongMetadataLookup.pending(in: history, lookedUp: [], limit: 25, searchLimit: 5)
                 let found = try await CatalogLookup().songMetadata(for: requests)
                 // Apple's own list too, to check how subgenres roll up to the genre shown.

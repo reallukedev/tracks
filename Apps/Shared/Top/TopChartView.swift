@@ -1,340 +1,457 @@
 import SwiftUI
-import MotifCore
+import TracksCore
 
-/// A ranked list of songs, artists or albums for the chosen range.
+/// Top songs, artists or albums for any day, week, month or year, or all time.
+///
+/// The page travels through time: the arrows step to the nearest period with listening, the
+/// title opens a calendar to pick any day, and Today (or This Week) comes back. Each entry
+/// shows how it moved since the period before, and the chart plays in order or shuffled.
 struct TopChartView: View {
     let kind: ChartKind
     /// When set, a Songs / Artists / Albums switcher sits at the top of the list.
     var kindSelection: Binding<ChartKind>?
     @Environment(AppModel.self) private var model
-    @AppStorage("statsRange") private var range: StatsRange = .month
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var entries: [ChartEntry] = []
-    /// The chart and range `entries` were computed for, so only new listening animates.
-    @State private var shown: String?
+    @Environment(\.openPlayRoute) private var openPlayRoute
+    @AppStorage(ChartSpan.storageKey) private var span: ChartSpan = .week
+    /// A day inside the period on show, or nil to follow now as the days go by.
+    @State private var anchor: Date? = LaunchScene.chartDate
+    @State private var snapshot: ChartSnapshot?
+    @State private var isPickingDate = false
+    /// The page's width, to choose between its column layout and its stacked one.
+    @State private var width: CGFloat = 0
+    private var sources = SourceScopeSetting()
+    private var playback = ChartPlayback()
+
+    init(kind: ChartKind, kindSelection: Binding<ChartKind>? = nil) {
+        self.kind = kind
+        self.kindSelection = kindSelection
+    }
+
+    private var period: ChartPeriod {
+        ChartPeriod.containing(anchor ?? .now, span: span)
+    }
 
     var body: some View {
-        List {
-            if let kindSelection {
-                Picker("Chart", selection: kindSelection) {
-                    ForEach(ChartKind.allCases) { kind in
-                        Text(kind.title).tag(kind)
-                    }
+        page
+            .navigationTitle(kindSelection == nil ? kind.navigationTitle : "Charts")
+            .sourceScopeSubtitle(sources.scope)
+            .toolbar { toolbar }
+            .task(id: "\(kind.rawValue)|\(span.rawValue)|\(period.interval?.start.timeIntervalSinceReferenceDate ?? 0)|\(sources.scope.rawValue)|\(model.library.revision)") {
+                // Until the first read there's nothing to chart, and an empty chart would say
+                // "No Charts Yet" to someone with years of listening.
+                guard model.library.isLoaded else { return }
+                let (kind, period, scope, history) = (kind, period, sources.scope, model.library.history)
+                let next = await OffMainActor.run {
+                    ChartSnapshot.make(kind: kind, period: period, scope: scope, history: history.scoped(to: scope))
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .listRowSeparator(.hidden)
-                .listRowBackground(Color.clear)
-            }
-            if entries.isEmpty, model.library.isLoaded {
-                ContentUnavailableView(
-                    "Nothing Played \(Text(range.phrase))",
-                    systemImage: "chart.bar",
-                    description: Text("Your top \(Text(kind.title).foregroundStyle(.primary)) appear once you've listened to some music.")
-                )
-                .listRowBackground(Color.clear)
-            }
-            ForEach(entries) { entry in
-                NavigationLink(value: entry.route) {
-                    RankedRow(entry: entry)
+                guard !Task.isCancelled, next != snapshot else { return }
+                // New listening in the same chart rolls in; a different chart just appears.
+                let isLive = snapshot?.identity == next.identity && snapshot?.playCount != next.playCount
+                LiveUpdate.apply(isLive: isLive, reduceMotion: reduceMotion) {
+                    snapshot = next
                 }
             }
+    }
+
+    // MARK: - Moving through time
+
+    private func show(_ target: ChartPeriod?) {
+        guard let target else { return }
+        anchor = target.isCurrent() ? nil : target.interval?.start
+    }
+
+    /// The snapshot, only while it's the chart on screen. Between a switch and its new
+    /// snapshot the old one would put last week's songs under this week's title, or songs
+    /// in artist tiles.
+    ///
+    /// The steps wait for it too, so a quick double press can't run past the period it meant.
+    private var shown: ChartSnapshot? {
+        guard let snapshot, snapshot.kind == kind, snapshot.period == period, snapshot.scope == sources.scope else {
+            return nil
         }
-        .navigationTitle(kindSelection == nil ? kind.navigationTitle : "Charts")
-        #if os(iOS)
-        .listStyle(.plain)
-        #endif
-        .toolbar {
-            #if os(macOS)
-            // The same segmented control as Summary. macOS turns a menu in the toolbar into
-            // a borderless pop-up, which read as unfinished next to it.
-            ToolbarItem(placement: .principal) {
-                RangePicker(range: $range)
-                    .fixedSize()
+        return snapshot
+    }
+    private var hasEntries: Bool { shown?.entries.isEmpty == false }
+    private var canGoBack: Bool { shown?.earlier != nil }
+    private var canGoForward: Bool { shown?.later != nil }
+    private var isCurrent: Bool { period.isCurrent() }
+
+    private var earlierHelp: Text {
+        Text("The \(Text(span.unitName)) before with listening")
+    }
+
+    private var laterHelp: Text {
+        Text("The \(Text(span.unitName)) after with listening")
+    }
+
+    private var pickedDay: Binding<Date> {
+        Binding(
+            get: { anchor ?? .now },
+            set: { day in
+                anchor = Calendar.current.isDateInToday(day) ? nil : day
+                isPickingDate = false
             }
+        )
+    }
+
+    /// From the first play to today.
+    private var pickableDays: ClosedRange<Date> {
+        let first = model.library.history.first?.capturedAt ?? .now
+        return min(first, .now)...Date.now
+    }
+
+    private var datePicker: some View {
+        DatePicker("Go to Date", selection: pickedDay, in: pickableDays, displayedComponents: .date)
+            .datePickerStyle(.graphical)
+            .labelsHidden()
+            .padding()
+            #if os(iOS)
+            .frame(minWidth: 320)
+            .presentationCompactAdaptation(.popover)
             #else
-            ToolbarItem(placement: .primaryAction) {
-                RangeMenu(range: $range)
-            }
+            .frame(width: 280)
             #endif
-        }
-        .task(id: "\(kind.rawValue)|\(range.rawValue)|\(model.library.revision)") {
-            let (kind, range, history) = (kind, range, model.library.history)
-            let next = await OffMainActor.run { ChartEntry.chart(kind, range: range, history: history) }
-            guard !Task.isCancelled else { return }
-            let selection = "\(kind.rawValue)|\(range.rawValue)"
-            LiveUpdate.apply(isLive: shown == selection, reduceMotion: reduceMotion) {
-                entries = next
-            }
-            shown = selection
-        }
-    }
-}
-
-/// A chart row in one shape whatever it ranks.
-nonisolated struct ChartEntry: Identifiable, Equatable, Sendable {
-    let id: String
-    let route: Route
-    let title: String
-    let subtitle: String?
-    let artworkURL: String?
-    let artworkSeed: String
-    let isArtist: Bool
-    let count: Int
-    let seconds: TimeInterval
-    let rank: Int
-    let movement: ChartMovement
-    /// Plays relative to the top entry, 0...1, for the bar under the name.
-    var fraction: Double = 1
-
-    static func chart(_ kind: ChartKind, range: StatsRange, history: ListeningHistory) -> [ChartEntry] {
-        var entries = unscaledChart(kind, range: range, history: history)
-        let top = Double(max(1, entries.first?.count ?? 1))
-        for index in entries.indices {
-            entries[index].fraction = Double(entries[index].count) / top
-        }
-        return entries
     }
 
-    private static func unscaledChart(_ kind: ChartKind, range: StatsRange, history: ListeningHistory) -> [ChartEntry] {
-        switch kind {
-        case .songs:
-            StatsCalculator.songChart(range: range, history: history).map { ranked in
-                let song = ranked.item
-                return ChartEntry(
-                    id: song.id, route: .song(song.id), title: song.title, subtitle: song.artistName,
-                    artworkURL: song.artworkURL, artworkSeed: song.albumTitle ?? song.title, isArtist: false,
-                    count: song.count, seconds: song.listeningSeconds, rank: ranked.rank,
-                    movement: ranked.movement
-                )
-            }
-        case .artists:
-            StatsCalculator.artistChart(range: range, history: history).map { ranked in
-                let artist = ranked.item
-                return ChartEntry(
-                    id: artist.id, route: .artist(artist.id), title: artist.name,
-                    subtitle: String(AttributedString(localized: "^[\(artist.songCount) song](inflect: true)").characters),
-                    artworkURL: artist.artworkURL, artworkSeed: artist.name, isArtist: true,
-                    count: artist.count, seconds: artist.listeningSeconds, rank: ranked.rank,
-                    movement: ranked.movement
-                )
-            }
-        case .albums:
-            StatsCalculator.albumChart(range: range, history: history).map { ranked in
-                let album = ranked.item
-                return ChartEntry(
-                    id: album.id, route: .album(album.id), title: album.title,
-                    subtitle: album.artistName, artworkURL: album.artworkURL, artworkSeed: album.title,
-                    isArtist: false, count: album.count, seconds: album.listeningSeconds, rank: ranked.rank,
-                    movement: ranked.movement
-                )
-            }
-        }
-    }
-}
-
-struct RankedRow: View {
-    let entry: ChartEntry
-    @Environment(\.dynamicTypeSize) private var typeSize
-    /// Room for the rank and the movement badge under it, which grow with the text.
-    @ScaledMetric(relativeTo: .caption2) private var rankColumnWidth: CGFloat = 32
-
-    var body: some View {
-        if typeSize.isAccessibilitySize {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    Text(entry.rank.formatted())
-                        .font(.headline)
-                    MovementIndicator(movement: entry.movement)
-                }
-                Text(entry.title)
-                if let subtitle = entry.subtitle {
-                    Text(subtitle)
+    /// The period's name, which opens the calendar.
+    private var titleButton: some View {
+        Button {
+            isPickingDate = true
+        } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(period.title())
+                    .font(titleFont)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                if span != .allTime {
+                    Image(systemName: "chevron.down")
+                        .font(.footnote.weight(.bold))
                         .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
                 }
-                Text("^[\(entry.count) play](inflect: true), \(Format.listening(entry.seconds))")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
             }
-            .accessibilityElement(children: .combine)
-        } else {
-            row
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .disabled(span == .allTime)
+        .help("Go to a date")
+        .accessibilityHint(span == .allTime ? Text(verbatim: "") : Text("Opens a calendar to pick a date."))
+        .popover(isPresented: $isPickingDate, arrowEdge: .bottom) { datePicker }
+    }
+
+    /// The dates the title leaves out, like the days of This Week.
+    @ViewBuilder
+    private var datesLine: some View {
+        if let dates = period.dates() {
+            Text(dates)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
         }
     }
 
-    private var row: some View {
-        HStack(spacing: 12) {
-            VStack(spacing: 2) {
-                Text(entry.rank.formatted())
-                    .font(.headline)
-                    .monospacedDigit()
-                    .contentTransition(.numericText(value: Double(entry.rank)))
-                MovementIndicator(movement: entry.movement)
+    private var playTitle: String {
+        String(localized: "\(String(localized: kind.navigationTitleResource)), \(period.title())")
+    }
+
+    private var playButtons: some View {
+        let songs = playback.playable(shown?.songs ?? [])
+        return HStack(spacing: 10) {
+            Button {
+                playback.play(songs, title: playTitle)
+            } label: {
+                Label("Play", systemImage: "play.fill")
+                    #if os(iOS)
+                    .frame(maxWidth: .infinity)
+                    #endif
             }
-            .frame(width: rankColumnWidth)
-
-            ArtworkView(url: entry.artworkURL, seed: entry.artworkSeed, size: 48, isCircle: entry.isArtist)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(entry.title)
-                    .lineLimit(1)
-                if let subtitle = entry.subtitle {
-                    Text(subtitle)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                ShareBar(fraction: entry.fraction)
-                    .frame(maxWidth: 360)
-                    .padding(.top, 2)
+            .buttonStyle(.glassProminent)
+            Button {
+                playback.play(songs, shuffled: true, title: playTitle)
+            } label: {
+                Label("Shuffle", systemImage: "shuffle")
+                    #if os(iOS)
+                    .frame(maxWidth: .infinity)
+                    #endif
             }
+            .buttonStyle(.glass)
+        }
+        .buttonBorderShape(.capsule)
+        #if os(iOS)
+        .controlSize(.large)
+        #endif
+        .disabled(songs.isEmpty)
+        .help("Play the songs of this chart in order, or shuffled")
+    }
 
-            Spacer(minLength: 8)
-
-            VStack(alignment: .trailing, spacing: 2) {
-                Text("^[\(entry.count) play](inflect: true)")
-                    .font(.subheadline.weight(.medium))
-                    .monospacedDigit()
-                    .contentTransition(.numericText(value: Double(entry.count)))
-                Text(Format.listening(entry.seconds))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-                    .contentTransition(.numericText(value: entry.seconds))
+    private func empty(_ snapshot: ChartSnapshot) -> some View {
+        ContentUnavailableView {
+            Label(snapshot.hasHistory ? snapshot.period.emptyTitle : "No Charts Yet", systemImage: "waveform")
+        } description: {
+            if !snapshot.hasHistory {
+                Text("Your top \(Text(kind.title)) appear here once you've listened to some music.")
+            } else if sources.scope != .all {
+                Text("Nothing from \(Text(sources.scope.title)) was played in this \(Text(span.unitName)).")
             }
-        }
-        .padding(.vertical, 2)
-        .accessibilityElement(children: .combine)
-    }
-}
-
-/// A thin bar showing how an entry compares with the top of its chart, as in Screen Time.
-struct ShareBar: View {
-    let fraction: Double
-
-    var body: some View {
-        FractionalWidthLayout(fraction: fraction, minimumWidth: 4) {
-            Capsule()
-                .fill(Color.accentColor.gradient)
-        }
-        .frame(height: 4)
-        .accessibilityHidden(true)
-    }
-}
-
-/// Takes all the width it's offered and gives its content `fraction` of it, from the
-/// leading edge. What a `GeometryReader` was doing for ``ShareBar``, without the reader.
-private struct FractionalWidthLayout: Layout {
-    let fraction: Double
-    let minimumWidth: CGFloat
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        proposal.replacingUnspecifiedDimensions()
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let width = max(minimumWidth, bounds.width * fraction)
-        for subview in subviews {
-            subview.place(
-                at: bounds.origin,
-                anchor: .topLeading,
-                proposal: ProposedViewSize(width: width, height: bounds.height)
-            )
-        }
-    }
-}
-
-/// ▲3 in green, ▼1 in red, NEW, or a dash for no change.
-///
-/// In text styles, so the badges grow with Dynamic Type. On iPhone `.caption2` never goes
-/// below 11 points; the fixed 6 to 10 point sizes these replaced were hard to read at any
-/// setting.
-struct MovementIndicator: View {
-    let movement: ChartMovement
-    /// The arrow and the equals sign, which are drawn smaller than the number beside them.
-    @ScaledMetric(relativeTo: .caption2) private var glyphSize: CGFloat = Self.baseGlyphSize
-
-    var body: some View {
-        Group {
-            switch movement {
-            case .new:
-                Text("NEW")
-                    .font(.caption2.weight(.heavy))
-                    .fontDesign(.rounded)
-                    .foregroundStyle(.tint)
-                    .accessibilityLabel("New entry")
-            case .up(let places):
-                Label("\(places)", systemImage: "arrowtriangle.up.fill")
-                    .labelStyle(CompactMovementStyle(glyphSize: glyphSize))
-                    .foregroundStyle(.green)
-                    .accessibilityLabel("Up \(places)")
-            case .down(let places):
-                Label("\(places)", systemImage: "arrowtriangle.down.fill")
-                    .labelStyle(CompactMovementStyle(glyphSize: glyphSize))
-                    .foregroundStyle(.red)
-                    .accessibilityLabel("Down \(places)")
-            case .same:
-                Image(systemName: "equal")
-                    .font(.system(size: glyphSize, weight: .bold))
-                    .foregroundStyle(.tertiary)
-                    .accessibilityLabel("No change")
-            case .none:
-                EmptyView()
+        } actions: {
+            if let earlier = snapshot.earlier {
+                Button("Go to \(earlier.title())") { show(earlier) }
+                    .buttonStyle(.glassProminent)
+                    .buttonBorderShape(.capsule)
+            }
+            if !snapshot.period.isCurrent() {
+                Button(span.currentLabel) { anchor = nil }
+                    .buttonStyle(.glass)
+                    .buttonBorderShape(.capsule)
             }
         }
-        // One line in the rank column; the column widens with the text instead.
-        .lineLimit(1)
-        .fixedSize()
     }
 
-    /// Glyphs at the default text size. Larger on iPhone, where `.caption2` is 11 points
-    /// rather than the Mac's 10.
-    #if os(iOS)
-    private static let baseGlyphSize: CGFloat = 8
-    #else
-    private static let baseGlyphSize: CGFloat = 7
-    #endif
-}
+    // MARK: - Toolbar
 
-private struct CompactMovementStyle: LabelStyle {
-    let glyphSize: CGFloat
-
-    func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: 1) {
-            configuration.icon.font(.system(size: glyphSize))
-            configuration.title
-                .font(.caption2.weight(.semibold))
-                .fontDesign(.rounded)
+    @ToolbarContentBuilder
+    private var toolbar: some ToolbarContent {
+        #if os(macOS)
+        // Calendar's controls, where Calendar has them: back, Today and forward together.
+        ToolbarItem(placement: .primaryAction) {
+            ControlGroup {
+                Button("Earlier", systemImage: "chevron.backward") { show(shown?.earlier) }
+                    .disabled(!canGoBack)
+                    .help(Text("\(earlierHelp) (⌥⌘←)"))
+                    // Through time. ⌘[ and ⌘] are the window's Back and Forward.
+                    .keyboardShortcut(.leftArrow, modifiers: [.command, .option])
+                Button(span.currentLabel) { anchor = nil }
+                    .disabled(isCurrent)
+                    .help(Text("Go to \(Text(span.currentLabel)) (⌘T)"))
+                    // Calendar's Go to Today.
+                    .keyboardShortcut("t", modifiers: .command)
+                Button("Later", systemImage: "chevron.forward") { show(shown?.later) }
+                    .disabled(!canGoForward)
+                    .help(Text("\(laterHelp) (⌥⌘→)"))
+                    .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
+            }
+            .controlGroupStyle(.navigation)
         }
-        .monospacedDigit()
-    }
-}
-
-/// The Week / Month / Year / All Time menu that sits in a toolbar.
-struct RangeMenu: View {
-    @Binding var range: StatsRange
-
-    var body: some View {
-        Picker("Range", selection: $range) {
-            ForEach(StatsRange.allCases, id: \.self) { range in
-                Text(range.label).tag(range)
+        ToolbarItem(placement: .principal) {
+            spanPicker
+                .fixedSize()
+        }
+        if sources.isOffered {
+            ToolbarItem(placement: .primaryAction) {
+                SourceScopeMenu(scope: sources.selection)
             }
         }
-        .pickerStyle(.menu)
+        #else
+        if !isCurrent {
+            ToolbarItem(placement: .topBarLeading) {
+                Button(span.currentLabel) { anchor = nil }
+            }
+        }
+        if sources.isOffered {
+            ToolbarItem(placement: .topBarTrailing) {
+                SourceScopeMenu(scope: sources.selection)
+            }
+        }
+        #endif
     }
-}
 
-/// The same choice as a segmented control, for the top of Summary.
-struct RangePicker: View {
-    @Binding var range: StatsRange
-
-    var body: some View {
-        Picker("Range", selection: $range) {
-            ForEach(StatsRange.allCases, id: \.self) { range in
-                Text(range.label).tag(range)
+    private var spanPicker: some View {
+        Picker("Period", selection: $span) {
+            ForEach(ChartSpan.allCases) { span in
+                Text(span.label).tag(span)
             }
         }
         .pickerStyle(.segmented)
         .labelsHidden()
+    }
+
+    // MARK: - Page
+
+    /// An artist's or album's songs from the period, most played first.
+    private func playSongs(of entry: ChartEntry) {
+        playback.play(songs(of: entry), title: entry.title)
+    }
+
+    private func songs(of entry: ChartEntry) -> [MixSong] {
+        entry.song.map { [$0] } ?? entry.songs
+    }
+
+    private func canPlay(_ entry: ChartEntry) -> Bool {
+        !playback.playable(songs(of: entry)).isEmpty
+    }
+
+    private func open(_ entry: ChartEntry) {
+        openPlayRoute(.stats(entry.route))
+    }
+
+    private func open(_ period: ChartPeriod) {
+        withAnimation(reduceMotion ? nil : .snappy) {
+            if period.span != span { span = period.span }
+            show(period)
+        }
+    }
+
+    @ViewBuilder
+    private var activity: some View {
+        if let shown {
+            // A period with nothing in it says so straight under its title: a card of zeros
+            // and an empty chart would push that below the fold.
+            if !shown.entries.isEmpty || shown.activity.plays > 0 {
+                ChartActivityCard(kind: kind, period: period, activity: shown.activity, entries: shown.entries, open: open)
+            }
+        } else {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.cardFill)
+                .frame(height: 290)
+        }
+    }
+
+    @ViewBuilder
+    private var chart: some View {
+        if let shown {
+            if shown.entries.isEmpty {
+                empty(shown)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 24)
+            } else {
+                switch kind {
+                case .songs: ChartList(entries: shown.entries, open: open)
+                case .artists: ArtistChartGrid(entries: shown.entries, open: open, canPlay: canPlay, play: playSongs(of:))
+                case .albums: AlbumChartGrid(entries: shown.entries, open: open, canPlay: canPlay, play: playSongs(of:))
+                }
+            }
+        } else {
+            LoadingRows()
+        }
+    }
+
+    #if os(iOS)
+    private var titleFont: Font { .title.bold() }
+
+    private var page: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                VStack(spacing: 12) {
+                    if let kindSelection {
+                        Picker("Chart", selection: kindSelection) {
+                            ForEach(ChartKind.allCases) { kind in
+                                Text(kind.title).tag(kind)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                    }
+                    spanPicker
+                }
+
+                header
+                activity
+                if hasEntries {
+                    playButtons
+                }
+                chart
+            }
+            .padding(.horizontal, PlayMetrics.margin)
+            .padding(.bottom, 24)
+        }
+        .background(Color.pageBackground)
+    }
+
+    /// The period's name and dates, with the steps either side.
+    private var header: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                titleButton
+                datesLine
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if span != .allTime {
+                HStack(spacing: 8) {
+                    Button("Earlier", systemImage: "chevron.backward") { show(shown?.earlier) }
+                        .disabled(!canGoBack)
+                        .accessibilityHint(earlierHelp)
+                    Button("Later", systemImage: "chevron.forward") { show(shown?.later) }
+                        .disabled(!canGoForward)
+                        .accessibilityHint(laterHelp)
+                }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.glass)
+                .buttonBorderShape(.circle)
+                .fontWeight(.semibold)
+            }
+        }
+    }
+    #else
+    private var titleFont: Font { .largeTitle.bold() }
+
+    /// On a wide window the period sits in a column of its own beside the chart, as a
+    /// dashboard does; narrower, one above the other.
+    private var page: some View {
+        Group {
+            if width >= 1_100 {
+                HStack(alignment: .top, spacing: 0) {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 20) {
+                            VStack(alignment: .leading, spacing: 14) {
+                                headerTitle
+                                if hasEntries { playButtons }
+                            }
+                            activity
+                        }
+                        .padding(PlayMetrics.margin)
+                    }
+                    .scrollIndicators(.never)
+                    .frame(width: 460)
+
+                    ScrollView {
+                        chart
+                            .frame(maxWidth: kind == .songs ? 960 : .infinity, alignment: .leading)
+                            .padding(.leading, kind == .songs ? 8 : 18)
+                            .padding(.trailing, PlayMetrics.margin - 10)
+                            .padding(.vertical, PlayMetrics.margin - 8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 24) {
+                        HStack(alignment: .bottom, spacing: 16) {
+                            headerTitle
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            if hasEntries { playButtons }
+                        }
+                        activity
+                        chart
+                            // A song row's highlight reaches past the text's margin.
+                            .padding(.horizontal, kind == .songs ? -10 : 0)
+                    }
+                    .padding(.horizontal, PlayMetrics.margin)
+                    .padding(.vertical, 20)
+                }
+            }
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        .background(Color.pageBackground)
+    }
+
+    private var headerTitle: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            titleButton
+            datesLine
+        }
+    }
+    #endif
+}
+
+extension ChartKind {
+    /// "Top Songs", as a resource, for building a sentence around it.
+    var navigationTitleResource: LocalizedStringResource {
+        switch self {
+        case .songs: "Top Songs"
+        case .artists: "Top Artists"
+        case .albums: "Top Albums"
+        }
     }
 }

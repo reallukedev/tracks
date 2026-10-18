@@ -1,100 +1,420 @@
 {
-  "fill": {
-    "linear-gradient": [
-      "display-p3:0.98000,0.37000,0.47000,1.00000",
-      "display-p3:0.91000,0.13000,0.25000,1.00000"
-    ],
-    "orientation": {
-      "start": {
-        "x": 0.5,
-        "y": 0.0
-      },
-      "stop": {
-        "x": 0.5,
-        "y": 1.0
-      }
-    }
-  },
-  "groups": [
+  "fill-specializations": [
     {
-      "name": "Played",
-      "shadow": {
-        "kind": "neutral",
-        "opacity": 0.5
-      },
-      "translucency": {
-        "enabled": true,
-        "value": 0.15
-      },
-      "layers": [
-        {
-          "image-name": "played.svg",
-          "name": "played",
-          "glass": true
+      "value": {
+        "linear-gradient": [
+          "display-p3:1,.38,.48,1",
+          "display-p3:.8,.035,.26,1"
+        ],
+        "orientation": {
+          "start": {
+            "x": 0.12,
+            "y": 0
+          },
+          "stop": {
+            "x": 0.88,
+            "y": 1
+          }
         }
-      ]
+      }
     },
     {
-      "name": "Record",
-      "shadow": {
-        "kind": "neutral",
-        "opacity": 0.5
-      },
-      "translucency": {
-        "enabled": true,
-        "value": 0.25
-      },
-      "lighting": "combined",
+      "appearance": "dark",
+      "value": {
+        "linear-gradient": [
+          "display-p3:.29,.07,.16,1",
+          "display-p3:.075,.012,.055,1"
+        ],
+        "orientation": {
+          "start": {
+            "x": 0.12,
+            "y": 0
+          },
+          "stop": {
+            "x": 0.88,
+            "y": 1
+          }
+        }
+      }
+    },
+    {
+      "appearance": "tinted",
+      "value": "automatic"
+    }
+  ],
+  "groups": [
+    {
+      "name": "Tape Mechanism",
       "layers": [
         {
-          "image-name": "label.svg",
-          "name": "label",
+          "name": "Tape Transport",
+          "image-name": "transport.svg",
           "glass": false,
-          "fill": {
-            "solid": "display-p3:0.99000,0.30000,0.40000,1.00000"
-          }
-        },
-        {
-          "image-name": "track.svg",
-          "name": "track",
-          "glass": false,
-          "opacity": 0.12
-        },
-        {
-          "image-name": "grooves.svg",
-          "name": "grooves",
-          "glass": false,
-          "opacity": 0.22
-        },
-        {
-          "image-name": "sheen.svg",
-          "name": "sheen",
-          "glass": false,
-          "opacity": 0.09
-        },
-        {
-          "image-name": "vinyl.svg",
-          "name": "vinyl",
-          "glass": true,
-          "fill": {
-            "solid": "display-p3:0.10000,0.09000,0.11000,1.00000"
-          },
           "fill-specializations": [
+            {
+              "value": {
+                "linear-gradient": [
+                  "display-p3:.28,.29,.4,1",
+                  "display-p3:.075,.09,.18,1"
+                ],
+                "orientation": {
+                  "start": {
+                    "x": 0.12,
+                    "y": 0
+                  },
+                  "stop": {
+                    "x": 0.88,
+                    "y": 1
+                  }
+                }
+              }
+            },
             {
               "appearance": "dark",
               "value": {
-                "solid": "display-p3:0.22000,0.21000,0.23000,1.00000"
+                "linear-gradient": [
+                  "display-p3:.28,.29,.4,1",
+                  "display-p3:.075,.09,.18,1"
+                ],
+                "orientation": {
+                  "start": {
+                    "x": 0.12,
+                    "y": 0
+                  },
+                  "stop": {
+                    "x": 0.88,
+                    "y": 1
+                  }
+                }
+              }
+            },
+            {
+              "appearance": "tinted",
+              "value": {
+                "solid": "display-p3:.25,.25,.25,1"
+              }
+            }
+          ],
+          "opacity": 0.45
+        },
+        {
+          "name": "Reel Hubs",
+          "image-name": "hubs.svg",
+          "glass": true,
+          "fill-specializations": [
+            {
+              "value": {
+                "linear-gradient": [
+                  "display-p3:1,.98,.91,1",
+                  "display-p3:.89,.8,.71,1"
+                ],
+                "orientation": {
+                  "start": {
+                    "x": 0.12,
+                    "y": 0
+                  },
+                  "stop": {
+                    "x": 0.88,
+                    "y": 1
+                  }
+                }
+              }
+            },
+            {
+              "appearance": "dark",
+              "value": {
+                "linear-gradient": [
+                  "display-p3:1,.98,.91,1",
+                  "display-p3:.89,.8,.71,1"
+                ],
+                "orientation": {
+                  "start": {
+                    "x": 0.12,
+                    "y": 0
+                  },
+                  "stop": {
+                    "x": 0.88,
+                    "y": 1
+                  }
+                }
+              }
+            },
+            {
+              "appearance": "tinted",
+              "value": {
+                "solid": "display-p3:1,1,1,1"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Wound Tape",
+          "image-name": "spools.svg",
+          "glass": true,
+          "fill-specializations": [
+            {
+              "value": {
+                "linear-gradient": [
+                  "display-p3:.5,.53,.65,1",
+                  "display-p3:.2,.24,.38,1"
+                ],
+                "orientation": {
+                  "start": {
+                    "x": 0.12,
+                    "y": 0
+                  },
+                  "stop": {
+                    "x": 0.88,
+                    "y": 1
+                  }
+                }
+              }
+            },
+            {
+              "appearance": "dark",
+              "value": {
+                "linear-gradient": [
+                  "display-p3:.5,.53,.65,1",
+                  "display-p3:.2,.24,.38,1"
+                ],
+                "orientation": {
+                  "start": {
+                    "x": 0.12,
+                    "y": 0
+                  },
+                  "stop": {
+                    "x": 0.88,
+                    "y": 1
+                  }
+                }
+              }
+            },
+            {
+              "appearance": "tinted",
+              "value": {
+                "solid": "display-p3:.5,.5,.5,1"
               }
             }
           ]
         }
-      ]
+      ],
+      "lighting": "combined",
+      "specular": true,
+      "translucency": {
+        "enabled": true,
+        "value": 0.3
+      },
+      "refractivity": {
+        "enabled": true,
+        "strength": 0.2,
+        "depth": 0.13
+      },
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.12
+      }
+    },
+    {
+      "name": "Glass Shell and Tape Well",
+      "layers": [
+        {
+          "name": "Recessed Tape Well",
+          "image-name": "well.svg",
+          "glass": true,
+          "fill-specializations": [
+            {
+              "value": {
+                "linear-gradient": [
+                  "display-p3:.91,.94,.97,1",
+                  "display-p3:.62,.7,.81,1"
+                ],
+                "orientation": {
+                  "start": {
+                    "x": 0.12,
+                    "y": 0
+                  },
+                  "stop": {
+                    "x": 0.88,
+                    "y": 1
+                  }
+                }
+              }
+            },
+            {
+              "appearance": "dark",
+              "value": {
+                "linear-gradient": [
+                  "display-p3:.91,.94,.97,1",
+                  "display-p3:.62,.7,.81,1"
+                ],
+                "orientation": {
+                  "start": {
+                    "x": 0.12,
+                    "y": 0
+                  },
+                  "stop": {
+                    "x": 0.88,
+                    "y": 1
+                  }
+                }
+              }
+            },
+            {
+              "appearance": "tinted",
+              "value": {
+                "solid": "display-p3:.65,.65,.65,1"
+              }
+            }
+          ],
+          "hidden-specializations": [
+            {
+              "value": false
+            },
+            {
+              "appearance": "tinted",
+              "value": true
+            }
+          ]
+        },
+        {
+          "name": "Continuous Shell",
+          "image-name": "shell.svg",
+          "glass": true,
+          "fill-specializations": [
+            {
+              "value": {
+                "linear-gradient": [
+                  "display-p3:1,1,.99,1",
+                  "display-p3:.8,.86,.94,1"
+                ],
+                "orientation": {
+                  "start": {
+                    "x": 0.12,
+                    "y": 0
+                  },
+                  "stop": {
+                    "x": 0.88,
+                    "y": 1
+                  }
+                }
+              }
+            },
+            {
+              "appearance": "dark",
+              "value": {
+                "linear-gradient": [
+                  "display-p3:1,1,.99,1",
+                  "display-p3:.8,.86,.94,1"
+                ],
+                "orientation": {
+                  "start": {
+                    "x": 0.12,
+                    "y": 0
+                  },
+                  "stop": {
+                    "x": 0.88,
+                    "y": 1
+                  }
+                }
+              }
+            },
+            {
+              "appearance": "tinted",
+              "value": {
+                "solid": "display-p3:.72,.72,.72,1"
+              }
+            }
+          ]
+        }
+      ],
+      "lighting": "individual",
+      "specular": true,
+      "translucency": {
+        "enabled": true,
+        "value": 0.34
+      },
+      "refractivity": {
+        "enabled": true,
+        "strength": 0.33,
+        "depth": 0.2
+      },
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.18
+      }
+    },
+    {
+      "name": "Smoked Reel Bay",
+      "layers": [
+        {
+          "name": "Recessed Bay",
+          "image-name": "window.svg",
+          "glass": true,
+          "fill-specializations": [
+            {
+              "value": {
+                "linear-gradient": [
+                  "display-p3:.28,.29,.4,1",
+                  "display-p3:.075,.09,.18,1"
+                ],
+                "orientation": {
+                  "start": {
+                    "x": 0.12,
+                    "y": 0
+                  },
+                  "stop": {
+                    "x": 0.88,
+                    "y": 1
+                  }
+                }
+              }
+            },
+            {
+              "appearance": "dark",
+              "value": {
+                "linear-gradient": [
+                  "display-p3:.28,.29,.4,1",
+                  "display-p3:.075,.09,.18,1"
+                ],
+                "orientation": {
+                  "start": {
+                    "x": 0.12,
+                    "y": 0
+                  },
+                  "stop": {
+                    "x": 0.88,
+                    "y": 1
+                  }
+                }
+              }
+            },
+            {
+              "appearance": "tinted",
+              "value": {
+                "solid": "display-p3:.24,.24,.24,1"
+              }
+            }
+          ]
+        }
+      ],
+      "lighting": "combined",
+      "specular": true,
+      "translucency": {
+        "enabled": true,
+        "value": 0.26
+      },
+      "refractivity": {
+        "enabled": true,
+        "strength": 0.18,
+        "depth": 0.12
+      },
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.11
+      }
     }
   ],
   "supported-platforms": {
-    "circles": [
-      "watchOS"
-    ],
     "squares": "shared"
   }
 }

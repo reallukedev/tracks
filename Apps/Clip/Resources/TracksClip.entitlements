@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- The full app this App Clip belongs to. Spelled out rather than $(TRACKS_BUNDLE_ID):
+         when automatic signing registers the App Clip's identifier it reads this value as
+         written, without expanding build settings, and fails on the placeholder. A copy built
+         under another bundle id (Config/Local.xcconfig) changes it here too.
+
+         com.apple.developer.on-demand-install-capable isn't listed: Xcode applies it to an
+         App Clip target when it signs. -->
+    <key>com.apple.developer.parent-application-identifiers</key>
+    <array>
+        <string>$(AppIdentifierPrefix)com.luke.tracks</string>
+    </array>
+</dict>
+</plist>

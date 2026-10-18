@@ -1,5 +1,5 @@
 import SwiftUI
-import MotifCore
+import TracksCore
 
 /// How the plays split between the top artists and everyone else: one bar for the whole,
 /// then a row per artist. Shades step down with rank, so the order reads without a key.
@@ -11,7 +11,7 @@ struct ArtistMixCard: View {
 
     var body: some View {
         let mix = summary.artistMix(limit: Self.limit)
-        let total = Double(max(1, summary.captureCount))
+        let total = Double(max(1, mix.whole))
 
         Card {
             VStack(alignment: .leading, spacing: 14) {
@@ -30,7 +30,7 @@ struct ArtistMixCard: View {
                 )
 
                 VStack(spacing: 0) {
-                    ForEach(Array(mix.artists.enumerated()), id: \.element.id) { index, artist in
+                    ForEach(mix.artists.enumerated(), id: \.element.id) { index, artist in
                         NavigationLink(value: Route.artist(artist.id)) {
                             MixRow(
                                 name: Text(artist.name),

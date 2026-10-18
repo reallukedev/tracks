@@ -1,191 +1,160 @@
-// Builds the pieces every frame uses: the record, the iPhone, the Mac window, and breakouts.
-// Each page describes its frames as data and calls these to draw them.
+// Builds the pieces the frames use: the caption, a realistic iPhone, a full-bleed Mac window,
+// and the Cover Flow tiles that carry the app's crate on past the phone. Each page describes
+// its frames as data and calls these, so every frame is measured the same way.
 
-const SVG_NS = "http://www.w3.org/2000/svg";
-
-function el(tag, style = {}, attrs = {}) {
+function el(tag, style = {}, attrs = {}, className = "") {
   const node = document.createElement(tag);
   Object.assign(node.style, style);
   for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
+  if (className) node.className = className;
   return node;
 }
 
 const px = (n) => `${n}px`;
 
-// The icon's record, from AppIcon.icon/Assets, in its own 1024-unit space.
-// `played` is how much of the ring the white arc covers, in degrees. The icon uses 265.
-function record({ cx, cy, r, played = 265, rotate = 0 }) {
-  const box = el("div", {
-    left: px(cx - r),
-    top: px(cy - r),
-    width: px(r * 2),
-    height: px(r * 2),
-    transform: rotate ? `rotate(${rotate}deg)` : "",
-  });
-  box.className = "record";
+// ---------- Caption ----------
 
-  let fine = "";
-  for (let radius = 160; radius <= 328; radius += 4.5) {
-    const alpha = radius % 9 < 4.5 ? 0.05 : 0.025;
-    fine += `<circle cx="512" cy="512" r="${radius}" fill="none" stroke="#fff" stroke-width="0.9" opacity="${alpha}"/>`;
-  }
-
-  const arc = (() => {
-    if (played >= 359.5) {
-      return `<circle cx="512" cy="512" r="226" fill="none" stroke="#fff" stroke-width="66"/>`;
-    }
-    const end = ((-90 + played) * Math.PI) / 180;
-    const x = 512 + 226 * Math.cos(end);
-    const y = 512 + 226 * Math.sin(end);
-    const large = played > 180 ? 1 : 0;
-    return `<path d="M512,286 A226,226 0 ${large} 1 ${x.toFixed(2)},${y.toFixed(2)}" fill="none" stroke="#fff" stroke-width="66" stroke-linecap="round"/>`;
-  })();
-
-  box.innerHTML = `
-    <svg viewBox="178 178 668 668" xmlns="${SVG_NS}">
-      <defs>
-        <radialGradient id="vinylShade" cx="0.5" cy="0.42" r="0.6">
-          <stop offset="0" stop-color="#2a262c"/>
-          <stop offset="1" stop-color="#141216"/>
-        </radialGradient>
-        <filter id="soften" x="-10%" y="-10%" width="120%" height="120%"><feGaussianBlur stdDeviation="9"/></filter>
-        <clipPath id="disc"><circle cx="512" cy="512" r="332"/></clipPath>
-        <linearGradient id="labelShade" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="#ff6a7f"/>
-          <stop offset="1" stop-color="#f23a55"/>
-        </linearGradient>
-      </defs>
-      <circle cx="512" cy="512" r="334" fill="url(#vinylShade)"/>
-      ${fine}
-      <circle cx="512" cy="512" r="302" fill="none" stroke="#fff" stroke-width="5" opacity="0.22"/>
-      <circle cx="512" cy="512" r="150" fill="none" stroke="#fff" stroke-width="5" opacity="0.22"/>
-      <path d="M512.0,512.0 L665.99,222.39 A328,328 0 0 1 801.61,358.01 ZM512.0,512.0 L358.01,801.61 A328,328 0 0 1 222.39,665.99 ZM394.00,512.00 a118.00,118.00 0 1,0 236.00,0 a118.00,118.00 0 1,0 -236.00,0 Z" fill="#fff" fill-rule="evenodd" opacity="0.11" filter="url(#soften)" clip-path="url(#disc)"/>
-      <circle cx="512" cy="512" r="226" fill="none" stroke="#fff" stroke-width="66" opacity="0.12"/>
-      ${arc}
-      <path d="M398,512 a114,114 0 1,0 228,0 a114,114 0 1,0 -228,0 ZM492,512 a20,20 0 1,0 40,0 a20,20 0 1,0 -40,0 Z" fill="url(#labelShade)" fill-rule="evenodd"/>
-      <circle cx="512" cy="512" r="333" fill="none" stroke="#fff" stroke-width="1.2" opacity="0.18"/>
-    </svg>`;
-  return box;
-}
-
-// Faint rings centred on a point, like the grooves of a record too big to fit the set.
-function grooves({ cx, cy, from, to, step, opacity = 0.07, width = 3, fade }) {
-  const size = to * 2 + 20;
-  const box = el("div", { position: "absolute", left: px(cx - size / 2), top: px(cy - size / 2), width: px(size), height: px(size) });
-  if (fade) {
-    const mask = `radial-gradient(circle at center, transparent ${fade[0]}px, #000 ${fade[1]}px, #000 ${fade[2]}px, transparent ${fade[3]}px)`;
-    box.style.maskImage = mask;
-    box.style.webkitMaskImage = mask;
-  }
-  let rings = "";
-  for (let radius = from; radius <= to; radius += step) {
-    rings += `<circle cx="${size / 2}" cy="${size / 2}" r="${radius}" fill="none" stroke="#fff" stroke-width="${width}" opacity="${opacity}"/>`;
-  }
-  box.innerHTML = `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="${SVG_NS}">${rings}</svg>`;
-  return box;
-}
-
-// An iPhone 6.9" at `s` pixels per point. The screen is 440 × 956 pt, like the captures.
-function iphone({ src, left, top, s }) {
-  const phone = el("div", { left: px(left), top: px(top) });
-  phone.className = "iphone";
-  phone.style.setProperty("--s", s);
-
-  const buttons = [
-    { side: "left", top: 172, height: 30 },
-    { side: "left", top: 232, height: 60 },
-    { side: "left", top: 306, height: 60 },
-    { side: "right", top: 262, height: 96 },
-    { side: "right", top: 560, height: 62 },
-  ];
-  for (const b of buttons) {
-    const button = el("div", {
-      top: px(b.top * s),
-      height: px(b.height * s),
-      [b.side]: px(-2.6 * s),
-    });
-    button.className = "button";
-    phone.append(button);
-  }
-
-  const bezel = el("div");
-  bezel.className = "bezel";
-  const screen = el("div");
-  screen.className = "screen";
-  const img = el("img", {}, { src });
-  const island = el("div");
-  island.className = "island";
-  screen.append(img, island);
-  bezel.append(screen);
-  phone.append(bezel);
-  return phone;
-}
-
-// Where a point in a 1320 × 2868 capture lands on a phone drawn by iphone().
-function onPhone(phone, x, y) {
-  const k = (440 * phone.s) / 1320;
-  const inset = 11 * phone.s;
-  return { x: phone.left + inset + x * k, y: phone.top + inset + y * k, k };
-}
-
-// A Mac window capture (2360 × 1600, the window at 1180 × 800 pt), drawn `width` pixels wide.
-function macWindow({ src, left, top, width, natural = [2360, 1600] }) {
-  const height = (width * natural[1]) / natural[0];
-  const box = el("div", { left: px(left), top: px(top), width: px(width), height: px(height) });
-  box.className = "window";
-  box.append(el("img", {}, { src }));
-  return box;
-}
-
-// A rectangle of a capture, scaled by `k` and centred on (cx, cy).
-function breakout({ src, natural, crop, k, cx, cy, radius }) {
-  const [x, y, w, h] = crop;
-  const box = el("div", {
-    left: px(cx - (w * k) / 2),
-    top: px(cy - (h * k) / 2),
-    width: px(w * k),
-    height: px(h * k),
-    borderRadius: px(radius),
-    backgroundImage: `url("${src}")`,
-    backgroundSize: `${natural[0] * k}px ${natural[1] * k}px`,
-    backgroundPosition: `${-x * k}px ${-y * k}px`,
-  });
-  box.className = "breakout";
-  return box;
-}
-
-function copy({ top, headline, sub, size, subSize, subWidth, align = "center", left = 0, right = 0 }) {
-  const block = el("div", { top: px(top), left: px(left), right: px(right), textAlign: align });
-  block.className = "copy";
-  const h = el("h1", { fontSize: px(size) });
-  h.className = "headline";
-  h.textContent = headline;
-  block.append(h);
-  if (sub) {
-    const p = el("p", { fontSize: px(subSize), maxWidth: px(subWidth), marginTop: px(subSize * 0.62), lineHeight: 1.26 });
-    if (align !== "center") p.style.marginLeft = "0";
-    p.className = "sub";
-    p.textContent = sub;
-    block.append(p);
-  }
+// Two lines in the accent colour, the idea in Semibold and the specifics in Regular, at one
+// size, like Apple's own App Store captions. `inline` sets both on one line (the Mac band).
+function caption({ left, width, top, idea, detail, size, inline = false }) {
+  const block = el("div", { left: px(left), width: px(width), top: px(top), fontSize: px(size) }, {}, "caption");
+  const a = el("span", {}, {}, "idea");
+  a.textContent = idea;
+  const b = el("span", {}, {}, "detail");
+  b.textContent = detail;
+  block.append(a, inline ? document.createTextNode(" ") : el("br"), b);
   return block;
 }
 
-function pills({ top, items, size, gap, width, left = 0 }) {
-  const row = el("div", { position: "absolute", top: px(top), left: px(left), width: px(width), gap: px(gap) });
-  row.className = "pills";
-  for (const text of items) {
-    const pill = el("span", { fontSize: px(size), padding: `${size * 0.42}px ${size * 0.78}px` });
-    pill.className = "pill";
-    pill.textContent = text;
-    row.append(pill);
+// ---------- Covers ----------
+
+// The app's own placeholder cover (GeneratedCover in ArtworkView.swift), redrawn as SVG so it
+// stays sharp at any size: a two-tone gradient and one soft shape, from a hash of the name.
+function hashSeed(seed) {
+  let value = 0xcbf29ce484222325n;
+  for (const byte of new TextEncoder().encode(seed)) {
+    value ^= BigInt(byte);
+    value = (value * 0x100000001b3n) & 0xffffffffffffffffn;
   }
-  return row;
+  return Number(value & 0x7fffffffn);
 }
 
+function hsb(h, s, b) {
+  const f = (n) => {
+    const k = (n + h * 6) % 6;
+    return b - b * s * Math.max(0, Math.min(k, 4 - k, 1));
+  };
+  return `rgb(${Math.round(f(5) * 255)}, ${Math.round(f(3) * 255)}, ${Math.round(f(1) * 255)})`;
+}
+
+let coverCount = 0;
+function coverSVG(seed) {
+  const hash = hashSeed(seed);
+  const hue = (hash % 360) / 360;
+  const shift = 0.06 + ((hash >> 9) % 18) / 100;
+  const motif = (hash >> 17) % 4;
+  const id = `c${coverCount++}`;
+  const light = 'fill="#fff" fill-opacity="0.22"';
+  let art = "";
+  if (motif === 0) {
+    art = `<circle cx="78" cy="72" r="40" ${light}/>`;
+  } else if (motif === 1) {
+    for (let i = 0; i < 4; i++) {
+      art += `<circle cx="78" cy="78" r="${50 - 100 * (0.18 + i * 0.14)}" fill="none" stroke="#fff" stroke-opacity="0.22" stroke-width="3.5"/>`;
+    }
+  } else if (motif === 2) {
+    for (let i = -1; i <= 2.0001; i += 0.22) {
+      art += `<line x1="${100 * i}" y1="100" x2="${100 * (i + 1)}" y2="0" stroke="#fff" stroke-opacity="0.14" stroke-width="6"/>`;
+    }
+  } else {
+    art = `<path d="M0 62 C35 35 60 85 100 50 L100 100 L0 100 Z" ${light}/>`;
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="none">
+    <defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="${hsb(hue, 0.55, 0.95)}"/>
+      <stop offset="1" stop-color="${hsb((hue + shift) % 1, 0.75, 0.55)}"/>
+    </linearGradient></defs>
+    <rect width="100" height="100" fill="url(#${id})"/>${art}
+  </svg>`;
+}
+
+// A mix's artwork, as the crate draws it: four covers in a square, turned a little on its
+// vertical axis so its outer edge stands slightly taller, the way the app's side tiles do.
+function mixTile({ seeds, size, left, top, turn, perspective }) {
+  const node = el("div", {
+    left: px(left), top: px(top), width: px(size), height: px(size),
+    transform: `perspective(${perspective}px) rotateY(${turn}deg)`,
+  }, {}, "tile");
+  node.innerHTML = seeds.map(coverSVG).join("");
+  return node;
+}
+
+// ---------- iPhone ----------
+
+// An iPhone with a 402 x 874 pt screen, like the captures, at `s` pixels per point.
+const PHONE = { screen: [402, 874], band: 3.2, bezel: 4.6, radius: 55, island: [124, 37, 11.5] };
+const phoneSize = (s) => {
+  const edge = PHONE.band + PHONE.bezel;
+  return { w: (PHONE.screen[0] + edge * 2) * s, h: (PHONE.screen[1] + edge * 2) * s, edge: edge * s };
+};
+
+function iphone({ src, left, top, s }) {
+  const { w, h } = phoneSize(s);
+  const b = PHONE.band * s, z = PHONE.bezel * s, r = PHONE.radius * s;
+  const phone = el("div", { left: px(left), top: px(top), width: px(w), height: px(h) }, {}, "iphone");
+  const buttons = [
+    { side: "left", top: 172, height: 28 },
+    { side: "left", top: 232, height: 60 },
+    { side: "left", top: 306, height: 60 },
+    { side: "right", top: 262, height: 96 },
+    { side: "right", top: 560, height: 66 },
+  ];
+  for (const btn of buttons) {
+    phone.append(el("div", {
+      top: px(btn.top * s), height: px(btn.height * s), width: px(3 * s),
+      borderRadius: px(1.5 * s), [btn.side]: px(-2.2 * s),
+    }, {}, "button"));
+  }
+  phone.append(el("div", { borderRadius: px(r + z + b) }, {}, "band"));
+  phone.append(el("div", { inset: px(b), borderRadius: px(r + z) }, {}, "bezel"));
+  const screen = el("div", { left: px(b + z), top: px(b + z), width: px(PHONE.screen[0] * s), height: px(PHONE.screen[1] * s), borderRadius: px(r) }, {}, "screen");
+  screen.append(el("img", {}, { src }));
+  const [iw, ih, it] = PHONE.island;
+  screen.append(el("div", {
+    width: px(iw * s), height: px(ih * s), top: px(it * s), left: px(((PHONE.screen[0] - iw) / 2) * s), borderRadius: px((ih / 2) * s),
+  }, {}, "island"));
+  phone.append(screen);
+  return phone;
+}
+
+// Where a pixel of a 1206 x 2622 capture lands on a phone drawn by iphone().
+function onPhone({ left, top, s }, x, y) {
+  const k = (PHONE.screen[0] * s) / 1206;
+  const e = phoneSize(s).edge;
+  return { x: left + e + x * k, y: top + e + y * k, k };
+}
+
+// ---------- Mac ----------
+
+// A window capture shown full bleed: `crop` (in the capture's pixels) is scaled to fill the
+// box exactly, so nothing is stretched.
+function macShot({ src, crop, left, top, width, height }) {
+  const [x, y, w] = crop;
+  const k = width / w;
+  const box = el("div", { left: px(left), top: px(top), width: px(width), height: px(height) }, {}, "mac-window");
+  box.append(el("img", { left: px(-x * k), top: px(-y * k), width: px(crop[4] * k), height: px(crop[5] * k) }, { src }));
+  return box;
+}
+
+// ---------- Frames ----------
+
 function frame(index, width, height) {
-  const node = el("section", { left: px(index * width), width: px(width), height: px(height) });
-  node.className = "frame";
+  const node = el("section", { left: px(index * width), width: px(width), height: px(height) }, {}, "frame");
   node.dataset.index = index;
   return node;
+}
+
+function ready() {
+  const images = [...document.images].map((img) => img.decode().catch(() => {}));
+  Promise.all([document.fonts.ready, ...images]).then(() => { document.body.dataset.ready = "1"; });
 }

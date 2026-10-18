@@ -1,13 +1,13 @@
 import Foundation
 
-/// A `motif://` link: where a tap on a widget opens the app.
+/// A `tracks://` link: where a tap on a widget opens the app.
 ///
 /// Plain Foundation, with no app types, because the widget extension compiles this file too:
 /// the widgets build the links and the apps follow them (see `DeepLink+Routing.swift`).
 ///
-///     motif://summary
-///     motif://history
-///     motif://song?title=Tidewater&artist=June%20Atlas
+///     tracks://summary
+///     tracks://history
+///     tracks://song?title=Tidewater&artist=June%20Atlas
 enum DeepLink: Hashable, Sendable {
     /// The Listening widget's week.
     case summary
@@ -18,7 +18,7 @@ enum DeepLink: Hashable, Sendable {
     case song(title: String, artistName: String)
 
     /// Registered under `CFBundleURLTypes` in both apps' Info.plist.
-    static let scheme = "motif"
+    static let scheme = "tracks"
 
     var url: URL {
         var components = URLComponents()

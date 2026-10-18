@@ -1,8 +1,8 @@
 import Foundation
 import MusicKit
 import MediaPlayer
-import MotifCore
-import MotifMusic
+import TracksCore
+import TracksMusic
 
 /// Dumps everything iOS reports about the current track, to find fields that separate radio
 /// from on-demand. `MusicPlayer.Queue.Entry.Item` has no `.station` case, so the candidates

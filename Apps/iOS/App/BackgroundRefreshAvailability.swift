@@ -1,7 +1,7 @@
 import UIKit
 import Observation
 
-/// Whether iOS will give Motif background time for ``BackgroundRefresh``, kept current as it
+/// Whether iOS will give Tracks background time for ``BackgroundRefresh``, kept current as it
 /// changes in Settings or Control Center.
 @Observable
 final class BackgroundRefreshAvailability {
@@ -9,7 +9,7 @@ final class BackgroundRefreshAvailability {
 
     enum Blocker {
         case lowPowerMode
-        /// The person turned Background App Refresh off, for Motif or for everything.
+        /// The person turned Background App Refresh off, for Tracks or for everything.
         case turnedOff
         /// Screen Time or a device profile doesn't allow it.
         case restricted

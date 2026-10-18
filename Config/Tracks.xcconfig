@@ -1,0 +1,78 @@
+// Shared build configuration for every target.
+//
+// To build your own copy, don't edit this file. Copy Local.example.xcconfig to
+// Local.xcconfig (gitignored) and set your team and bundle identifier there. It's
+// included at the end, so its values win.
+
+// ── The maintainer's signing identity ───────────────────────────────────────────
+// Committed so the published app builds from a clean checkout. Team IDs aren't secret;
+// every signed binary contains one.
+DEVELOPMENT_TEAM = W3Y3Z7CJH2
+
+// Don't change it once the app ships: the App Group holding the history, the iCloud
+// container, the Last.fm sign-in in the Keychain, the widgets and the MusicKit service are
+// all keyed to it. A new identifier would be a new app with none of that data.
+TRACKS_BUNDLE_ID = com.luke.tracks
+// ────────────────────────────────────────────────────────────────────────────────
+
+// The version people see, and the build number App Store Connect requires to go up with
+// every upload. Both Info.plists read these.
+MARKETING_VERSION = 1.0
+CURRENT_PROJECT_VERSION = 1
+
+// App Group identifiers differ by platform: iOS uses `group.<name>`, macOS needs the team
+// ID prefix. An App Group only shares data between an app and its extensions on one
+// device; cross-device sync is the CloudKit container below.
+TRACKS_APP_GROUP[sdk=iphoneos*]         = group.$(TRACKS_BUNDLE_ID)
+TRACKS_APP_GROUP[sdk=iphonesimulator*]  = group.$(TRACKS_BUNDLE_ID)
+TRACKS_APP_GROUP[sdk=macosx*]           = $(DEVELOPMENT_TEAM).group.$(TRACKS_BUNDLE_ID)
+
+// Motif's App Group, from the app Tracks replaces. Tracks joins it to find Motif's history on
+// the same device and bring it over (see MotifImport). Read only; never renamed.
+TRACKS_MOTIF_APP_GROUP[sdk=iphoneos*]        = group.com.luke.motif
+TRACKS_MOTIF_APP_GROUP[sdk=iphonesimulator*] = group.com.luke.motif
+TRACKS_MOTIF_APP_GROUP[sdk=macosx*]          = $(DEVELOPMENT_TEAM).group.com.luke.motif
+
+// The CloudKit container for sync, the same on both platforms. Automatic signing creates
+// it on the first build, which needs `-allowProvisioningUpdates` (build.sh passes it).
+TRACKS_ICLOUD_CONTAINER = iCloud.$(TRACKS_BUNDLE_ID)
+
+// Last.fm credentials identify the application, not the user. Register one at
+// https://www.last.fm/api/account/create.
+//
+// Leave these empty, since this file is committed. Put real values in
+// Config/Secrets.xcconfig (gitignored), starting from Secrets.example.xcconfig. Without
+// them the app still runs and reports that Last.fm isn't set up.
+TRACKS_LASTFM_API_KEY =
+TRACKS_LASTFM_SECRET =
+
+// SharePlay's relay, for passengers joining by code from Tracks’ App Clip, which can't reach
+// the host's iPhone nearby: a Supabase project's host (no scheme, since // starts a comment
+// here) and its publishable key. Every message on it is sealed with the code's own key.
+// Empty, SharePlay by code works nearby only. Real values go in Secrets.xcconfig.
+TRACKS_RELAY_HOST =
+TRACKS_RELAY_KEY =
+
+// YES once the App Clip's default experience is live in App Store Connect: SharePlay's code
+// then holds Apple's App Clip link, which opens Tracks where it's installed and the App Clip
+// where it isn't. Until then the code holds a tracks:// link, for iPhones with Tracks.
+TRACKS_APP_CLIP_LIVE = NO
+
+SWIFT_VERSION = 6.0
+SWIFT_APPROACHABLE_CONCURRENCY = YES
+SWIFT_STRICT_CONCURRENCY = complete
+
+IPHONEOS_DEPLOYMENT_TARGET = 27.0
+MACOSX_DEPLOYMENT_TARGET = 27.0
+
+CODE_SIGN_STYLE = Automatic
+
+// CarPlay Audio is approved for Tracks. Enable CarPlay Audio App (CarPlay framework) under
+// Additional Capabilities for com.luke.tracks in the developer portal. Automatic signing
+// then includes the approved entitlement in new profiles, including Xcode Cloud exports.
+TRACKS_IOS_ENTITLEMENTS = Apps/iOS/Resources/Tracks-CarPlay.entitlements
+
+// Optional, and last so they override the values above. A fresh clone builds for the
+// simulator and as an unsigned Mac app without either.
+#include? "Local.xcconfig"
+#include? "Secrets.xcconfig"

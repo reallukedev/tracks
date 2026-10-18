@@ -9,7 +9,7 @@ struct Card<Content: View>: View {
         content
             .padding(padding)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(CardBackground())
+            .background { CardBackground() }
     }
 }
 
@@ -17,11 +17,22 @@ struct CardBackground: View {
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous)
         #if os(iOS)
-        shape.fill(Color(.secondarySystemGroupedBackground))
+        CardFill().clipShape(shape)
         #else
-        shape
-            .fill(.background.secondary)
+        CardFill()
+            .clipShape(shape)
             .overlay { shape.strokeBorder(.separator.opacity(0.6), lineWidth: 0.5) }
+        #endif
+    }
+}
+
+/// A card's fill alone, for something that has to match the card it sits on.
+struct CardFill: View {
+    var body: some View {
+        #if os(iOS)
+        Color(.secondarySystemGroupedBackground)
+        #else
+        Rectangle().fill(.background.secondary)
         #endif
     }
 }

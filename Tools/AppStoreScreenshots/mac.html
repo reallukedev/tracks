@@ -2,107 +2,57 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Motif Mac Screenshots</title>
+<title>Tracks Mac Screenshots</title>
 <link rel="stylesheet" href="shared.css">
 <script src="components.js"></script>
 </head>
 <body>
 <div class="canvas" id="canvas"></div>
 <script>
-// Mac: 2880 × 1800 per frame, five frames on one canvas, like the iPhone set.
-const W = 2880, H = 1800, N = 5;
-const RAW = "../../build/raw/mac/";
-const IPHONE_RAW = "../../build/raw/iphone/";
-const NATURAL = [2360, 1600];
+// Mac: 2880 x 1800 per frame, ten frames, the way Apple shows its own Mac apps: the window
+// full bleed at its own resolution, under a thin caption band in the iPhone set's style.
+const W = 2880, H = 1800, N = 10;
+const RAW2 = "../../build/raw2/mac/", RAW3 = "../../build/raw3/mac/";
 
 const canvas = document.getElementById("canvas");
 Object.assign(canvas.style, { width: px(W * N), height: px(H) });
 
-const back = el("div"); back.className = "layer";
-const front = el("div"); front.className = "layer";
-canvas.append(back);
-
-// The hero record slides out of the window's right edge, the way it slides out of the
-// phone on iPhone. Its grooves run on through the rest of the set.
-const hero = { cx: 2250, cy: 930, r: 560 };
-back.append(grooves({ cx: hero.cx, cy: hero.cy, from: 680, to: 13600, step: 110, opacity: 0.1, width: 3.5, fade: [560, 980, 11000, 13500] }));
-
-// The closing record comes out from behind the iPhone, the way the hero one comes out of
-// the window on the first frame.
-const finale = { cx: 4 * W + 2440, cy: 1030, r: 400 };
-back.append(grooves({ cx: finale.cx, cy: finale.cy, from: 500, to: 1500, step: 48, opacity: 0.08, width: 3, fade: [400, 540, 1100, 1500] }));
-
-const HEAD = { size: 112, subSize: 48, subWidth: 1900 };
-const WIN_W = 2080;
-const winTop = 440;
-const winLeft = (i) => i * W + (W - WIN_W) / 2;
-const winScale = WIN_W / NATURAL[0];
+const BAND = 216;
+const CAPTION = { left: 120, width: W - 240, size: 54, inline: true };
+// Window captures are 2880 x 1800: shown 1:1 under the band, losing only their foot.
+const WINDOW = [0, 0, 2880, H - BAND, 2880, 1800];
 
 const frames = [
+  { idea: "Cover Flow is back.", detail: "Flip through your stations and mixes.", src: RAW2 + "listen-now.png" },
+  { idea: "Radio that learns your taste.", detail: "Plus live stations and a mood for every moment.", src: RAW3 + "radio.png" },
+  { idea: "Fills the room.", detail: "Now Playing opens out to the whole window.", src: RAW2 + "full-player.png" },
+  { idea: "Music for every mood.", detail: "Each one picked from your own songs.", src: RAW3 + "mood-chill.png" },
   {
-    headline: "You listen.\nMotif remembers.",
-    sub: "Every song you play in Apple Music, kept and counted. Radio included.",
-    copy: { top: 140, size: 148, subSize: 52, subWidth: 1180, align: "left", inset: 200 },
-    build(i) {
-      front.append(record({ cx: i * W + hero.cx, cy: hero.cy, r: hero.r }));
-      front.append(macWindow({ src: RAW + "summary.png", left: i * W + 200, top: 720, width: 1720 }));
-    },
+    idea: "Turn your Mac into a stage.", detail: "The visualizer moves to every beat.", src: RAW3 + "stage.png",
+    // Full screen at 3456 x 2234 with the notch's black strip in its top 64 px. It's taller
+    // than the frame, so keep rows 230 to 2131: the whole cover, the bars and the progress
+    // line, dropping the strip and the "Next" line, scaled to the frame's width.
+    crop: [0, 230, 3456, 1901, 3456, 2234],
   },
-  {
-    headline: "Every song you've played.",
-    sub: "A sortable table of everything you've heard, with radio and recovered songs marked.",
-    build(i) {
-      front.append(macWindow({ src: RAW + "history.png", left: winLeft(i), top: winTop, width: WIN_W }));
-    },
-  },
-  {
-    headline: "Your year in artists.",
-    sub: "Top songs, artists and albums for any week, month or year, and how far each one moved.",
-    build(i) {
-      front.append(macWindow({ src: RAW + "artists-year.png", left: winLeft(i), top: winTop, width: WIN_W }));
-    },
-  },
-  {
-    headline: "When you listen, hour by hour.",
-    sub: "A listening clock, and a heat map of your whole week.",
-    build(i) {
-      const left = winLeft(i);
-      front.append(macWindow({ src: RAW + "rhythm.png", left, top: winTop, width: WIN_W }));
-      const [x, y, w, h] = [1123, 169, 1186, 678];
-      front.append(breakout({
-        src: RAW + "rhythm.png", natural: NATURAL, crop: [x, y, w, h], k: winScale * 1.22,
-        cx: left + (x + w / 2) * winScale + 40, cy: winTop + (y + h / 2) * winScale + 40, radius: 44,
-      }));
-    },
-  },
-  {
-    headline: "On your Mac and iPhone.",
-    sub: "Synced through your own iCloud. No account, no servers, no tracking.",
-    build(i) {
-      // The two devices stand on one floor, overlapping, and the pair is centred in the frame.
-      const floor = 1700, macW = 1640, phoneS = 1.26, overlap = 140;
-      const macH = (macW * NATURAL[1]) / NATURAL[0];
-      const phoneW = 462 * phoneS, phoneH = 978 * phoneS;
-      const left = i * W + (W - (macW + phoneW - overlap)) / 2;
-      front.append(record({ cx: finale.cx, cy: finale.cy, r: finale.r, played: 360 }));
-      front.append(macWindow({ src: RAW + "artist.png", left, top: floor - macH, width: macW }));
-      front.append(iphone({ src: IPHONE_RAW + "summary.png", left: left + macW - overlap, top: floor - phoneH, s: phoneS }));
-    },
-  },
+  { idea: "Your listening, at a glance.", detail: "Any week, month or year.", src: RAW2 + "summary.png" },
+  { idea: "Charts, but yours.", detail: "Your top artists, songs and albums.", src: RAW3 + "top-artists.png" },
+  { idea: "Every song you play, kept.", detail: "Even the ones on the radio.", src: RAW3 + "history.png" },
+  { idea: "Just ask Siri.", detail: "“Play my station in Tracks.”", src: RAW2 + "listen-now.png" },
+  { idea: "Yours, and only yours.", detail: "No account, no ads, no tracking.", type: true },
 ];
 
 frames.forEach((spec, i) => {
-  frame(i, W, H);
-  const c = spec.copy || { top: 118, ...HEAD, inset: 120 };
-  front.append(copy({
-    top: c.top, headline: spec.headline, sub: spec.sub, size: c.size, subSize: c.subSize, subWidth: c.subWidth,
-    align: c.align || "center", left: i * W + c.inset, right: (N - 1 - i) * W + c.inset,
-  }));
-  spec.build(i);
+  const f = frame(i, W, H);
+  canvas.append(f);
+  if (spec.type) {
+    f.append(caption({ ...CAPTION, inline: false, top: H / 2 - 120, size: 100, idea: spec.idea, detail: spec.detail }));
+    return;
+  }
+  f.append(caption({ ...CAPTION, top: (BAND - CAPTION.size * 1.2) / 2 + 4, idea: spec.idea, detail: spec.detail }));
+  f.append(macShot({ src: spec.src, crop: spec.crop || WINDOW, left: 0, top: BAND, width: W, height: H - BAND }));
 });
 
-canvas.append(front);
-document.fonts.ready.then(() => { document.body.dataset.ready = "1"; });
+ready();
 </script>
 </body>
 </html>
