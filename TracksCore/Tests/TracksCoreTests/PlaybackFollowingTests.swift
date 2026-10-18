@@ -5,7 +5,7 @@ import SwiftData
 
 /// Which captures a play-back marks, and when it stops listening to the player.
 @MainActor
-@Suite("Playback following")
+@Suite("Playback following", .timeLimit(.minutes(1)))
 struct PlaybackFollowingTests {
     let store: TracksStore
     let service = FakePlaybackService()

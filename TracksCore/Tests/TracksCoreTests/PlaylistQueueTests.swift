@@ -6,7 +6,7 @@ import SwiftData
 /// The playlist queue under failure and overlap: what a failed write costs a song, and that
 /// two drains never write one song twice.
 @MainActor
-@Suite("Playlist queue")
+@Suite("Playlist queue", .timeLimit(.minutes(1)))
 struct PlaylistQueueTests {
     let store: TracksStore
     let writer = ScriptedPlaylistWriter()

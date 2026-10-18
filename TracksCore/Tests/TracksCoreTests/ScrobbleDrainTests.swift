@@ -115,7 +115,7 @@ struct ScrobbleResponseTests {
 /// The scrobble queue against a fake Last.fm: what a failure costs the rows, and that drains
 /// don't overlap.
 @MainActor
-@Suite("Scrobble drain")
+@Suite("Scrobble drain", .timeLimit(.minutes(1)))
 struct ScrobbleDrainTests {
     let store: TracksStore
     let lastFM = FakeLastFM()
@@ -531,7 +531,8 @@ final class FakeLastFM: @unchecked Sendable {
     }
 }
 
-/// Holds whatever waits on it until opened.
+/// Holds whatever waits on it until opened, or until its task is cancelled, so a test that
+/// times out or fails never leaves a request parked behind it.
 final class Gate: @unchecked Sendable {
     private let lock = NSLock()
     private var isOpen = false
@@ -539,7 +540,7 @@ final class Gate: @unchecked Sendable {
     func open() { lock.withLock { isOpen = true } }
 
     func wait() async {
-        while !lock.withLock({ isOpen }) {
+        while !Task.isCancelled, !lock.withLock({ isOpen }) {
             try? await Task.sleep(for: .milliseconds(5))
         }
     }
@@ -559,18 +560,13 @@ final class TestClock: @unchecked Sendable {
     }
 }
 
-/// Polls rather than sleeping a fixed time, which a slow Simulator outlasts.
+/// Polls rather than sleeping a fixed time, which a slow Simulator outlasts. It has no
+/// deadline of its own, since a wall clock runs out on a busy machine while the work is still
+/// on its way; the calling suite's `.timeLimit` bounds it instead, and cancelling the test
+/// ends the wait.
 @MainActor
-func waitUntil(
-    timeout: Duration = .seconds(5),
-    _ condition: () -> Bool
-) async throws {
-    let deadline = ContinuousClock.now + timeout
+func waitUntil(_ condition: () -> Bool) async throws {
     while !condition() {
-        guard ContinuousClock.now < deadline else {
-            Issue.record("Timed out waiting")
-            return
-        }
         try await Task.sleep(for: .milliseconds(5))
     }
 }

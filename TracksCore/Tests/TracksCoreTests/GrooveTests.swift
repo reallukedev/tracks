@@ -1,3 +1,4 @@
+import Accelerate
 import AVFoundation
 import Testing
 import Foundation
@@ -78,77 +79,94 @@ enum Band {
         var testDescription: String { rawValue }
     }
 
+    /// Each sound is worked out once, sample by sample, and then added wherever it plays, so
+    /// a song costs a few hundred thousand sines rather than tens of millions: the same
+    /// samples, to the bit, without minutes of a test run spent drawing them.
     static func song(bpm: Double, style: Style, start: Double, seconds: Double = 20, rate: Double = Band.rate) -> [Float] {
         var random = SeededRandom("\(bpm)\(style)")
         let count = Int(rate * seconds)
         var out = [Float](repeating: 0, count: count)
         let beat = 60 / bpm
         func noise() -> Double { Double(random.next() % 20_000) / 10_000 - 1 }
-        func add(at songTime: Double, length: Double, _ sound: (Double) -> Double) {
+        func sound(length: Double, _ shape: (Double) -> Double) -> [Float] {
+            (0..<Int(length * rate)).map { offset in Float(shape(Double(offset) / rate)) }
+        }
+        func add(_ sound: [Float], at songTime: Double) {
             let first = Int(((songTime - start) * rate).rounded())
-            for offset in 0..<Int(length * rate) where first + offset >= 0 && first + offset < count {
-                out[first + offset] += Float(sound(Double(offset) / rate))
+            let from = max(0, -first), to = min(sound.count, count - first)
+            guard from < to else { return }
+            out.withUnsafeMutableBufferPointer { out in
+                sound.withUnsafeBufferPointer { sound in
+                    let into = out.baseAddress! + first + from
+                    vDSP_vadd(sound.baseAddress! + from, 1, into, 1, into, 1, vDSP_Length(to - from))
+                }
             }
         }
-        let kick: (Double) -> Double = { time in
+        let kick = sound(length: 0.4) { time in
             0.8 * min(1, time / 0.003) * exp(-time / 0.11) * sin(2 * .pi * (50 * time + 2.7 * (1 - exp(-time / 0.03))))
         }
         let snareNoise = (0..<Int(rate * 0.3)).map { _ in noise() }
-        let snare: (Double) -> Double = { time in
+        let snare = sound(length: 0.3) { time in
             let noise = snareNoise[min(snareNoise.count - 1, Int(time * rate))]
             return min(1, time / 0.002) * (0.35 * noise * exp(-time / 0.07) + 0.3 * sin(2 * .pi * 190 * time) * exp(-time / 0.05))
         }
         let raw = (0..<Int(rate * 0.1)).map { _ in noise() }
         let hatNoise = zip(raw, [0] + raw).map { $0 - $1 }
-        let hat: (Double) -> Double = { time in 0.12 * hatNoise[min(hatNoise.count - 1, Int(time * rate))] * exp(-time / 0.02) }
+        let hat = sound(length: 0.1) { time in 0.12 * hatNoise[min(hatNoise.count - 1, Int(time * rate))] * exp(-time / 0.02) }
         let roots = [55.0, 55, 65.4, 49]
         let tune = [440.0, 494, 523, 587, 659, 587, 523, 494]
+        var basses: [Double: [Float]] = [:], chords: [Double: [Float]] = [:]
+        for root in Set(roots) {
+            basses[root] = sound(length: beat) { time in
+                0.25 * min(1, time / 0.02) * exp(-time / (beat * 0.8)) * (sin(2 * .pi * root * time) + 0.4 * sin(4 * .pi * root * time))
+            }
+            chords[root] = sound(length: beat * 4) { time in
+                0.05 * min(1, time / 0.3) * (4...6).reduce(0) { $0 + sin(2 * .pi * root * Double($1) * time) }
+            }
+        }
+        var notes: [Double: [Float]] = [:]
+        for note in Set(tune) {
+            notes[note] = sound(length: beat / 2) { time in
+                0.08 * min(1, time / 0.03) * min(1, (beat / 2 - time) / 0.02) * sin(2 * .pi * note * time + 0.3 * sin(2 * .pi * 5 * time))
+            }
+        }
         for index in Int((start / beat).rounded(.down)) - 1...Int(((start + seconds) / beat).rounded(.up)) {
             let time = Double(index) * beat
             let inBar = index % 4
             let root = roots[(index / 4) % 4]
             switch style {
             case .fourOnFloor:
-                add(at: time, length: 0.4, kick)
-                if inBar % 2 == 1 { add(at: time, length: 0.3, snare) }
-                add(at: time + beat / 2, length: 0.1, hat)
+                add(kick, at: time)
+                if inBar % 2 == 1 { add(snare, at: time) }
+                add(hat, at: time + beat / 2)
             case .backbeat:
-                if inBar % 2 == 0 { add(at: time, length: 0.4, kick) }
-                if inBar == 2 { add(at: time + beat / 2, length: 0.4, kick) }
-                if inBar % 2 == 1 { add(at: time, length: 0.3, snare) }
-                add(at: time, length: 0.1, hat)
-                add(at: time + beat / 2, length: 0.1, hat)
+                if inBar % 2 == 0 { add(kick, at: time) }
+                if inBar == 2 { add(kick, at: time + beat / 2) }
+                if inBar % 2 == 1 { add(snare, at: time) }
+                add(hat, at: time)
+                add(hat, at: time + beat / 2)
             case .halfTime:
                 if inBar == 0 {
-                    add(at: time, length: 0.4, kick)
-                    add(at: time + beat * 0.75, length: 0.4, kick)
+                    add(kick, at: time)
+                    add(kick, at: time + beat * 0.75)
                 }
-                if inBar == 2 { add(at: time, length: 0.3, snare) }
-                for sixteenth in 0..<4 { add(at: time + Double(sixteenth) * beat / 4, length: 0.1, hat) }
+                if inBar == 2 { add(snare, at: time) }
+                for sixteenth in 0..<4 { add(hat, at: time + Double(sixteenth) * beat / 4) }
             case .breakbeat:
-                if inBar == 0 { add(at: time, length: 0.4, kick) }
-                if inBar == 2 { add(at: time + beat / 2, length: 0.4, kick) }
-                if inBar % 2 == 1 { add(at: time, length: 0.3, snare) }
-                add(at: time, length: 0.1, hat)
-                add(at: time + beat / 2, length: 0.1, hat)
+                if inBar == 0 { add(kick, at: time) }
+                if inBar == 2 { add(kick, at: time + beat / 2) }
+                if inBar % 2 == 1 { add(snare, at: time) }
+                add(hat, at: time)
+                add(hat, at: time + beat / 2)
             case .ballad:
-                if inBar == 0 { add(at: time, length: 0.4, kick) }
-                if inBar == 2 { add(at: time, length: 0.3, snare) }
+                if inBar == 0 { add(kick, at: time) }
+                if inBar == 2 { add(snare, at: time) }
             }
-            add(at: time, length: beat) { time in
-                0.25 * min(1, time / 0.02) * exp(-time / (beat * 0.8)) * (sin(2 * .pi * root * time) + 0.4 * sin(4 * .pi * root * time))
-            }
+            add(basses[root]!, at: time)
             for eighth in 0..<2 {
-                let note = tune[(index * 2 + eighth) % tune.count]
-                add(at: time + Double(eighth) * beat / 2, length: beat / 2) { time in
-                    0.08 * min(1, time / 0.03) * min(1, (beat / 2 - time) / 0.02) * sin(2 * .pi * note * time + 0.3 * sin(2 * .pi * 5 * time))
-                }
+                add(notes[tune[(index * 2 + eighth) % tune.count]]!, at: time + Double(eighth) * beat / 2)
             }
-            if inBar == 0 {
-                add(at: time, length: beat * 4) { time in
-                    0.05 * min(1, time / 0.3) * (4...6).reduce(0) { $0 + sin(2 * .pi * root * Double($1) * time) }
-                }
-            }
+            if inBar == 0 { add(chords[root]!, at: time) }
         }
         return out
     }
@@ -159,7 +177,12 @@ enum Band {
 
 /// One at a time: each case is seconds of number crunching, and dozens at once hold every
 /// thread the other suites' tasks wait on.
-@Suite("Groove analysis", .serialized)
+///
+/// The limit applies to each case on its own. The slowest, the AAC harness and the held
+/// chords, take under two seconds on a Mac and a few in a busy Simulator, so a minute is
+/// many times what any needs and only a hang, or the analysis turning drastically slower,
+/// reaches it.
+@Suite("Groove analysis", .serialized, .timeLimit(.minutes(1)))
 struct GrooveAnalysisTests {
     @Test("Finds the tempo of a click track, not half or twice it", arguments: [90.0, 120, 128, 170, 174])
     func tempo(bpm: Double) {
