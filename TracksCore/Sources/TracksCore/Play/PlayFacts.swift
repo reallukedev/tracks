@@ -97,9 +97,10 @@ public enum PlayFacts {
     /// Discover, which looks up what else they've made.
     public static func topArtists(in history: ListeningHistory, since start: Date, limit: Int = 8) -> [String] {
         var plays: [String: (count: Int, name: String)] = [:]
-        for capture in history.captures where capture.capturedAt >= start && !capture.artistIdentity.isEmpty {
-            let existing = plays[capture.artistIdentity]
-            plays[capture.artistIdentity] = ((existing?.count ?? 0) + 1, capture.artistName)
+        for capture in history.captures where capture.capturedAt >= start {
+            for credit in capture.credits {
+                plays[credit.identity] = ((plays[credit.identity]?.count ?? 0) + 1, credit.name)
+            }
         }
         let ranked = plays.sorted { lhs, rhs in
             lhs.value.count == rhs.value.count ? lhs.key < rhs.key : lhs.value.count > rhs.value.count
@@ -113,15 +114,17 @@ public enum PlayFacts {
     ///   play counts stay counts.
     public static func favoriteArtists(in history: ListeningHistory, since start: Date, limit: Int = 12, halfLife: TimeInterval? = nil, now: Date = .now) -> [FavoriteArtist] {
         var plays: [String: (count: Int, score: Double, name: String, cover: String?)] = [:]
-        for capture in history.captures where capture.capturedAt >= start && !capture.artistIdentity.isEmpty {
-            let existing = plays[capture.artistIdentity]
+        for capture in history.captures where capture.capturedAt >= start {
             let weight = halfLife.map { pow(0.5, max(0, now.timeIntervalSince(capture.capturedAt)) / $0) } ?? 1
-            plays[capture.artistIdentity] = (
-                (existing?.count ?? 0) + 1,
-                (existing?.score ?? 0) + weight,
-                capture.artistName,
-                capture.artworkURL ?? existing?.cover
-            )
+            for credit in capture.credits {
+                let existing = plays[credit.identity]
+                plays[credit.identity] = (
+                    (existing?.count ?? 0) + 1,
+                    (existing?.score ?? 0) + weight,
+                    credit.name,
+                    capture.artworkURL ?? existing?.cover
+                )
+            }
         }
         return plays
             .sorted { lhs, rhs in lhs.value.score == rhs.value.score ? lhs.key < rhs.key : lhs.value.score > rhs.value.score }
@@ -139,7 +142,7 @@ public enum PlayFacts {
     /// An artist's songs, most played first, for playing them from their tile.
     public static func songs(byArtist identity: String, in history: ListeningHistory, limit: Int = 50) -> [MixSong] {
         var counts: [String: (count: Int, song: MixSong)] = [:]
-        for capture in history.captures where capture.artistIdentity == identity {
+        for capture in history.captures where capture.credits(identity) {
             let count = (counts[capture.songIdentity]?.count ?? 0) + 1
             let earlier = counts[capture.songIdentity]?.song
             counts[capture.songIdentity] = (count, MixSong(

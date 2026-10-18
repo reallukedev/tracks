@@ -199,7 +199,7 @@ private struct ChartListRow: View {
                 .font(.body.weight(.medium))
                 .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
             if let line = entry.detail ?? subtitle {
-                Text(line)
+                CreditedText(text: line, credits: entry.detail == nil ? entry.credits : [], linkStyle: .row)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)

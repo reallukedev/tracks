@@ -27,7 +27,7 @@ struct LibrarySongsTable<Menu: View>: View {
             }
             .width(min: 140, ideal: 220)
             TableColumn("Artist", value: \.artist) { row in
-                Text(row.artist).lineLimit(1).dimmed(!row.isPlayable)
+                ArtistLinks(artist: row.artist, title: row.title, linkStyle: .cell).lineLimit(1).dimmed(!row.isPlayable)
             }
             .width(min: 90, ideal: 130)
             TableColumn("Album", value: \.album) { row in

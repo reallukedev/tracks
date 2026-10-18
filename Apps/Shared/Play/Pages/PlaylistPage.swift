@@ -49,7 +49,8 @@ struct PlaylistPage: View {
                             subtitle: track.artistName,
                             cover: track.artwork.map(CoverArt.artwork) ?? .url(nil, seed: track.albumTitle ?? track.title),
                             isExplicit: track.contentRating == .explicit,
-                            isCurrent: isCurrent(track)
+                            isCurrent: isCurrent(track),
+                            artist: track.artistName
                         )
                     }
                     .buttonStyle(.plain)

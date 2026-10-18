@@ -228,9 +228,7 @@ extension StatsCalculator {
             }
             days[dayStart, default: Day()].seconds += history.seconds[index]
             days[dayStart, default: Day()].songs += 1
-            if !capture.artistIdentity.isEmpty {
-                days[dayStart, default: Day()].artists.insert(capture.artistIdentity)
-            }
+            days[dayStart, default: Day()].artists.formUnion(capture.creditIdentities)
             let previousPlays = days[dayStart]?.plays[capture.songIdentity]?.count ?? 0
             days[dayStart, default: Day()].plays[capture.songIdentity] = (previousPlays + 1, capture)
 

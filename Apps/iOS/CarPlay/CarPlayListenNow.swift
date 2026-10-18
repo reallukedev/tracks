@@ -317,7 +317,7 @@ extension CarPlaySceneDelegate {
     /// An artist's songs, most played first, for playing them from the week's row.
     nonisolated private static func mostPlayed(byArtist identity: String, in history: ListeningHistory) -> [HistorySong] {
         var plays: [String: (count: Int, song: HistorySong)] = [:]
-        for capture in history.captures where capture.artistIdentity == identity && !capture.songID.isEmpty {
+        for capture in history.captures where !capture.songID.isEmpty && capture.credits(identity) {
             let song = HistorySong(songID: capture.songID, title: capture.title, artistName: capture.artistName, albumTitle: capture.albumTitle, artworkURL: capture.artworkURL)
             plays[capture.songIdentity] = ((plays[capture.songIdentity]?.count ?? 0) + 1, song)
         }

@@ -5,16 +5,27 @@ public struct SongMetadata: Sendable, Equatable, Codable {
     /// The song's main genre, like "Hip-Hop/Rap". Never Apple's catch-all "Music".
     public let genre: String?
     public let releaseYear: Int?
+    /// The names of the song's artists in Apple Music, which settle who a collaboration
+    /// credits (see ``ArtistCredits``). Empty when the catalog listed none; nil for songs
+    /// looked up before Tracks asked, which a song that may credit several is asked about again.
+    public let artists: [String]?
 
-    public init(genre: String?, releaseYear: Int?) {
+    public init(genre: String?, releaseYear: Int?, artists: [String]? = nil) {
         self.genre = genre
         self.releaseYear = releaseYear
+        self.artists = artists
     }
 
     /// A song that was looked up and had nothing to say.
-    public static let unknown = SongMetadata(genre: nil, releaseYear: nil)
+    public static let unknown = SongMetadata(genre: nil, releaseYear: nil, artists: [])
 
+    /// Genre and release year, which is all a page shows.
     public var isEmpty: Bool { genre == nil && releaseYear == nil }
+
+    /// The same, now that its artists have been asked about.
+    func askedAboutArtists() -> SongMetadata {
+        artists == nil ? SongMetadata(genre: genre, releaseYear: releaseYear, artists: []) : self
+    }
 
     /// The song's genre, rolled up to one of Apple's top-level genres so a chart doesn't
     /// split one taste across "Hip-Hop/Rap", "Rap" and "Underground Rap".
@@ -70,7 +81,8 @@ public struct SongMetadataCache: Sendable {
     }
 
     /// Saves one round of lookups on top of `existing`, and returns the result. Every song in
-    /// `asked` missing from `found` is remembered as unknown.
+    /// `asked` missing from `found` is remembered as unknown, or keeps what an earlier round
+    /// found, so asking again about its artists never loses its genre.
     @discardableResult
     public func record(
         found: [String: SongMetadata],
@@ -78,7 +90,9 @@ public struct SongMetadataCache: Sendable {
         into existing: [String: SongMetadata]
     ) -> [String: SongMetadata] {
         var updated = existing
-        for identity in asked { updated[identity] = found[identity] ?? .unknown }
+        for identity in asked {
+            updated[identity] = found[identity] ?? existing[identity]?.askedAboutArtists() ?? .unknown
+        }
         if let url {
             try? FileManager.default.createDirectory(
                 at: url.deletingLastPathComponent(),
@@ -126,9 +140,32 @@ public enum SongMetadataLookup {
         limit: Int,
         searchLimit: Int
     ) -> [Request] {
+        pending(in: history, limit: limit, searchLimit: searchLimit) { lookedUp.contains($0.songIdentity) }
+    }
+
+    /// The same, from what's known so far: a song looked up before Tracks asked for its
+    /// artists is asked again when its credit may name several.
+    public static func pending(
+        in history: ListeningHistory,
+        known: [String: SongMetadata],
+        limit: Int,
+        searchLimit: Int
+    ) -> [Request] {
+        pending(in: history, limit: limit, searchLimit: searchLimit) { capture in
+            guard let metadata = known[capture.songIdentity] else { return false }
+            return metadata.artists != nil || !capture.mayCreditSeveral
+        }
+    }
+
+    private static func pending(
+        in history: ListeningHistory,
+        limit: Int,
+        searchLimit: Int,
+        isLookedUp: (CaptureStat) -> Bool
+    ) -> [Request] {
         var plays: [String: Int] = [:]
         var requests: [String: Request] = [:]
-        for capture in history.captures where !lookedUp.contains(capture.songIdentity) {
+        for capture in history.captures where !isLookedUp(capture) {
             plays[capture.songIdentity, default: 0] += 1
             let request = Request(
                 songIdentity: capture.songIdentity,

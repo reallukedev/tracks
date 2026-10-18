@@ -149,10 +149,10 @@ extension ListeningHistory {
         for index in range {
             let capture = captures[index]
             songs.insert(capture.songIdentity)
-            if !capture.artistIdentity.isEmpty { artists.insert(capture.artistIdentity) }
+            artists.formUnion(capture.creditIdentities)
             if let album = capture.albumIdentity { albums.insert(album) }
             if isFirstHearing[index] { newSongs += 1 }
-            if isFirstArtistHearing[index] { newArtists.insert(capture.artistIdentity) }
+            newArtists.formUnion(self.newArtists[index])
             seconds += self.seconds[index]
         }
 

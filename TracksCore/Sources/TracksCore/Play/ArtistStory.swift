@@ -33,7 +33,7 @@ public enum ArtistStories {
         guard let mine = counts[identity], mine > 0 else { return nil }
         var first: Date?
         var last: Date?
-        for capture in history.captures where capture.artistIdentity == identity {
+        for capture in history.captures where capture.credits(identity) {
             if first == nil { first = capture.capturedAt }
             last = capture.capturedAt
         }
@@ -51,8 +51,8 @@ public enum ArtistStories {
     /// artists, and for ranking one of them.
     public static func plays(in history: ListeningHistory) -> [String: Int] {
         var counts: [String: Int] = [:]
-        for capture in history.captures where !capture.artistIdentity.isEmpty {
-            counts[capture.artistIdentity, default: 0] += 1
+        for capture in history.captures {
+            for identity in capture.creditIdentities { counts[identity, default: 0] += 1 }
         }
         return counts
     }

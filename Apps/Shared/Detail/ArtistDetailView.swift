@@ -10,6 +10,7 @@ struct ArtistDetailView: View {
     /// for the answer instead of showing while the first one is still on its way.
     @State private var loadedID: String?
     @State private var showsAllSongs = false
+    @State private var showsAllFeatures = false
 
     var body: some View {
         ScrollView {
@@ -76,15 +77,38 @@ struct ArtistDetailView: View {
                 PlaysOverTimeCard(timeline: profile.timeline, unit: profile.timelineUnit)
             }
 
-            VStack(alignment: .leading, spacing: 10) {
-                SectionHeader(title: "Top Songs") {
-                    if profile.songs.count > 5 {
-                        Button(showsAllSongs ? "Show Less" : "Show All") {
-                            withAnimation { showsAllSongs.toggle() }
+            if !profile.songs.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    SectionHeader(title: "Top Songs") {
+                        if profile.songs.count > 5 {
+                            Button(showsAllSongs ? "Show Less" : "Show All") {
+                                withAnimation { showsAllSongs.toggle() }
+                            }
                         }
                     }
+                    TopSongsCard(songs: profile.songs, limit: showsAllSongs ? profile.songs.count : 5)
                 }
-                TopSongsCard(songs: profile.songs, limit: showsAllSongs ? profile.songs.count : 5)
+            }
+
+            // Their own songs first, then the ones they guest on, as Music's "Appears On".
+            if !profile.features.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    SectionHeader(title: "Featured On") {
+                        if profile.features.count > 5 {
+                            Button(showsAllFeatures ? "Show Less" : "Show All") {
+                                withAnimation { showsAllFeatures.toggle() }
+                            }
+                        }
+                    }
+                    TopSongsCard(songs: profile.features, limit: showsAllFeatures ? profile.features.count : 5)
+                }
+            }
+
+            if !profile.collaborators.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    SectionHeader("Collaborators")
+                    TopArtistsShelf(artists: profile.collaborators, artworkSize: 80, countsSongs: true)
+                }
             }
 
             if !profile.albums.isEmpty {

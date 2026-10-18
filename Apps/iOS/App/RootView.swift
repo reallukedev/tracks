@@ -6,6 +6,9 @@ struct RootView: View {
     @Bindable var model: AppModel
     @AppStorage(PlayPreferences.songDestinationKey) private var songDestination = SongDestination.tracks
     @State private var summaryPath = LaunchScene.route.map { NavigationPath([$0]) } ?? NavigationPath()
+    /// So a link inside a row, like an artist's name on a collaboration, can push.
+    @State private var historyPath = NavigationPath()
+    @State private var chartsPath = NavigationPath()
     /// Where the app opens also decides where Play sits: first when it's where Tracks opens,
     /// last otherwise, so the opening tab is always far left.
     @AppStorage(OpeningTab.storageKey) private var openingTab: OpeningTab = .standard
@@ -180,9 +183,19 @@ struct RootView: View {
             }
             .environment(\.openPlayRoute, OpenPlayRouteAction(stack: "play") { navigator.show($0) })
         case .history:
-            NavigationStack { HistoryScreen().tracksDestinations() }
+            NavigationStack(path: $historyPath) {
+                HistoryScreen()
+                    .tracksDestinations()
+                    .playDestinations()
+            }
+            .environment(\.openPlayRoute, OpenPlayRouteAction(stack: "history") { historyPath.append($0) })
         case .charts:
-            NavigationStack { ChartsScreen().tracksDestinations() }
+            NavigationStack(path: $chartsPath) {
+                ChartsScreen()
+                    .tracksDestinations()
+                    .playDestinations()
+            }
+            .environment(\.openPlayRoute, OpenPlayRouteAction(stack: "charts") { chartsPath.append($0) })
         case .search:
             @Bindable var search = model.search
             NavigationStack(path: $search.path) {

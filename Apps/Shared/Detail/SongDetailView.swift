@@ -7,6 +7,7 @@ struct SongDetailView: View {
     @Environment(PlaybackController.self) private var playback
     @Environment(\.playSongs) private var playSongs
     @Environment(\.openURL) private var openURL
+    @Environment(\.openPlayRoute) private var openPlayRoute
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var profile: SongProfile?
     /// The id whose profile was last worked out from a loaded library, so "No Plays" waits
@@ -55,15 +56,24 @@ struct SongDetailView: View {
                 ArtworkView(url: song.artworkURL, seed: song.albumTitle ?? song.title, size: 200)
                     .shadow(color: .black.opacity(0.18), radius: 20, y: 10)
                 VStack(spacing: 4) {
-                    Text(song.title)
+                    // Each artist links where they're named: a feature only the title names
+                    // is linked there, so no one is written twice.
+                    CreditedText(text: song.title, credits: titleOnlyCredits(song))
                         .font(.title.bold())
                         .multilineTextAlignment(.center)
-                    NavigationLink(value: Route.artist(profile.artistID)) {
-                        Text(song.artistName)
+                    if openPlayRoute.canPush {
+                        CreditedText(text: song.artistName, credits: song.credits)
                             .font(.title3)
+                            .foregroundStyle(.tint)
+                            .multilineTextAlignment(.center)
+                    } else {
+                        NavigationLink(value: Route.artist(profile.artistID)) {
+                            Text(song.artistName)
+                                .font(.title3)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.tint)
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.tint)
                     if let album = song.albumTitle {
                         Text(album)
                             .font(.subheadline)
@@ -148,6 +158,12 @@ struct SongDetailView: View {
                 }
             }
         }
+    }
+
+    /// The artists the title names that the artist line doesn't, like "Song (feat. B)" by A.
+    private func titleOnlyCredits(_ song: SongTally) -> [ArtistCredit] {
+        let named = Set(CreditedText.links(in: song.artistName, credits: song.credits).map(\.credit.identity))
+        return song.credits.filter { !named.contains($0.identity) }
     }
 
     private func releaseDetails(_ metadata: SongMetadata?) -> String? {

@@ -198,7 +198,7 @@ nonisolated struct YourReleases: Sendable {
     init(history: ListeningHistory) {
         for capture in history.captures {
             if let album = capture.albumIdentity { albums.insert(album) }
-            if !capture.artistIdentity.isEmpty { artists[capture.artistIdentity, default: 0] += 1 }
+            for identity in capture.creditIdentities { artists[identity, default: 0] += 1 }
         }
     }
 
@@ -209,11 +209,7 @@ nonisolated struct YourReleases: Sendable {
 
     /// Plays of whoever made it: the first of its artists you play.
     func plays(of release: Discovery.Release) -> Int {
-        let names = release.album.artistName
-            .replacingOccurrences(of: " & ", with: ",")
-            .replacingOccurrences(of: " and ", with: ",")
-            .split(separator: ",")
-            .map { StatsCalculator.folded(String($0).trimmingCharacters(in: .whitespaces)) }
+        let names = ArtistCredits.parse(artist: release.album.artistName).map(\.identity)
         return ([StatsCalculator.folded(release.album.artistName)] + names).lazy.compactMap { artists[$0] }.first ?? 0
     }
 

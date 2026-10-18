@@ -18,6 +18,10 @@ public enum DemoLibrary {
 
     /// Every invented artist, so real data can be told apart from sample data.
     public static var artistNames: [String] { Catalog.artistNames }
+    /// Every artist credit on an invented song: each artist, and the collaborations.
+    public static var artistCredits: [String] {
+        Catalog.artistNames + Catalog.collaborations.compactMap(\.credit)
+    }
     public static var albumNames: [String] { Catalog.albumNames }
 
     public static let stations = [
@@ -124,7 +128,7 @@ public enum DemoLibrary {
                 let year = 2025 - (rank * 7 + number * 4) % (rank < 6 ? 40 : 15)
                 for song in album.songs {
                     result[HistoryImport.key(title: song.title, artistName: song.artist)] =
-                        SongMetadata(genre: genre, releaseYear: year)
+                        SongMetadata(genre: genre, releaseYear: year, artists: Catalog.catalogArtists(of: song))
                 }
             }
         }
@@ -348,7 +352,61 @@ private struct Catalog {
                 debutOffset: debut
             ))
         }
+        // After every draw, so the history around them stays as it was.
+        for collaboration in collaborations {
+            let song = artists[collaboration.artist].albums[collaboration.album].songs[collaboration.song]
+            let albums = artists[collaboration.artist].albums
+            var songs = albums[collaboration.album].songs
+            songs[collaboration.song] = Song(
+                title: song.title + (collaboration.titleFeature.map { " (feat. \($0))" } ?? ""),
+                artist: collaboration.credit ?? song.artist,
+                album: song.album,
+                length: song.length
+            )
+            var updated = albums
+            updated[collaboration.album] = Album(title: albums[collaboration.album].title, songs: songs)
+            let artist = artists[collaboration.artist]
+            artists[collaboration.artist] = Artist(name: artist.name, albums: updated, weight: artist.weight, debutOffset: artist.debutOffset)
+        }
         return Catalog(artists: artists)
+    }
+
+    struct Collaboration {
+        /// Where the song is: artist, album and song, by position.
+        let artist: Int
+        let album: Int
+        let song: Int
+        /// The song's whole artist credit, when it isn't the artist alone.
+        var credit: String?
+        /// Someone featured in the title, as Apple Music writes it.
+        var titleFeature: String?
+        /// Who Apple Music would list as the song's artists.
+        let catalog: [String]
+    }
+
+    /// Songs by more than one artist, one of each kind of credit.
+    static let collaborations = [
+        Collaboration(artist: 0, album: 1, song: 2, credit: "Mara Solis & Nova Harbor", catalog: ["Mara Solis", "Nova Harbor"]),
+        Collaboration(artist: 1, album: 0, song: 3, titleFeature: "Kaito Rivers", catalog: ["Juniper Lane", "Kaito Rivers"]),
+        Collaboration(artist: 2, album: 1, song: 0, credit: "Nova Harbor feat. Ada Kestrel", catalog: ["Nova Harbor", "Ada Kestrel"]),
+        Collaboration(artist: 3, album: 0, song: 2, credit: "Wren & Ivy feat. Mara Solis", catalog: ["Wren & Ivy", "Mara Solis"]),
+        Collaboration(
+            artist: 4, album: 0, song: 2,
+            credit: "Hollow Pines, Amara Vale, Luca Marin & Cassia Ray",
+            catalog: ["Hollow Pines", "Amara Vale", "Luca Marin", "Cassia Ray"]
+        ),
+        Collaboration(artist: 5, album: 0, song: 1, credit: "The Velvet Hours x Mara Solis", catalog: ["The Velvet Hours", "Mara Solis"]),
+        Collaboration(
+            artist: 6, album: 0, song: 2,
+            titleFeature: "Anastasia Montgomery-Whitfield",
+            catalog: ["Solstice Club", "Anastasia Montgomery-Whitfield"]
+        ),
+    ]
+
+    /// The catalog's artists for a song, by its artist credit and title.
+    static func catalogArtists(of song: Song) -> [String] {
+        collaborations.first { $0.credit == song.artist || ($0.titleFeature.map { song.title.hasSuffix("(feat. \($0))") } ?? false) }?
+            .catalog ?? [song.artist]
     }
 }
 

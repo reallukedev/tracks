@@ -82,20 +82,12 @@ public struct LocalTrack: Codable, Sendable, Hashable, Identifiable {
     /// "Umbra feat. Yuki Tanabe" stays on Umbra's album when the tags don't say whose it is.
     public var albumArtistName: String { albumArtist.flatMap { $0.isEmpty ? nil : $0 } ?? Self.leadArtist(of: artist) }
 
-    /// Everyone a song's artist credits, folded: "Umbra feat. Yuki Tanabe & Mara Solis" is
-    /// Umbra, Yuki Tanabe and Mara Solis. Whole names only, so "Air" isn't found in "Blair".
-    public static func creditedArtists(of artist: String) -> Set<String> {
+    /// Everyone a song's artist and title credit, folded, and the whole credit too: "Umbra
+    /// feat. Yuki Tanabe & Mara Solis" is Umbra, Yuki Tanabe and Mara Solis. Whole names only,
+    /// so "Air" isn't found in "Blair". See ``ArtistCredits``.
+    public static func creditedArtists(of artist: String, title: String = "") -> Set<String> {
         let whole = StatsCalculator.folded(artist)
-        // Brackets first, so "(feat. Air)" becomes a piece that starts with its marker.
-        var names = " " + whole.replacingOccurrences(of: "(", with: "\u{1F} ")
-            .replacingOccurrences(of: "[", with: "\u{1F} ")
-            .replacingOccurrences(of: ")", with: "\u{1F}")
-            .replacingOccurrences(of: "]", with: "\u{1F}")
-        for marker in [" featuring ", " feat. ", " feat ", " ft. ", " ft ", " with ", " x ", " & ", " and ", ", ", " / "] {
-            names = names.replacingOccurrences(of: marker, with: "\u{1F}")
-        }
-        let pieces = names.split(separator: "\u{1F}").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-        return Set(pieces).union([whole])
+        return Set(ArtistCredits.parse(artist: artist, title: title).map(\.identity)).union([whole])
     }
 
     /// The artist before any "feat.", "ft." or "featuring".

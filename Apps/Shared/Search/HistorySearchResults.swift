@@ -201,7 +201,8 @@ struct HistorySearchResults: View {
                     title: song.title,
                     subtitle: [song.artistName, song.albumTitle].compactMap(\.self).joined(separator: " · "),
                     cover: .url(song.artworkURL, seed: song.albumTitle ?? song.title),
-                    isCurrent: player.current?.songIdentity == song.id
+                    isCurrent: player.current?.songIdentity == song.id,
+                    artist: song.artistName
                 )
                 .padding(.vertical, 5)
                 .contentShape(.rect)
@@ -384,8 +385,7 @@ struct HistorySearchResults: View {
         switch kind {
         case .artist:
             guard let artist = results.artists.first else { return nil }
-            let name = StatsCalculator.folded(artist.name)
-            let theirs = results.songs.filter { StatsCalculator.folded($0.artistName) == name }
+            let theirs = results.songs.filter { $0.credits.contains { $0.identity == artist.id } }
             return SearchTopResult(
                 title: artist.name,
                 kind: String(localized: "Artist"),

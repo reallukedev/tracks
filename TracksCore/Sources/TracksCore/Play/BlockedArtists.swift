@@ -59,10 +59,10 @@ public struct BlockedArtists: Sendable, Equatable {
         names.removeAll { StatsCalculator.folded($0) == key }
     }
 
-    /// Who a song is by, for blocking from it: the artist before anyone featured, so a song
-    /// by "Umbra feat. Mara Solis" offers to block Umbra.
+    /// Who a song is by, for blocking from it: its first artist, so a song by "Umbra feat.
+    /// Mara Solis" or "Umbra & Mara Solis" offers to block Umbra.
     public static func leadArtist(of credit: String) -> String {
-        LocalTrack.leadArtist(of: credit)
+        ArtistCredits.lead(of: credit)
     }
 
     /// The artist part of a song identity: what follows its separator.

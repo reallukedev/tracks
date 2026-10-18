@@ -35,10 +35,6 @@ public enum ServerSongMatcher {
     static func artists(_ credit: String) -> Set<String> {
         let whole = StatsCalculator.folded(credit)
         guard !whole.isEmpty else { return [] }
-        var parts = [whole]
-        for separator in [",", " & ", " x ", " feat. ", " feat ", " ft. ", " featuring ", " with "] {
-            parts = parts.flatMap { $0.components(separatedBy: separator) }
-        }
-        return Set(parts.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty } + [whole])
+        return LocalTrack.creditedArtists(of: credit)
     }
 }

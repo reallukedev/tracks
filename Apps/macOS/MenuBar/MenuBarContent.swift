@@ -652,7 +652,8 @@ private struct RecentList: View {
     /// The song's menu, as everywhere else, with its pages opening in the main window.
     private func menu(for item: Capture) -> some View {
         let song = MixSong(item)
-        let artist = StatsCalculator.folded(item.artistName)
+        let credits = ArtistCredits.song(artist: item.artistName, title: item.title)
+        let artist = credits.first?.identity ?? StatsCalculator.folded(item.artistName)
         var actions = SongActions(
             stats: { show(.song(song.songIdentity)) },
             share: .song(id: item.songID, title: item.title, artist: item.artistName),
@@ -674,6 +675,7 @@ private struct RecentList: View {
             actions.goToAlbum = { show(.album("\(album)\u{1F}\(artist)")) }
         }
         actions.goToArtist = { show(.artist(artist)) }
+        actions.linkArtists(credits) { show(.artist($0.identity)) }
         return SongMenuItems(actions)
     }
 

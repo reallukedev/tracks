@@ -23,10 +23,19 @@ public struct CaptureStat: Sendable, Equatable {
     /// depends on the device (iOS uses the catalog id, macOS the title and artist), so one
     /// song heard on both would otherwise show up twice in a chart.
     public let songIdentity: String
+    /// Everyone the song credits, main artists first: a play of "A & B" counts for both.
+    /// From the artist and title, and Apple Music's own list once it's been looked up.
+    public let credits: [ArtistCredit]
+    /// The first credited artist, folded: whose song it is when one artist is needed, as for
+    /// a link from the song's page. Empty for a blank artist.
     public let artistIdentity: String
-    /// Album and artist together, since plenty of artists have an album called "Home". The
-    /// artist without anyone featured, so "Umbra feat. Yuki Tanabe" counts on Umbra's album.
+    /// Album and lead artist together, since plenty of artists have an album called "Home".
+    /// The lead alone, so "Umbra feat. Yuki Tanabe" and "Umbra & Mara Solis" count on
+    /// Umbra's album.
     public let albumIdentity: String?
+    /// Whether the credit could name more than one artist, so Apple Music's list of the
+    /// song's artists is worth having.
+    public let mayCreditSeveral: Bool
 
     public init(
         songKey: String,
@@ -53,9 +62,19 @@ public struct CaptureStat: Sendable, Equatable {
         self.kind = kind
         self.source = source
         self.songIdentity = HistoryImport.key(title: title, artistName: artistName)
-        self.artistIdentity = StatsCalculator.folded(artistName)
+        self.mayCreditSeveral = ArtistCredits.mayCreditSeveral(artist: artistName, title: title)
+        self.credits = ArtistCredits.byName(artist: artistName, title: title)
+        self.artistIdentity = credits.first?.identity ?? ""
         let album = albumTitle.map(StatsCalculator.folded) ?? ""
-        self.albumIdentity = album.isEmpty ? nil : "\(album)\u{1F}\(Self.leadArtistIdentity(artistIdentity))"
+        self.albumIdentity = album.isEmpty ? nil : "\(album)\u{1F}\(artistIdentity)"
+    }
+
+    /// Every credited artist's identity, main artists first.
+    public var creditIdentities: [String] { credits.map(\.identity) }
+
+    /// Whether the song credits the artist with this identity.
+    public func credits(_ identity: String) -> Bool {
+        credits.contains { $0.identity == identity }
     }
 
     /// The ``albumIdentity`` of a song on an album, or nil when the album has no name.
@@ -73,11 +92,11 @@ public struct CaptureStat: Sendable, Equatable {
         return id[..<separator] + "\u{1F}" + leadArtistIdentity(artist)
     }
 
-    /// A folded artist without anyone featured on the song.
+    /// A folded artist's first credited artist. From the name alone, never Apple Music's
+    /// list, so an album link made anywhere finds the same album.
     static func leadArtistIdentity(_ artistIdentity: String) -> String {
-        // Every marker has an "f" in it; most names can skip the search.
-        guard artistIdentity.utf8.contains(UInt8(ascii: "f")) else { return artistIdentity }
-        return LocalTrack.leadArtist(of: artistIdentity)
+        guard ArtistCredits.mayCreditSeveral(artist: artistIdentity) else { return artistIdentity }
+        return ArtistCredits.parse(artist: artistIdentity).first?.identity ?? artistIdentity
     }
 
     /// The same play under another station name, without folding its names again.
@@ -86,10 +105,16 @@ public struct CaptureStat: Sendable, Equatable {
     /// can touch thousands of plays at once.
     public func with(stationName: String?) -> CaptureStat {
         guard stationName != self.stationName else { return self }
-        return CaptureStat(copying: self, stationName: stationName)
+        return CaptureStat(copying: self, stationName: stationName, credits: credits)
     }
 
-    private init(copying other: CaptureStat, stationName: String?) {
+    /// The same play credited otherwise, as Apple Music's list of the song's artists says.
+    /// The album stays where the name alone puts it, so a link to it made anywhere finds it.
+    func with(credits: [ArtistCredit]) -> CaptureStat {
+        CaptureStat(copying: self, stationName: stationName, credits: credits)
+    }
+
+    private init(copying other: CaptureStat, stationName: String?, credits: [ArtistCredit]) {
         songKey = other.songKey
         songID = other.songID
         title = other.title
@@ -102,8 +127,10 @@ public struct CaptureStat: Sendable, Equatable {
         kind = other.kind
         source = other.source
         songIdentity = other.songIdentity
-        artistIdentity = other.artistIdentity
+        self.credits = credits
+        artistIdentity = credits.first?.identity ?? ""
         albumIdentity = other.albumIdentity
+        mayCreditSeveral = other.mayCreditSeveral
     }
 }
 
@@ -119,6 +146,8 @@ public struct SongTally: Sendable, Equatable, Identifiable {
     public let firstHeard: Date
     public let lastHeard: Date
     public let listeningSeconds: TimeInterval
+    /// Everyone the song credits, main artists first, for a link to each.
+    public let credits: [ArtistCredit]
 
     public init(
         id: String? = nil,
@@ -131,8 +160,10 @@ public struct SongTally: Sendable, Equatable, Identifiable {
         count: Int,
         firstHeard: Date,
         lastHeard: Date? = nil,
-        listeningSeconds: TimeInterval = 0
+        listeningSeconds: TimeInterval = 0,
+        credits: [ArtistCredit]? = nil
     ) {
+        self.credits = credits ?? ArtistCredits.byName(artist: artistName, title: title)
         self.id = id ?? HistoryImport.key(title: title, artistName: artistName)
         self.songKey = songKey
         self.songID = songID

@@ -1,8 +1,15 @@
 import Foundation
 
 public struct ArtistProfile: Sendable, Equatable {
+    /// Every play they're credited on, featured ones included.
     public let artist: ArtistTally
+    /// Songs that are theirs, alone or with others, most played first.
     public let songs: [SongTally]
+    /// Songs of someone else's they're featured on, most played first.
+    public var features: [SongTally] = []
+    /// Everyone credited beside them, most played together first. Each tally counts only
+    /// the plays and songs they share.
+    public var collaborators: [ArtistTally] = []
     public let albums: [AlbumTally]
     public let timeline: [TimeBucket]
     public let timelineUnit: Calendar.Component
@@ -68,8 +75,20 @@ extension StatsCalculator {
         calendar: Calendar = .current,
         now: Date = .now
     ) -> ArtistProfile? {
-        let members = history.captures.indices.filter { history.captures[$0].artistIdentity == id }
-        guard let artist = tallyArtists(members, in: history).first else { return nil }
+        var members: [Int] = []
+        var own: [Int] = []
+        var featured: [Int] = []
+        // Albums are the ones they lead: a song shared on someone else's album stays theirs.
+        var led: [Int] = []
+        for index in history.captures.indices {
+            let capture = history.captures[index]
+            guard let credit = capture.credits.first(where: { $0.identity == id }) else { continue }
+            members.append(index)
+            if credit.role == .featured { featured.append(index) } else { own.append(index) }
+            if capture.artistIdentity == id { led.append(index) }
+        }
+        let onTheirSongs = tallyArtists(members, in: history)
+        guard let artist = onTheirSongs.first(where: { $0.id == id }) else { return nil }
         let everyone = tallyArtists(history.captures.indices, in: history)
         let ranks = competitionRanks(everyone.map(\.count))
         let position = everyone.firstIndex { $0.id == id }.map { ranks[$0] } ?? everyone.count
@@ -77,8 +96,10 @@ extension StatsCalculator {
         let (unit, span) = profileSpan(first: artist.firstHeard, calendar: calendar, now: now)
         return ArtistProfile(
             artist: artist,
-            songs: tallySongs(members, in: history),
-            albums: tallyAlbums(members, in: history),
+            songs: tallySongs(own, in: history),
+            features: tallySongs(featured, in: history),
+            collaborators: onTheirSongs.filter { $0.id != id },
+            albums: tallyAlbums(led, in: history),
             timeline: timeline(members, in: history, unit: unit, span: span, calendar: calendar),
             timelineUnit: unit,
             hourly: hourly(for: members.map { history.captures[$0] }, calendar: calendar),

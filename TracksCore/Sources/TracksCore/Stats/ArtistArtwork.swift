@@ -97,19 +97,24 @@ public enum ArtistArtworkLookup {
         public let songID: String
         public let title: String
         public let albumTitle: String?
+        /// Whether the artist leads the song. Anyone else credited is only given a picture
+        /// when the catalog names them on it, never the lead's.
+        public let isLead: Bool
 
         public init(
             artistIdentity: String,
             artistName: String,
             songID: String,
             title: String,
-            albumTitle: String? = nil
+            albumTitle: String? = nil,
+            isLead: Bool = true
         ) {
             self.artistIdentity = artistIdentity
             self.artistName = artistName
             self.songID = songID
             self.title = title
             self.albumTitle = albumTitle
+            self.isLead = isLead
         }
 
         /// Whether the catalog can be asked for this song directly, without a search.
@@ -124,21 +129,24 @@ public enum ArtistArtworkLookup {
     ) -> [Request] {
         var plays: [String: Int] = [:]
         var requests: [String: Request] = [:]
-        for capture in history.captures
-        where !capture.artistIdentity.isEmpty && !lookedUp.contains(capture.artistIdentity) {
-            plays[capture.artistIdentity, default: 0] += 1
-            // History is oldest first, so the most recent song wins, but a catalog id beats
-            // one that needs a search. Songs imported from Recently Played carry library ids
-            // ("i.…"), which the catalog won't take.
-            let request = Request(
-                artistIdentity: capture.artistIdentity,
-                artistName: capture.artistName,
-                songID: capture.songID,
-                title: capture.title,
-                albumTitle: capture.albumTitle
-            )
-            if request.hasCatalogID || requests[capture.artistIdentity]?.hasCatalogID != true {
-                requests[capture.artistIdentity] = request
+        for capture in history.captures {
+            for (position, credit) in capture.credits.enumerated() where !lookedUp.contains(credit.identity) {
+                plays[credit.identity, default: 0] += 1
+                // History is oldest first, so the most recent song wins, but a catalog id
+                // beats one that needs a search, and a song they lead beats one they're on.
+                // Songs imported from Recently Played carry library ids ("i.…"), which the
+                // catalog won't take.
+                let request = Request(
+                    artistIdentity: credit.identity,
+                    artistName: credit.name,
+                    songID: capture.songID,
+                    title: capture.title,
+                    albumTitle: capture.albumTitle,
+                    isLead: position == 0
+                )
+                if rank(request) >= requests[credit.identity].map(rank) ?? 0 {
+                    requests[credit.identity] = request
+                }
             }
         }
         return requests.values
@@ -153,7 +161,10 @@ public enum ArtistArtworkLookup {
     /// Which of a song's artists is the one credited, since "Boom (ft. JID)" by Token lists
     /// Token and JID. An exact match first, then whoever is named first in a joint credit
     /// like "Rome Streetz & Conductor Williams", otherwise the first.
-    public static func creditedArtist(named credited: String, among names: [String]) -> Int? {
+    ///
+    /// - Parameter fallsBackToFirst: false for an artist who doesn't lead the song, who mustn't
+    ///   be given the lead's picture.
+    public static func creditedArtist(named credited: String, among names: [String], fallsBackToFirst: Bool = true) -> Int? {
         guard !names.isEmpty else { return nil }
         let target = StatsCalculator.folded(credited)
         let folded = names.map(StatsCalculator.folded)
@@ -161,6 +172,11 @@ public enum ArtistArtworkLookup {
         let named = folded.indices.compactMap { index in
             folded[index].isEmpty ? nil : target.range(of: folded[index]).map { (index, $0.lowerBound) }
         }
-        return named.min { $0.1 < $1.1 }?.0 ?? 0
+        return named.min { $0.1 < $1.1 }?.0 ?? (fallsBackToFirst ? 0 : nil)
+    }
+
+    /// A catalog id beats a song that needs a search, then a song they lead.
+    private static func rank(_ request: Request) -> Int {
+        (request.hasCatalogID ? 2 : 0) + (request.isLead ? 1 : 0)
     }
 }

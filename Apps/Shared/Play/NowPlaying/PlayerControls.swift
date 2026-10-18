@@ -414,9 +414,7 @@ struct NowPlayingTitleMenu<Label: View>: View {
             if let goToAlbum = actions.goToAlbum {
                 Button("Go to Album", systemImage: "square.stack", action: goToAlbum)
             }
-            if let goToArtist = actions.goToArtist {
-                Button("Go to Artist", systemImage: "music.microphone", action: goToArtist)
-            }
+            GoToArtistItem(actions: actions)
             if let stats = actions.stats {
                 Button("Your Stats", systemImage: "chart.bar.xaxis", action: stats)
             }
@@ -439,12 +437,15 @@ struct NowPlayingTitleMenu<Label: View>: View {
             actions = .catalog(song, player: player, go: go)
         } else {
             // Known by name alone, as the demo's songs are: your history's pages for them.
-            let artist = StatsCalculator.folded(track.artistName)
+            let credits = ArtistCredits.song(artist: track.artistName, title: track.title)
+            let artist = credits.first?.identity ?? StatsCalculator.folded(track.artistName)
+            let lead = credits.first?.name ?? track.artistName
             actions = SongActions()
             if let album = track.albumTitle.map(StatsCalculator.folded), !album.isEmpty {
                 actions.goToAlbum = { onNavigate(.stats(.album("\(album)\u{1F}\(artist)"))) }
             }
-            actions.goToArtist = { go(.artistNamed(track.artistName, identity: artist)) }
+            actions.goToArtist = { go(.artistNamed(lead, identity: artist)) }
+            actions.linkArtists(credits) { go(.artistNamed($0.name, identity: $0.identity)) }
         }
         let identity = track.songIdentity
         actions.stats = { onNavigate(.stats(.song(identity))) }

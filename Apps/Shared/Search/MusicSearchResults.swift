@@ -196,7 +196,8 @@ struct MusicSearchResults: View {
                     subtitle: [song.artistName, song.albumTitle].compactMap(\.self).joined(separator: " · "),
                     cover: song.artwork.map(CoverArt.artwork) ?? .url(nil, seed: song.title),
                     isExplicit: song.isExplicit,
-                    isCurrent: player.current?.songIdentity == HistoryImport.key(title: song.title, artistName: song.artistName)
+                    isCurrent: player.current?.songIdentity == HistoryImport.key(title: song.title, artistName: song.artistName),
+                    artist: song.artistName
                 )
                 .padding(.vertical, 5)
                 .contentShape(.rect)

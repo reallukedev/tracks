@@ -20,7 +20,7 @@ enum CloudCheck {
                 print("The real store isn't available (\(store.backing)); nothing done.")
                 return 1
             }
-            let artists = Set(DemoLibrary.artistNames)
+            let artists = Set(DemoLibrary.artistCredits)
             let albums = Set(DemoLibrary.albumNames)
             let stationNames = Set(DemoLibrary.stations)
             let context = store.context
@@ -50,7 +50,7 @@ enum CloudCheck {
             return 1
         }
         let database = CKContainer(identifier: identifier).privateCloudDatabase
-        let demoArtists = Set(DemoLibrary.artistNames)
+        let demoArtists = Set(DemoLibrary.artistCredits)
         let demoAlbums = Set(DemoLibrary.albumNames)
         let demoStations = Set(DemoLibrary.stations)
 

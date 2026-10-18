@@ -200,7 +200,8 @@ struct LibrarySongsList: View {
                     // The title needs the width at the largest sizes; the plays can go.
                     plays: nil,
                     isExplicit: song.isExplicit,
-                    isCurrent: player.current?.songIdentity == identity
+                    isCurrent: player.current?.songIdentity == identity,
+                    artist: song.artistName
                 )
             }
             .buttonStyle(.plain)

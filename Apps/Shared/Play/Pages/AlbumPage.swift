@@ -43,7 +43,8 @@ struct AlbumPage: View {
                             subtitle: track.artistName == album.artistName ? nil : track.artistName,
                             number: track.trackNumber ?? index + 1,
                             isExplicit: track.contentRating == .explicit,
-                            isCurrent: isCurrent(track)
+                            isCurrent: isCurrent(track),
+                            artist: track.artistName
                         )
                     }
                     .trackMenu { songMenu(track) }

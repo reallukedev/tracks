@@ -44,9 +44,6 @@ struct ChartEntryMenu: View {
     let entry: ChartEntry
     /// Your Stats, where a click doesn't already open them.
     var openStats: (() -> Void)?
-    private var playback = ChartPlayback()
-    @Environment(PlayerModel.self) private var player
-    @Environment(\.openPlayRoute) private var openPlayRoute
 
     init(entry: ChartEntry, openStats: (() -> Void)? = nil) {
         self.entry = entry
@@ -55,10 +52,29 @@ struct ChartEntryMenu: View {
 
     var body: some View {
         if let song = entry.song {
-            SongMenuItems(actions(for: song))
+            ChartSongMenu(song: song, openStats: openStats)
         } else if let openStats {
             Button("Your Stats", systemImage: "chart.bar.xaxis", action: openStats)
         }
+    }
+}
+
+/// A charted song's menu: played the way charts play, with Go to Album, each of its artists, and your stats.
+struct ChartSongMenu: View {
+    let song: MixSong
+    /// Your Stats, where a click doesn't already open them.
+    var openStats: (() -> Void)?
+    private var playback = ChartPlayback()
+    @Environment(PlayerModel.self) private var player
+    @Environment(\.openPlayRoute) private var openPlayRoute
+
+    init(song: MixSong, openStats: (() -> Void)? = nil) {
+        self.song = song
+        self.openStats = openStats
+    }
+
+    var body: some View {
+        SongMenuItems(actions(for: song))
     }
 
     private func actions(for song: MixSong) -> SongActions {

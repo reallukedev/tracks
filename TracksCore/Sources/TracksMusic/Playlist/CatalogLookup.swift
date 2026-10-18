@@ -102,7 +102,8 @@ public struct CatalogLookup: CatalogResolving {
                   let artists = song.artists.map(Array.init),
                   let index = ArtistArtworkLookup.creditedArtist(
                       named: credit.artistName,
-                      among: artists.map(\.name)
+                      among: artists.map(\.name),
+                      fallsBackToFirst: credit.isLead
                   ),
                   // Big enough for the artist page, which shows it at 150 points.
                   let url = ArtworkURL.loadable(
@@ -142,9 +143,11 @@ public struct CatalogLookup: CatalogResolving {
             for song in songs {
                 let metadata = SongMetadata(
                     genre: SongMetadata.primaryGenre(from: song.genreNames, topLevel: Self.topLevelGenres(of: song)),
-                    releaseYear: SongMetadata.releaseYear(from: song.releaseDate)
+                    releaseYear: SongMetadata.releaseYear(from: song.releaseDate),
+                    // Library songs carry no artists, so they're asked about once, as empty.
+                    artists: song.artists.map { $0.map(\.name) } ?? []
                 )
-                guard !metadata.isEmpty else { continue }
+                guard !metadata.isEmpty || metadata.artists?.isEmpty == false else { continue }
                 for identity in ids[song.id.rawValue] ?? [] { result[identity] = metadata }
             }
         }
@@ -156,7 +159,8 @@ public struct CatalogLookup: CatalogResolving {
             var request = MusicCatalogResourceRequest<Song>(matching: \.id, memberOf: chunk.map { MusicItemID($0) })
             // Only the top-level genres come back as relationships, each with its parent,
             // which is how a subgenre like "Rap" is rolled up to "Hip-Hop/Rap".
-            request.properties = [.genres]
+            // Artists too: their names settle who a collaboration credits.
+            request.properties = [.genres, .artists]
             record(try await request.response().items, from: catalogIDs)
         }
         // Library ids fail a catalog request outright (see `artworkURLs(forSongIDs:)`).

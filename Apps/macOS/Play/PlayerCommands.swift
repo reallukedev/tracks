@@ -348,14 +348,23 @@ private struct PlayingSongMenuItems: View {
                 }
             }
             .disabled(track?.local == nil && song == nil)
-            Button("Go to Artist", systemImage: "music.microphone") {
-                if let local = track?.local {
-                    open(.localArtist(local.artistKey))
-                } else if let song {
-                    Task { if let artist = await SongLinks.artist(of: song) { open(.artist(artist)) } }
+            if track?.local == nil, let song, case let credits = ArtistCredits.song(artist: song.artistName, title: song.title), credits.count > 1 {
+                // A collaboration asks which artist, as Music's does.
+                Menu("Go to Artist", systemImage: "music.microphone") {
+                    ForEach(credits) { credit in
+                        Button { open(.artistNamed(credit.name, identity: credit.identity)) } label: { Text(verbatim: credit.name) }
+                    }
                 }
+            } else {
+                Button("Go to Artist", systemImage: "music.microphone") {
+                    if let local = track?.local {
+                        open(.localArtist(local.artistKey))
+                    } else if let song {
+                        Task { if let artist = await SongLinks.artist(of: song) { open(.artist(artist)) } }
+                    }
+                }
+                .disabled(track?.local == nil && song == nil)
             }
-            .disabled(track?.local == nil && song == nil)
             // ⌘I is the selection's, as Music's Get Info is: History's inspector has it.
             Button("Your Stats", systemImage: "chart.bar.xaxis") {
                 if let track { open(.stats(.song(track.songIdentity))) }

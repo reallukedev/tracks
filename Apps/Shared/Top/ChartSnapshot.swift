@@ -40,9 +40,10 @@ nonisolated struct ChartSnapshot: Equatable, Sendable {
         let allSongs = StatsCalculator.songChart(in: period, history: history, calendar: calendar, limit: .max)
         let songChart = Array(allSongs.prefix(100))
         let activity = history.activity(in: period, now: now, calendar: calendar)
-        let byArtist = kind == .artists ? group(allSongs) { StatsCalculator.folded($0.artistName) } : [:]
+        // A collaboration is under each artist on it.
+        let byArtist = kind == .artists ? group(allSongs) { $0.credits.map(\.identity) } : [:]
         let byAlbum = kind == .albums ? group(allSongs) { song in
-            song.albumTitle.flatMap { CaptureStat.albumIdentity(title: $0, artistName: song.artistName) }
+            song.albumTitle.flatMap { CaptureStat.albumIdentity(title: $0, artistName: song.artistName) }.map { [$0] } ?? []
         } : [:]
         let entries: [ChartEntry] = switch kind {
         case .songs:
@@ -54,7 +55,7 @@ nonisolated struct ChartSnapshot: Equatable, Sendable {
                 entry.songs = byArtist[ranked.item.id] ?? []
                 entry.songCount = ranked.item.songCount
                 entry.isNew = activity.newArtists.contains(ranked.item.id)
-                if let song = songChart.first(where: { StatsCalculator.folded($0.item.artistName) == ranked.item.id }) {
+                if let song = songChart.first(where: { $0.item.credits.contains { $0.identity == ranked.item.id } }) {
                     entry.detail = String(localized: "Most played: \(song.item.title)")
                 }
                 return entry
@@ -82,11 +83,12 @@ nonisolated struct ChartSnapshot: Equatable, Sendable {
     }
 
     /// The songs under each artist or album, in chart order, a hundred at most.
-    private static func group(_ songs: [Ranked<SongTally>], by key: (SongTally) -> String?) -> [String: [MixSong]] {
+    private static func group(_ songs: [Ranked<SongTally>], by keys: (SongTally) -> [String]) -> [String: [MixSong]] {
         var groups: [String: [MixSong]] = [:]
         for song in songs {
-            guard let key = key(song.item), groups[key, default: []].count < 100 else { continue }
-            groups[key, default: []].append(MixSong(tally: song.item))
+            for key in keys(song.item) where groups[key, default: []].count < 100 {
+                groups[key, default: []].append(MixSong(tally: song.item))
+            }
         }
         return groups
     }
@@ -110,6 +112,8 @@ nonisolated struct ChartEntry: Identifiable, Equatable, Sendable {
     let title: String
     /// The artist, for a song or an album.
     let subtitle: String?
+    /// Everyone the song or album credits, to link each name in the subtitle.
+    var credits: [ArtistCredit] = []
     /// The album, for a song.
     let album: String?
     let artworkURL: String?
@@ -135,6 +139,7 @@ nonisolated struct ChartEntry: Identifiable, Equatable, Sendable {
         route = .song(song.id)
         title = song.title
         subtitle = song.artistName
+        credits = song.credits
         album = song.albumTitle
         artworkURL = song.artworkURL
         artworkSeed = song.albumTitle ?? song.title
@@ -167,6 +172,7 @@ nonisolated struct ChartEntry: Identifiable, Equatable, Sendable {
         route = .album(album.id)
         title = album.title
         subtitle = album.artistName
+        credits = ArtistCredits.parse(artist: album.artistName)
         self.album = nil
         artworkURL = album.artworkURL
         artworkSeed = album.title

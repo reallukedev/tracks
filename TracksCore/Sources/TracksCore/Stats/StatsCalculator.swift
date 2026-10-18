@@ -98,7 +98,7 @@ public enum StatsCalculator {
             listeningSeconds: listening,
             previousListeningSeconds: previousIndices.map { $0.reduce(0) { $0 + history.seconds[$1] } },
             firstTimeHeardCount: firstHearings.count,
-            newArtistCount: indices.count { history.isFirstArtistHearing[$0] },
+            newArtistCount: indices.reduce(0) { $0 + history.newArtists[$1].count },
             topSongs: songTallies,
             topArtists: artistTallies,
             uniqueArtistCount: artistTallies.count,
@@ -435,22 +435,36 @@ public enum StatsCalculator {
                 count: captures.count,
                 firstHeard: first.capturedAt,
                 lastHeard: latest.capturedAt,
-                listeningSeconds: members.reduce(0) { $0 + history.seconds[$1] }
+                listeningSeconds: members.reduce(0) { $0 + history.seconds[$1] },
+                credits: resolved.credits
             )
         }
         .sorted { ($0.count, $0.lastHeard, $1.title, $1.id) > ($1.count, $1.lastHeard, $0.title, $0.id) }
     }
 
     /// Artists, most played first. Blank names are skipped.
-    static func tallyArtists(_ indices: some Sequence<Int>, in history: ListeningHistory) -> [ArtistTally] {
+    ///
+    /// A play counts in full for everyone it credits, featured artists included: "A feat. B"
+    /// is a play of B's too, and a fraction of a play would leave counts no one could check
+    /// against the songs listed under them.
+    ///
+    /// - Parameter only: one artist's identity, to tally them alone.
+    static func tallyArtists(_ indices: some Sequence<Int>, in history: ListeningHistory, only: String? = nil) -> [ArtistTally] {
         var groups: [String: [Int]] = [:]
-        for index in indices where !history.captures[index].artistIdentity.isEmpty {
-            groups[history.captures[index].artistIdentity, default: []].append(index)
+        for index in indices {
+            for identity in history.captures[index].creditIdentities where only.map({ $0 == identity }) ?? true {
+                groups[identity, default: []].append(index)
+            }
         }
 
         return groups.map { identity, members in
             let captures = members.map { history.captures[$0] }
-            let spellings = counts(of: captures) { $0.artistName.trimmingCharacters(in: .whitespacesAndNewlines) }
+            var spellings: [String: Int] = [:]
+            for capture in captures {
+                if let credit = capture.credits.first(where: { $0.identity == identity }) {
+                    spellings[credit.name, default: 0] += 1
+                }
+            }
             let name = spellings.max { ($0.value, $1.key) < ($1.value, $0.key) }?.key ?? captures[0].artistName
             let bySong = Dictionary(grouping: captures, by: \.songIdentity)
             let favourite = bySong.values.max { ($0.count, $0.last?.capturedAt ?? .distantPast) < ($1.count, $1.last?.capturedAt ?? .distantPast) }

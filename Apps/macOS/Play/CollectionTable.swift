@@ -378,7 +378,7 @@ private struct CollectionSongRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             if showsArtist {
-                Text(track.artist)
+                ArtistLinks(artist: track.artist, title: track.title, linkStyle: .cell)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)

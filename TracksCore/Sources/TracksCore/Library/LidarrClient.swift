@@ -442,14 +442,8 @@ extension LidarrClient {
 
     /// A credited name, then the first artist in it where several are credited.
     public static func artistCandidates(_ name: String) -> [String] {
-        var candidates = [name]
-        for separator in [" & ", ", ", " x ", " feat. ", " featuring ", " ft. ", " with "] {
-            if let range = name.range(of: separator, options: .caseInsensitive) {
-                let first = String(name[..<range.lowerBound]).trimmingCharacters(in: .whitespaces)
-                if !first.isEmpty, !candidates.contains(first) { candidates.append(first) }
-            }
-        }
-        return candidates
+        let lead = ArtistCredits.lead(of: name)
+        return lead.isEmpty || lead == name ? [name] : [name, lead]
     }
 
     /// Asks for one album: the artist is followed if they aren't (without taking the rest of

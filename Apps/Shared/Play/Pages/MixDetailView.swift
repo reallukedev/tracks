@@ -79,7 +79,8 @@ struct MixDetailView: View {
                             subtitle: song.artistName,
                             cover: .url(song.artworkURL, seed: song.albumTitle ?? song.title),
                             isCurrent: player.current?.songIdentity == song.songIdentity,
-                            isPlayable: playable
+                            isPlayable: playable,
+                            artist: song.artistName
                         )
                     }
                     .buttonStyle(.plain)

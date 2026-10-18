@@ -30,7 +30,7 @@ struct CaptureRow: View {
         VStack(alignment: .leading, spacing: 4) {
             ArtworkView(url: capture.artworkURL, seed: capture.albumTitle ?? capture.title, size: artworkSize)
             Text(capture.title)
-            Text(capture.artistName)
+            artist
                 .foregroundStyle(.secondary)
             if showsStatus {
                 Text(capture.capturedAt, format: .dateTime.hour().minute())
@@ -57,7 +57,7 @@ struct CaptureRow: View {
                             .foregroundStyle(.pink)
                             .accessibilityHidden(true)
                     }
-                    Text(capture.artistName)
+                    artist
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -92,6 +92,15 @@ struct CaptureRow: View {
                 }
             }
         }
+    }
+
+    /// Each name opens your history's page for them.
+    private var artist: some View {
+        CreditedText(
+            text: capture.artistName,
+            credits: ArtistCredits.song(artist: capture.artistName, title: capture.title),
+            linkStyle: .row
+        )
     }
 
     /// Radio only, since nothing else goes into the playlist.

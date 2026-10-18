@@ -20,6 +20,9 @@ struct SongActions {
     var favorite: Song?
     var goToAlbum: (() -> Void)?
     var goToArtist: (() -> Void)?
+    /// Each artist a collaboration credits, for a Go to Artist that asks which, as Music's
+    /// does. Used over ``goToArtist`` when there are two or more.
+    var artistLinks: [ArtistLink] = []
     var stats: (() -> Void)?
     /// Show in Finder or Show in Music, after Your Stats.
     var reveal: [SongMenuButton] = []
@@ -32,6 +35,37 @@ struct SongActions {
     var steer: [SongMenuButton] = []
     /// Last, after a divider: Remove from Playlist, Delete, Tune Tracks Radio.
     var trailing: [SongMenuButton] = []
+}
+
+/// One artist in a Go to Artist menu.
+struct ArtistLink {
+    let name: String
+    let action: () -> Void
+}
+
+extension SongActions {
+    /// Links to each artist the song credits, when it credits more than one.
+    mutating func linkArtists(_ credits: [ArtistCredit], to go: @escaping (ArtistCredit) -> Void) {
+        artistLinks = credits.count > 1 ? credits.map { credit in ArtistLink(name: credit.name) { go(credit) } } : []
+    }
+}
+
+/// Go to Artist: one item for one artist, or a menu of each for a collaboration.
+struct GoToArtistItem: View {
+    let actions: SongActions
+
+    var body: some View {
+        if actions.artistLinks.count > 1 {
+            Menu("Go to Artist", systemImage: "music.microphone") {
+                ForEach(actions.artistLinks.indices, id: \.self) { index in
+                    let link = actions.artistLinks[index]
+                    Button(action: link.action) { Text(verbatim: link.name) }
+                }
+            }
+        } else if let goToArtist = actions.goToArtist {
+            Button("Go to Artist", systemImage: "music.microphone", action: goToArtist)
+        }
+    }
 }
 
 /// One item of a song's menu that only some songs have.
@@ -70,7 +104,7 @@ struct SongMenuItems: View {
 
     private var hasPlay: Bool { actions.play != nil || actions.playNext != nil || actions.playLast != nil }
     private var hasLibrary: Bool { actions.addToLibrary != nil || !actions.keep.isEmpty || !actions.playlistTracks.isEmpty || actions.favorite != nil }
-    private var hasGo: Bool { actions.goToAlbum != nil || actions.goToArtist != nil || actions.stats != nil || !actions.reveal.isEmpty }
+    private var hasGo: Bool { actions.goToAlbum != nil || actions.goToArtist != nil || !actions.artistLinks.isEmpty || actions.stats != nil || !actions.reveal.isEmpty }
 
     var body: some View {
         let groups = [hasPlay, actions.createStation != nil, hasLibrary, hasGo, actions.share != nil]
@@ -110,9 +144,7 @@ struct SongMenuItems: View {
             if let goToAlbum = actions.goToAlbum {
                 Button("Go to Album", systemImage: "square.stack", action: goToAlbum)
             }
-            if let goToArtist = actions.goToArtist {
-                Button("Go to Artist", systemImage: "music.microphone", action: goToArtist)
-            }
+            GoToArtistItem(actions: actions)
             if let stats = actions.stats {
                 Button("Your Stats", systemImage: "chart.bar.xaxis", action: stats)
             }
@@ -188,6 +220,9 @@ extension SongActions {
             }
             if showsArtist {
                 actions.goToArtist = { Task { if let artist = await SongLinks.artist(of: song) { go(.artist(artist)) } } }
+                actions.linkArtists(ArtistCredits.song(artist: song.artistName, title: song.title)) { credit in
+                    go(.artistNamed(credit.name, identity: credit.identity))
+                }
             }
         }
         if showsSuggestLess {
@@ -206,7 +241,8 @@ extension SongActions {
         go: ((PlayRoute) -> Void)?
     ) -> SongActions {
         let canPlay = player.canPlay(songID: song.songID)
-        let artistIdentity = StatsCalculator.folded(song.artistName)
+        let credits = ArtistCredits.song(artist: song.artistName, title: song.title)
+        let artistIdentity = credits.first?.identity ?? StatsCalculator.folded(song.artistName)
         let album = song.albumTitle.map(StatsCalculator.folded) ?? ""
         var actions = SongActions(
             play: canPlay ? play : nil,
@@ -218,7 +254,9 @@ extension SongActions {
             if !album.isEmpty {
                 actions.goToAlbum = { go(.stats(.album("\(album)\u{1F}\(artistIdentity)"))) }
             }
-            actions.goToArtist = { go(.artistNamed(song.artistName, identity: artistIdentity)) }
+            let lead = credits.first?.name ?? song.artistName
+            actions.goToArtist = { go(.artistNamed(lead, identity: artistIdentity)) }
+            actions.linkArtists(credits) { go(.artistNamed($0.name, identity: $0.identity)) }
             actions.stats = { go(.stats(.song(song.songIdentity))) }
         }
         if canPlay {

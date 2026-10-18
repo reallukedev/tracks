@@ -86,7 +86,7 @@ final class PlayFeed {
                 MixBuilder.build(from: history, signals: signals),
                 PlayFacts.songs(in: history),
                 PlayFacts.favoriteArtists(in: history, since: since),
-                Set(history.captures.map(\.artistIdentity)),
+                Set(history.captures.flatMap(\.creditIdentities)),
                 PlayFacts.favoriteArtists(in: history, since: since, limit: 13, halfLife: 30 * 24 * 60 * 60).map(\.name)
             )
         }

@@ -309,9 +309,12 @@ public struct StatsSummary: Sendable, Equatable {
         knownYearPlays > 0 ? Double(recentReleasePlays) / Double(knownYearPlays) : nil
     }
 
-    /// The top `limit` artists, and plays by everyone else.
-    public func artistMix(limit: Int) -> (artists: [ArtistTally], otherCount: Int) {
+    /// The top `limit` artists, plays by everyone else, and what their shares are of. A
+    /// collaboration counts for each artist on it, so when the artists' plays add up to more
+    /// than the plays themselves, the whole is their sum and the shares still fill it once.
+    public func artistMix(limit: Int) -> (artists: [ArtistTally], otherCount: Int, whole: Int) {
         let top = Array(topArtists.prefix(limit))
-        return (top, max(0, captureCount - top.reduce(0) { $0 + $1.count }))
+        let whole = max(captureCount, topArtists.reduce(0) { $0 + $1.count })
+        return (top, max(0, whole - top.reduce(0) { $0 + $1.count }), whole)
     }
 }

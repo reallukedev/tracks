@@ -42,9 +42,7 @@ extension StatsCalculator {
                 figures.knownGenrePlays += 1
                 genres[genre, default: (0, 0, [])].count += 1
                 genres[genre, default: (0, 0, [])].seconds += seconds
-                if !capture.artistIdentity.isEmpty {
-                    genres[genre, default: (0, 0, [])].artists.insert(capture.artistIdentity)
-                }
+                genres[genre, default: (0, 0, [])].artists.formUnion(capture.creditIdentities)
             }
 
             if let year = metadata.releaseYear {

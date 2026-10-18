@@ -49,6 +49,8 @@ struct TrackRow: View {
     var isPlayable = true
     /// A short fact in place of the plays, like when it played.
     var detail: String?
+    /// The song's artist, where the subtitle names them, so each name in it opens their page.
+    var artist: String?
 
     @Environment(PlayerModel.self) private var player
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -80,7 +82,7 @@ struct TrackRow: View {
                     }
                 }
                 if let subtitle, !subtitle.isEmpty {
-                    Text(subtitle)
+                    ArtistLinks(text: subtitle, artist: artist, title: title)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)

@@ -233,16 +233,23 @@ struct ArtistShareBar: View {
 
     private static let palette: [Color] = [.accentColor, .blue, .teal, .orange, .pink]
 
+    /// What the shares are of. A collaboration counts for each artist on it, so the artists'
+    /// plays can add up to more than the period's, and the bar is cut from their sum then.
+    private var whole: Int {
+        max(plays, entries.reduce(0) { $0 + $1.count })
+    }
+
     private var shares: [(name: String, plays: Int, color: Color)] {
         let top = entries.prefix(Self.palette.count)
         var shares = zip(top, Self.palette).map { ($0.title, $0.count, $1) }
-        let rest = plays - top.map(\.count).reduce(0, +)
+        let rest = whole - top.map(\.count).reduce(0, +)
         if rest > 0 { shares.append((String(localized: "Everyone Else"), rest, Color.secondary.opacity(0.35))) }
         return shares
     }
 
     var body: some View {
         let shares = shares
+        let whole = whole
         VStack(alignment: .leading, spacing: 12) {
             Text("Who You Listened To")
                 .font(.subheadline.weight(.semibold))
@@ -252,7 +259,7 @@ struct ArtistShareBar: View {
                     ForEach(shares.enumerated(), id: \.offset) { _, share in
                         Rectangle()
                             .fill(share.color)
-                            .frame(width: max(2, (proxy.size.width - CGFloat(shares.count - 1) * 2) * CGFloat(share.plays) / CGFloat(max(plays, 1))))
+                            .frame(width: max(2, (proxy.size.width - CGFloat(shares.count - 1) * 2) * CGFloat(share.plays) / CGFloat(max(whole, 1))))
                     }
                 }
                 .clipShape(.capsule)
@@ -267,7 +274,7 @@ struct ArtistShareBar: View {
                             .frame(width: 8, height: 8)
                         Text(share.name)
                             .lineLimit(1)
-                        Text((Double(share.plays) / Double(max(plays, 1))).formatted(.percent.precision(.fractionLength(0))))
+                        Text((Double(share.plays) / Double(max(whole, 1))).formatted(.percent.precision(.fractionLength(0))))
                             .foregroundStyle(.secondary)
                             .monospacedDigit()
                     }

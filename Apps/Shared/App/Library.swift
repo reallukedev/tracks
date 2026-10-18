@@ -65,6 +65,7 @@ final class Library {
     func connect(to store: TracksStore, looksUpCatalog: Bool) {
         guard reader == nil else { return }
         self.looksUpCatalog = looksUpCatalog
+        if !looksUpCatalog { CatalogCredits.shared.update(from: Self.sampleMetadata) }
         // The store's own reader, which the merge shares, so the history is read in full once.
         reader = store.historyReader
         refresh()
@@ -90,6 +91,7 @@ final class Library {
                         if looksUpCatalog, !hasLoadedSongMetadata {
                             songMetadata = await Self.loadSongMetadata(from: songMetadataCache)
                             hasLoadedSongMetadata = true
+                            CatalogCredits.shared.update(from: songMetadata)
                         }
                         let (history, sessions) = await Self.build(snapshot)
                         publish(history, sessions: sessions)
@@ -179,7 +181,7 @@ final class Library {
                 publishLookups(force: true)
             }
             while looksUpCatalog {
-                let requests = await Self.pendingSongs(in: history, lookedUp: Set(songMetadata.keys))
+                let requests = await Self.pendingSongs(in: history, known: songMetadata)
                 guard !requests.isEmpty,
                       let found = try? await CatalogLookup().songMetadata(for: requests),
                       looksUpCatalog
@@ -191,6 +193,7 @@ final class Library {
                     into: songMetadata,
                     cache: songMetadataCache
                 )
+                CatalogCredits.shared.update(from: songMetadata)
                 hasUnpublishedLookups = true
                 publishLookups(force: false)
             }
@@ -211,9 +214,9 @@ final class Library {
     @concurrent
     private nonisolated static func pendingSongs(
         in history: ListeningHistory,
-        lookedUp: Set<String>
+        known: [String: SongMetadata]
     ) async -> [SongMetadataLookup.Request] {
-        SongMetadataLookup.pending(in: history, lookedUp: lookedUp, limit: 200, searchLimit: 20)
+        SongMetadataLookup.pending(in: history, known: known, limit: 200, searchLimit: 20)
     }
 
     @concurrent

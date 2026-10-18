@@ -11,7 +11,7 @@ struct ArtistMixCard: View {
 
     var body: some View {
         let mix = summary.artistMix(limit: Self.limit)
-        let total = Double(max(1, summary.captureCount))
+        let total = Double(max(1, mix.whole))
 
         Card {
             VStack(alignment: .leading, spacing: 14) {

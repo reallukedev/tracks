@@ -93,7 +93,11 @@ private struct MacHistoryTable: View {
             .width(min: 110, ideal: 240)
 
             TableColumn("Artist", sortUsing: SortDescriptor(\Capture.artistName, comparator: .localizedStandard)) { capture in
-                Text(capture.artistName)
+                CreditedText(
+                    text: capture.artistName,
+                    credits: ArtistCredits.song(artist: capture.artistName, title: capture.title),
+                    linkStyle: .cell
+                )
             }
             .width(min: 70, ideal: 160)
 
