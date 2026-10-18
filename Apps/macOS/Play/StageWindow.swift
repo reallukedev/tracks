@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 
 /// Stage on the Mac: a window of its own that goes full screen as it opens, for a second
-/// display or a TV. Esc, or its close button, puts it away.
+/// display or a TV. Esc, or its Close button, puts it away.
 struct StageWindow: Scene {
     static let id = "stage"
     let model: AppModel
@@ -30,41 +30,20 @@ struct StageWindow: Scene {
 private struct StageWindowContent: View {
     @Environment(\.dismissWindow) private var dismissWindow
     @State private var window: NSWindow?
-    @State private var controlsShown = true
+    @State private var chrome = StageWindowChrome()
 
     var body: some View {
         StageView { close() }
+            .environment(chrome)
             .frame(minWidth: 640, minHeight: 400)
             .background { WindowReader(window: $window) }
             .onChange(of: window) { _, window in
-                showButtons(controlsShown, animated: false)
-                guard let window, !window.styleMask.contains(.fullScreen) else { return }
+                guard let window else { return }
+                chrome.attach(window)
+                guard !window.styleMask.contains(.fullScreen) else { return }
                 window.collectionBehavior.insert(.fullScreenPrimary)
                 window.toggleFullScreen(nil)
             }
-            .onPreferenceChange(StageControlsShownKey.self) { isShown in
-                controlsShown = isShown
-                showButtons(isShown, animated: true)
-            }
-    }
-
-    /// Close, minimize and zoom come and go with Stage's controls, as the pointer arrives
-    /// and leaves, so nothing sits over the song in a window left showing it.
-    private func showButtons(_ isShown: Bool, animated: Bool) {
-        guard let window else { return }
-        let buttons = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].compactMap(window.standardWindowButton)
-        if isShown { buttons.forEach { $0.isHidden = false } }
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = animated ? 0.3 : 0
-            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            buttons.forEach { $0.animator().alphaValue = isShown ? 1 : 0 }
-        } completionHandler: {
-            // Faded out, they stop taking clicks too, unless they've been brought back since.
-            MainActor.assumeIsolated {
-                guard !controlsShown else { return }
-                buttons.forEach { $0.isHidden = true }
-            }
-        }
     }
 
     /// Leaves full screen first, so the space it made goes with it.
@@ -86,14 +65,29 @@ private struct WindowReader: NSViewRepresentable {
     @Binding var window: NSWindow?
 
     func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        Task { @MainActor in window = view.window }
+        let view = ArrivalView()
+        view.onArrival = { window in
+            Task { @MainActor in self.window = window }
+        }
         return view
     }
 
     func updateNSView(_ view: NSView, context: Context) {
-        if window !== view.window {
-            Task { @MainActor in window = view.window }
+        if window !== view.window, let arrived = view.window {
+            Task { @MainActor in window = arrived }
+        }
+    }
+
+    /// Says when the view lands in a window, which a SwiftUI update may not follow, and hides
+    /// the system's window buttons then, before the window's first frame.
+    private final class ArrivalView: NSView {
+        var onArrival: ((NSWindow) -> Void)?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard let window else { return }
+            StageWindowChrome.hideSystemButtons(of: window)
+            onArrival?(window)
         }
     }
 }

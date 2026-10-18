@@ -31,7 +31,10 @@ struct StageView: View {
     @State private var activity = 0
     #if os(macOS)
     @State private var isOverControls = false
+    /// The pointer in the band along the top, on its way to the buttons there.
+    @State private var isNearTop = false
     @State private var pointer = PointerMoves()
+    @Environment(StageWindowChrome.self) private var chrome: StageWindowChrome?
     #endif
     @FocusState private var isFocused: Bool
     @Environment(\.isOnScreen) private var isOnScreen
@@ -65,6 +68,9 @@ struct StageView: View {
                 }
             }
             .foregroundStyle(.white)
+            #if os(macOS)
+            windowDragStrip
+            #endif
             controls
                 .opacity(controlsShown ? 1 : 0)
                 .allowsHitTesting(controlsShown)
@@ -99,7 +105,7 @@ struct StageView: View {
             let found = await CoverTint.palette(for: cover)
             if !Task.isCancelled { palette = found }
         }
-        .animation(.easeInOut(duration: 0.3), value: controlsShown)
+        .animation(controlsAnimation, value: controlsShown)
         .animation(stageAnimation, value: layout)
         .animation(stageAnimation, value: player.current?.id)
         .contentShape(.rect)
@@ -109,14 +115,12 @@ struct StageView: View {
         // window puts them away at once.
         .onContinuousHover { phase in
             switch phase {
-            case .active: pointerMoved()
+            case .active(let location): pointerMoved(to: location)
             case .ended: pointerLeft()
             }
         }
-        // The window's buttons come and go with the controls.
-        .preference(key: StageControlsShownKey.self, value: controlsShown)
         #endif
-        .task(id: IdleKey(activity: activity, isShown: showsControls, customizing: customizing)) {
+        .task(id: IdleKey(activity: activity, isShown: showsControls, customizing: customizing, isResting: isPointerOnControls)) {
             await putControlsAwayWhenIdle()
         }
         .accessibilityActions {
@@ -157,6 +161,16 @@ struct StageView: View {
             if !controlsShown { showHintIfNew() }
         }
         .listensToAudio()
+    }
+
+    /// Up at once, as the pointer arrives; away gently, since nobody asked for it.
+    private var controlsAnimation: Animation {
+        controlsShown ? .easeOut(duration: 0.2) : .easeInOut(duration: 0.35)
+    }
+
+    /// The controls drift in from the edge they sit on. Under Reduce Motion they only fade.
+    private func controlsDrift(_ distance: CGFloat) -> CGFloat {
+        controlsShown || reduceMotion ? 0 : distance
     }
 
     /// Under Reduce Motion, a new layout or song settles in a moment rather than gliding there.
@@ -447,7 +461,12 @@ struct StageView: View {
     private var controls: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
+                #if os(macOS)
+                // In the corner where the window's own buttons would be.
+                StageWindowButtons(onClose: onClose)
+                #else
                 controlButton("Close Stage", symbol: "xmark", action: onClose)
+                #endif
                 Spacer()
                 #if os(iOS)
                 controlButton(orientation == .portrait ? "Turn to Landscape" : "Turn to Portrait", symbol: "rectangle.portrait.rotate") {
@@ -467,6 +486,7 @@ struct StageView: View {
             #if os(macOS)
             .onHover { isOverControls = $0 }
             #endif
+            .offset(y: controlsDrift(-6))
             Spacer()
             if let track = player.current {
                 VStack(spacing: isShort ? 8 : 18) {
@@ -490,16 +510,13 @@ struct StageView: View {
                 #if os(macOS)
                 .onHover { isOverControls = $0 }
                 #endif
+                .offset(y: controlsDrift(6))
             }
         }
         // Anything done with the controls keeps them up a while longer.
         .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in activity += 1 })
         .foregroundStyle(.white)
         .padding(24)
-        #if os(macOS)
-        // Below the window's own buttons, which come up with these, rather than crowding them.
-        .padding(.top, 20)
-        #endif
         .background {
             // Shade over the song, deeper top and bottom, so the controls sit over it rather
             // than among it.
@@ -518,6 +535,14 @@ struct StageView: View {
     }
 
     private func controlButton(_ label: LocalizedStringKey, symbol: String, action: @escaping () -> Void) -> some View {
+        #if os(macOS)
+        Button(action: action) {
+            Image(systemName: symbol)
+        }
+        .buttonStyle(.stageGlassCircle)
+        .help(Text(label))
+        .accessibilityLabel(label)
+        #else
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.body.weight(.semibold))
@@ -527,6 +552,7 @@ struct StageView: View {
         .buttonStyle(.plain)
         .glassEffect(.regular.interactive(), in: .circle)
         .accessibilityLabel(label)
+        #endif
     }
 
     /// A word about the controls the first few times Stage opens, since at first it shows none.
@@ -579,13 +605,24 @@ struct StageView: View {
         let activity: Int
         let isShown: Bool
         let customizing: Bool
+        let isResting: Bool
+    }
+
+    /// Over the controls, or close to the buttons along the top: the wait to put them away
+    /// holds until the pointer moves off.
+    private var isPointerOnControls: Bool {
+        #if os(macOS)
+        isOverControls || isNearTop
+        #else
+        false
+        #endif
     }
 
     /// Puts the controls away once nothing's been done with them for a few seconds, as a video
     /// player does, so a Stage left on doesn't keep them over the song. Not while customizing,
     /// under VoiceOver, or with the pointer resting on them.
     private func putControlsAwayWhenIdle() async {
-        guard showsControls, !customizing, !LaunchScene.opensStageControls else { return }
+        guard showsControls, !customizing, !isPointerOnControls, !LaunchScene.opensStageControls else { return }
         #if os(macOS)
         let wait = 3.0
         #else
@@ -594,14 +631,15 @@ struct StageView: View {
         try? await Task.sleep(for: .seconds(wait))
         guard !Task.isCancelled, !voiceOver, !customizing else { return }
         #if os(macOS)
-        guard !isOverControls else { return }
         NSCursor.setHiddenUntilMouseMoves(true)
         #endif
         showsControls = false
     }
 
     #if os(macOS)
-    private func pointerMoved() {
+    private func pointerMoved(to location: CGPoint) {
+        let nearTop = location.y < Self.topReach
+        if nearTop != isNearTop { isNearTop = nearTop }
         // Each move restarts the wait, but not more than twice a second.
         guard !showsControls || pointer.isDue else { return }
         showsHint = false
@@ -609,24 +647,34 @@ struct StageView: View {
         activity += 1
     }
 
+    /// How far down from the top the pointer counts as near the buttons there.
+    private static let topReach: CGFloat = 120
+
     private func pointerLeft() {
+        isNearTop = false
         guard showsControls, !customizing, !voiceOver, !LaunchScene.opensStageControls else { return }
+        // A hover also ends over what AppKit lays on the content, the title bar among it. Only
+        // leaving the window puts the controls away at once.
+        if chrome?.containsPointer == true { return }
         showsHint = false
         showsControls = false
+    }
+
+    /// Empty space along the top moves the window, as a title bar does, and a click there
+    /// still shows or hides the controls.
+    private var windowDragStrip: some View {
+        Color.clear
+            .frame(height: 68)
+            .contentShape(.rect)
+            .onTapGesture(perform: toggleControls)
+            .gesture(WindowDragGesture())
+            .frame(maxHeight: .infinity, alignment: .top)
+            .ignoresSafeArea()
     }
     #endif
 }
 
 #if os(macOS)
-/// Whether Stage's controls are up, for its window to show its buttons with them.
-struct StageControlsShownKey: PreferenceKey {
-    static let defaultValue = true
-
-    static func reduce(value: inout Bool, nextValue: () -> Bool) {
-        value = nextValue()
-    }
-}
-
 /// When the pointer last restarted Stage's idle wait. Not observed: a move redraws nothing.
 private final class PointerMoves {
     private var last = Date.distantPast
