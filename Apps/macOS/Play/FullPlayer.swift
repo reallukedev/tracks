@@ -112,7 +112,9 @@ struct FullPlayer: View {
                         case .play(let route): openPlayRoute(route)
                         case .stats(let route): openPlayRoute(.stats(route))
                         }
-                    }, onTuneRadio: openRadioTuner.map { open in { open() } })
+                    }, onTuneRadio: openRadioTuner.map { open in { open() } }, showsFavorite: false)
+                    Divider()
+                    SleepTimerMenu()
                 }
                 .labelStyle(.iconOnly)
                 .menuStyle(.button)
@@ -235,15 +237,15 @@ struct FullPlayer: View {
                     .help(repeatHelp)
                     .accessibilityValue(repeatHelp)
             }
-            Menu("Sleep Timer", systemImage: player.sleepTimer == nil ? "moon.zzz" : "moon.zzz.fill") {
-                SleepTimerItems(player: player)
+            if let track = player.current {
+                FavoriteStarButton(track: track) { systemImage, _ in
+                    Label("Favorite", systemImage: systemImage)
+                }
+                .menuStyle(.button)
+                .buttonStyle(BarIconButtonStyle(diameter: 36))
+                .menuIndicator(.hidden)
+                .fixedSize()
             }
-            .labelStyle(.iconOnly)
-            .menuStyle(.button)
-            .buttonStyle(BarIconButtonStyle(diameter: 36, isOn: player.sleepTimer != nil))
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help("Sleep Timer")
             Spacer()
             Button("Your History", systemImage: "clock.arrow.circlepath") { showsBack.toggle() }
                 .buttonStyle(BarIconButtonStyle(diameter: 36, isOn: showsBack))

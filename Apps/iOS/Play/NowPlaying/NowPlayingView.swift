@@ -259,7 +259,14 @@ struct NowPlayingView: View {
             }
 
             HStack {
-                NowPlayingFavoriteButton(track: track)
+                FavoriteStarButton(track: track) { systemImage, isOn in
+                    Image(systemName: systemImage)
+                        .font(.title3)
+                        .foregroundStyle(.white.opacity(isOn ? 1 : 0.7))
+                        .frame(width: 44, height: 44)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
                 Spacer()
                 pageToggle(isOn: showsBack && !showsQueue, systemImage: "clock.arrow.circlepath", label: showsBack ? "Show the Cover" : "Your History") {
                     if showsQueue {
