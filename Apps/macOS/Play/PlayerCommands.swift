@@ -33,6 +33,8 @@ struct PlayerWindowActions {
 
 extension FocusedValues {
     @Entry var playerWindow: PlayerWindowActions?
+    /// The one song selected in a table, for Get Info. With none, Get Info is the playing song's.
+    @Entry var songInfoSelection: SongInfoSubject?
 }
 
 /// The window's Back and Forward, as a browser's: what Back left stays ahead until another
@@ -138,6 +140,7 @@ private struct PlayerCommandsModifier: ViewModifier {
 struct ControlsCommands: Commands {
     let model: AppModel
     @FocusedValue(\.playerWindow) private var window
+    @FocusedValue(\.songInfoSelection) private var selection
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
 
@@ -173,7 +176,7 @@ struct ControlsCommands: Commands {
         }
 
         CommandMenu("Song") {
-            PlayingSongMenuItems(model: model, window: window, openWindow: openWindow)
+            PlayingSongMenuItems(model: model, window: window, selection: selection, openWindow: openWindow)
         }
 
         CommandGroup(before: .windowList) {
@@ -312,6 +315,7 @@ private struct ControlsMenuItems: View {
 private struct PlayingSongMenuItems: View {
     let model: AppModel
     let window: PlayerWindowActions?
+    let selection: SongInfoSubject?
     let openWindow: OpenWindowAction
 
     private var player: PlayerModel { model.player }
@@ -365,12 +369,19 @@ private struct PlayingSongMenuItems: View {
                 }
                 .disabled(track?.local == nil && song == nil)
             }
-            // ⌘I is the selection's, as Music's Get Info is: History's inspector has it.
             Button("Your Stats", systemImage: "chart.bar.xaxis") {
                 if let track { open(.stats(.song(track.songIdentity))) }
             }
             .keyboardShortcut("i", modifiers: [.command, .option])
             .disabled(track == nil)
+            // Music's Get Info: the selected song, or the one playing when nothing is selected.
+            Button("Get Info", systemImage: "info.circle") {
+                if let subject = selection ?? track.map(SongInfoSubject.init) {
+                    SongInfoWindow.show(subject, model: model, openWindow: openWindow)
+                }
+            }
+            .keyboardShortcut("i", modifiers: .command)
+            .disabled(selection == nil && track == nil)
 
             Divider()
 

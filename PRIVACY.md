@@ -112,6 +112,10 @@ If you ask Tracks to import your Last.fm history, it reads your scrobbles from L
 
 You can turn scrobbling off, or disconnect Last.fm, in the Tracks settings at any time. Disconnecting deletes the Tracks Last.fm key from that device. Scrobbles already sent stay on your Last.fm profile; you can delete them on Last.fm's website.
 
+## Song info
+
+When you choose Get Info on a song, Tracks asks [MusicBrainz](https://musicbrainz.org), the open music encyclopedia, who made it, what it samples and what other recordings of it exist. It sends only the song's identifying code (its ISRC) or, when it has none, its title and artist. Nothing about you or your listening is sent, and MusicBrainz's answers are kept on your device so the same song isn't asked about again. With Last.fm connected, Get Info also asks Last.fm for the song's tags, its wiki summary and similar songs. MusicBrainz has its own [privacy policy](https://metabrainz.org/privacy).
+
 ## SharePlay (iPhone, optional)
 
 SharePlay lets the people with you add songs to what's playing on your iPhone. They join in Messages, or by scanning a code Tracks shows on your iPhone or your car's screen.
@@ -128,6 +132,7 @@ Tracks connects only to:
 
 - **Apple**, for Apple Music (through MusicKit), album artwork, and iCloud sync, and Apple's public music search from the Tracks App Clip
 - **Last.fm**, only if you connect your account
+- **MusicBrainz**, only when you open a song's info, as described under [Song info](#song-info)
 - **Your own music servers and Lidarr**, only the ones you add
 - **SharePlay's relay**, only while a SharePlay code is showing or someone has joined with it, as described above
 - **Your other devices** on the same local network, as described under [Your Devices](#your-devices)

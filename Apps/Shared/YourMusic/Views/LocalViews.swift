@@ -234,6 +234,7 @@ extension SongActions {
             play: isPlayable ? play : nil,
             playlistTracks: [track],
             stats: showsStats ? { go(.stats(.song(track.identity))) } : nil,
+            info: SongInfoSubject(track),
             suggestLess: showsStats ? track.identity : nil,
             block: track.artist
         )

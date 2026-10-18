@@ -102,29 +102,8 @@ struct SongDetailView: View {
                 PlaysOverTimeCard(timeline: profile.timeline, unit: profile.timelineUnit)
             }
 
-            if profile.sources.count > 1 || !profile.stations.isEmpty {
-                Card {
-                    VStack(alignment: .leading, spacing: 14) {
-                        CardLabel(title: "How You Heard It", systemImage: "headphones", tint: .accentColor)
-                        if profile.sources.count > 1 {
-                            SourcesDonut(sources: profile.sources)
-                        }
-                        ForEach(profile.stations) { station in
-                            Label {
-                                HStack {
-                                    Text(station.name)
-                                    Spacer()
-                                    Text("^[\(station.count) time](inflect: true)")
-                                        .foregroundStyle(.secondary)
-                                }
-                            } icon: {
-                                Image(systemName: "dot.radiowaves.left.and.right")
-                                    .foregroundStyle(.pink)
-                            }
-                            .font(.subheadline)
-                        }
-                    }
-                }
+            if HowYouHeardItCard.isWorthShowing(sources: profile.sources, stations: profile.stations) {
+                HowYouHeardItCard(sources: profile.sources, stations: profile.stations)
             }
 
             VStack(alignment: .leading, spacing: 10) {

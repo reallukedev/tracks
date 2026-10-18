@@ -154,10 +154,11 @@ private struct MacHistoryTable: View {
                 selectionMenu(ids)
             }
         } primaryAction: { ids in
-            // Double-click or Return plays, as in Music; ⌘I shows the inspector.
+            // Double-click or Return plays, as in Music; ⌘I gets its info.
             let chosen = ordered(ids)
             if playback.canPlay(chosen) { playback.play(chosen) }
         }
+        .focusedSceneValue(\.songInfoSelection, single(selection).map { SongInfoSubject(MixSong($0)) })
         .onDeleteCommand {
             guard !model.isShowingSampleData else { return }
             if let capture = single(selection) {
@@ -231,8 +232,9 @@ private struct MacHistoryTable: View {
                 Button("Inspector", systemImage: "sidebar.trailing") {
                     showsInspector.toggle()
                 }
-                .keyboardShortcut("i", modifiers: .command)
-                .help("Show or hide the song inspector (⌘I)")
+                // ⌘I is Get Info, as in Music.
+                .keyboardShortcut("i", modifiers: [.command, .control])
+                .help("Show or hide the song inspector (⌃⌘I)")
             }
         }
         .deleteConfirmation(for: $pendingDelete)

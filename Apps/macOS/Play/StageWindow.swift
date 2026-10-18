@@ -12,6 +12,7 @@ struct StageWindow: Scene {
             // Everything Stage's controls and menus read, as the main window has it: without
             // one, opening Stage stops the app.
             StageWindowContent()
+                .opensSongInfo(model)
                 .tracksOnScreen()
                 .environment(model)
                 .environment(model.player)

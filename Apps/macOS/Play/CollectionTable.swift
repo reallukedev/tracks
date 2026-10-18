@@ -169,6 +169,7 @@ struct CollectionTable<SongMenu: View>: View {
             guard removal != nil, !selection.isEmpty else { return }
             removing = selection
         }
+        .focusedSceneValue(\.songInfoSelection, selectedSubject)
         .confirmationDialog(
             removalTitle,
             isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
@@ -183,6 +184,12 @@ struct CollectionTable<SongMenu: View>: View {
         } message: {
             Text("They stay in your music, and your plays of them stay in your history.")
         }
+    }
+
+    /// The one song selected, for Get Info.
+    private var selectedSubject: SongInfoSubject? {
+        guard selection.count == 1, let track = tracks.first(where: { selection.contains($0.id) }) else { return nil }
+        return SongInfoSubject(title: track.title, artistName: track.artist, albumTitle: track.album, cover: track.artwork)
     }
 
     private func row(_ track: CollectionTrack, index: Int) -> some View {

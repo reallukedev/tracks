@@ -24,7 +24,9 @@ struct SongActions {
     /// does. Used over ``goToArtist`` when there are two or more.
     var artistLinks: [ArtistLink] = []
     var stats: (() -> Void)?
-    /// Show in Finder or Show in Music, after Your Stats.
+    /// The song, for Get Info. Nil leaves it out.
+    var info: SongInfoSubject?
+    /// Show in Finder or Show in Music, after Get Info.
     var reveal: [SongMenuButton] = []
     var share: SongShare?
     /// The song's identity, for Suggest Less. Nil leaves it out.
@@ -93,10 +95,11 @@ enum SongShare {
 
 /// Every song's menu, in one order, with one name for each action: Play, Play Next, Play Last ·
 /// Create Station · Add to Library, Add to Playlist, Favorite · Go to Album, Go to Artist, Your
-/// Stats · Share… · Suggest Less, Block · and Remove or Delete where they apply. A group with
+/// Stats, Get Info · Share… · Suggest Less, Block · and Remove or Delete where they apply. A group with
 /// nothing in it takes its divider with it.
 struct SongMenuItems: View {
     let actions: SongActions
+    @Environment(\.showSongInfo) private var showSongInfo
 
     init(_ actions: SongActions) {
         self.actions = actions
@@ -104,7 +107,13 @@ struct SongMenuItems: View {
 
     private var hasPlay: Bool { actions.play != nil || actions.playNext != nil || actions.playLast != nil }
     private var hasLibrary: Bool { actions.addToLibrary != nil || !actions.keep.isEmpty || !actions.playlistTracks.isEmpty || actions.favorite != nil }
-    private var hasGo: Bool { actions.goToAlbum != nil || actions.goToArtist != nil || !actions.artistLinks.isEmpty || actions.stats != nil || !actions.reveal.isEmpty }
+    private var hasGo: Bool { actions.goToAlbum != nil || actions.goToArtist != nil || !actions.artistLinks.isEmpty || actions.stats != nil || getInfo != nil || !actions.reveal.isEmpty }
+
+    /// Only where something can show it.
+    private var getInfo: (() -> Void)? {
+        guard let subject = actions.info, let showSongInfo else { return nil }
+        return { showSongInfo(subject) }
+    }
 
     var body: some View {
         let groups = [hasPlay, actions.createStation != nil, hasLibrary, hasGo, actions.share != nil]
@@ -147,6 +156,9 @@ struct SongMenuItems: View {
             GoToArtistItem(actions: actions)
             if let stats = actions.stats {
                 Button("Your Stats", systemImage: "chart.bar.xaxis", action: stats)
+            }
+            if let getInfo {
+                Button("Get Info", systemImage: "info.circle", action: getInfo)
             }
             buttons(actions.reveal)
         }
@@ -211,6 +223,7 @@ extension SongActions {
             createStation: { player.playStation(from: song) },
             addToLibrary: { player.addToLibrary(song) },
             favorite: song,
+            info: SongInfoSubject(song),
             share: song.url.map(SongShare.url)
         )
         if let go {
@@ -246,6 +259,7 @@ extension SongActions {
         let album = song.albumTitle.map(StatsCalculator.folded) ?? ""
         var actions = SongActions(
             play: canPlay ? play : nil,
+            info: SongInfoSubject(song),
             share: player.isDemo ? nil : .song(id: song.songID, title: song.title, artist: song.artistName),
             suggestLess: song.songIdentity,
             block: song.artistName

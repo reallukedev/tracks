@@ -48,6 +48,10 @@ struct RootView: View {
             .fullScreenCover(isPresented: $showsNowPlaying) {
                 NowPlayingView(onNavigate: go(to:))
                     .navigationTransition(.zoom(sourceID: "nowPlaying", in: nowPlayingTransition))
+                    .songInfoSheet(model) { route in
+                        showsNowPlaying = false
+                        go(to: .play(route))
+                    }
             }
             #if DEBUG
             .overlay {
@@ -60,6 +64,8 @@ struct RootView: View {
             .shakeToPlay(model.player) { showsNowPlaying = true }
             // Songs being added to a playlist, from a menu anywhere.
             .sheet(item: Bindable(model.yourMusic.playlists).picking) { PlaylistPickerSheet(pick: $0) }
+            // Get Info, from any song's menu. Now Playing shows its own over itself.
+            .songInfoSheet(model, isActive: !showsNowPlaying) { go(to: .play($0)) }
             // Under Now Playing while it's open; it shows its own.
             .playerFeedback(isActive: !showsNowPlaying)
             // Someone else's SharePlay, joined from Messages.
@@ -85,6 +91,13 @@ struct RootView: View {
                 #endif
             }
             .task { await model.playFeed.followSubscription() }
+            #if DEBUG
+            .onChange(of: model.library.isLoaded, initial: true) { _, isLoaded in
+                if isLoaded, let subject = SongInfoSamples.requested(in: model.library.history) {
+                    model.songInfo.show(subject)
+                }
+            }
+            #endif
             .onChange(of: player.hasQueue) { _, hasQueue in
                 if hasQueue, LaunchScene.opensNowPlaying { showsNowPlaying = true }
             }
@@ -104,6 +117,7 @@ struct RootView: View {
             .environment(\.playSongs, songDestination == .tracks ? PlaySongsAction { items, title in
                 player.play(.history(items.map(HistorySong.init)), from: .songs(title))
             } : nil)
+            .environment(\.showSongInfo, ShowSongInfoAction { model.songInfo.show($0) })
             .task { await model.startCapture() }
             // Lidarr's actions show wherever music does, whatever the source.
             .task { await model.lidarr.check() }

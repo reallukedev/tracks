@@ -74,6 +74,7 @@ struct LibrarySongsTable<Menu: View>: View {
         .onDeleteCommand {
             if let delete, !selection.isEmpty { delete(selection) }
         }
+        .focusedSceneValue(\.songInfoSelection, selectedSubject)
     }
 
     /// The table's sort descriptors, as the one order the page keeps. A column clicked for the
@@ -90,6 +91,12 @@ struct LibrarySongsTable<Menu: View>: View {
     private func isNearEnd(_ row: LibrarySongRow) -> Bool {
         guard let index = rows.lastIndex(where: { $0.id == row.id }) else { return false }
         return index >= rows.count - 30
+    }
+
+    /// The one row selected, for Get Info.
+    private var selectedSubject: SongInfoSubject? {
+        guard selection.count == 1, let row = rows.first(where: { selection.contains($0.id) }) else { return nil }
+        return SongInfoSubject(title: row.title, artistName: row.artist, albumTitle: row.album, cover: row.cover)
     }
 
     /// The row dragged, with the rest of the selection when it's part of it.

@@ -19,6 +19,7 @@ struct MiniPlayerWindow: Scene {
         Window("Mini Player", id: Self.id) {
             if let capture = model.capture {
                 MiniPlayer()
+                    .opensSongInfo(model)
                     .tracksOnScreen()
                     .environment(model)
                     .environment(model.player)

@@ -189,6 +189,11 @@ struct MacRootView: View {
                     MenuBarFooter.bringSettingsForward(openSettings: openSettings)
                 }
             }
+            .onChange(of: model.library.isLoaded, initial: true) { _, isLoaded in
+                if isLoaded, let subject = SongInfoSamples.requested(in: model.library.history) {
+                    SongInfoWindow.show(subject, model: model, openWindow: openWindow)
+                }
+            }
             #endif
         } else {
             ContentUnavailableView {

@@ -272,6 +272,7 @@ struct NowPlayingMenuItems: View {
         actions.playNext = nil
         actions.playLast = nil
         actions.stats = { navigate(.stats(.song(identity))) }
+        actions.info = SongInfoSubject(track)
         // Steering what a live mix plays next, for the song on only.
         if player.canAskForMoreLikeThis, identity == player.current?.songIdentity {
             let isAsked = player.moreLikeThis.contains(identity)
@@ -407,6 +408,7 @@ struct NowPlayingTitleMenu<Label: View>: View {
     @ViewBuilder let label: () -> Label
     @Environment(PlayerModel.self) private var player
     @Environment(YourMusic.self) private var music
+    @Environment(\.showSongInfo) private var showSongInfo
 
     var body: some View {
         let actions = actions
@@ -418,6 +420,9 @@ struct NowPlayingTitleMenu<Label: View>: View {
             if let stats = actions.stats {
                 Button("Your Stats", systemImage: "chart.bar.xaxis", action: stats)
             }
+            if let showSongInfo {
+                Button("Get Info", systemImage: "info.circle") { showSongInfo(SongInfoSubject(track)) }
+            }
         } label: {
             label()
                 .contentShape(.rect)
@@ -425,7 +430,7 @@ struct NowPlayingTitleMenu<Label: View>: View {
         .menuStyle(.button)
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
-        .accessibilityHint("Shows the album, the artist and your stats")
+        .accessibilityHint("Shows the album, the artist, your stats and the song's info")
     }
 
     private var actions: SongActions {

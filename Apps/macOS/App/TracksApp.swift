@@ -43,6 +43,7 @@ struct TracksApp: App {
     var body: some Scene {
         WindowGroup("Tracks", id: "main") {
             MacRootView(model: model)
+                .opensSongInfo(model)
                 .tracksOnScreen()
                 .environment(behaviour)
                 .environment(quitMonitor)
@@ -83,6 +84,7 @@ struct TracksApp: App {
 
         MiniPlayerWindow(model: model)
         StageWindow(model: model)
+        SongInfoWindow(model: model)
 
         Settings {
             MacSettingsView(model: model)
@@ -97,6 +99,7 @@ struct TracksApp: App {
         // buildEither, and its buildOptional only takes availability checks.
         MenuBarExtra(isInserted: $showMenuBarExtra) {
             MenuBarContent(model: model, monitor: monitor)
+                .opensSongInfo(model)
                 .tracksOnScreen()
                 .environment(behaviour)
                 .environment(quitMonitor)

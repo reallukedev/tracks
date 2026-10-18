@@ -3,8 +3,8 @@ import Foundation
 import MusicKit
 
 /// Invented Apple Music items for screenshots of the About sections with sample data, which
-/// can't reach the catalog: an artist with a biography, and a song with its credits and how
-/// it's mastered. `-TracksSampleArtist YES` beside `-TracksSampleAlbum YES` opens the artist
+/// can't reach the catalog: an artist with a biography, and a song with its credits, how it's
+/// mastered and its album's label. `-TracksSampleArtist YES` beside `-TracksSampleAlbum YES` opens the artist
 /// from the sample album. Debug builds only.
 enum AboutSamples {
     static let artistID = MusicItemID("700")
@@ -37,7 +37,25 @@ enum AboutSamples {
                 "releaseDate": "2024-05-17",
                 "composerName": "Ada Kestrel & Juniper Lane",
                 "audioTraits": ["lossless", "atmos"],
+                "isrc": "GBSMP2400117",
+                "hasLyrics": true,
                 "url": "https://music.apple.com/song/9001",
+            ],
+            "relationships": [
+                "albums": [
+                    "data": [[
+                        "id": "9002",
+                        "type": "albums",
+                        "attributes": [
+                            "name": album ?? title,
+                            "artistName": artist,
+                            "releaseDate": "2024-05-17",
+                            "trackCount": 10,
+                            "recordLabel": "Harbour Light Records",
+                            "copyright": "℗ 2024 Harbour Light Records",
+                        ],
+                    ]],
+                ],
             ],
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return nil }

@@ -656,6 +656,7 @@ private struct RecentList: View {
         let artist = credits.first?.identity ?? StatsCalculator.folded(item.artistName)
         var actions = SongActions(
             stats: { show(.song(song.songIdentity)) },
+            info: SongInfoSubject(song),
             share: .song(id: item.songID, title: item.title, artist: item.artistName),
             suggestLess: song.songIdentity,
             block: item.artistName
@@ -677,6 +678,10 @@ private struct RecentList: View {
         actions.goToArtist = { show(.artist(artist)) }
         actions.linkArtists(credits) { show(.artist($0.identity)) }
         return SongMenuItems(actions)
+            .environment(\.showSongInfo, ShowSongInfoAction { subject in
+                SongInfoWindow.show(subject, model: model, openWindow: openWindow)
+                dismiss()
+            })
     }
 
     /// Opens a page in the main window and closes this one.

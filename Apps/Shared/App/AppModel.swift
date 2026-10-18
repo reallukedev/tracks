@@ -64,6 +64,8 @@ final class AppModel {
     let playNavigator = PlayNavigator()
     /// The one search, kept while you're away from it.
     let search = SearchSession()
+    /// The song Get Info shows, asked for from any menu.
+    let songInfo = SongInfoPresenter()
 
     /// Where Play's music comes from. Changing it changes the player; whatever was playing stops.
     var musicSource: MusicSource = MusicSource.current {
