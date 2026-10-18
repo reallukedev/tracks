@@ -62,6 +62,10 @@ final class StageWindowChrome {
         for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
             window?.standardWindowButton(type)?.isHidden = true
         }
+        // In full screen the title bar slides down with the menu bar, an empty grey band over
+        // Stage once its buttons are hidden. A video player shows the menu bar alone.
+        window?.titlebarAppearsTransparent = true
+        window?.standardWindowButton(.closeButton)?.superview?.superview?.alphaValue = 0
     }
 
     isolated deinit {
