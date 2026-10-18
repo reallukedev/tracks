@@ -28,9 +28,10 @@ import Foundation
 ///   moment that isn't in the song.
 /// - With a sure beat, the cover sways to and fro once a bar, in time with the song, as far as
 ///   the beat is sure, and in the song's fuller parts.
-/// - What's new in the middle of the sound, a snare, a clap, stirs the colours round, as a
-///   spoon does ink in water, and unwinds.
-/// - What's new up high, the hats and cymbals, glints in the highlights.
+/// - A big snare or clap, among the strongest lately, stirs the colours round, as a spoon does
+///   ink in water, and unwinds; a steady backbeat doesn't stir on every hit.
+/// - A big hit up high, a crash or an open hat, glints in the highlights, now and then rather
+///   than on every hat.
 /// - How loud the music is gives the colours their richness and depth: how loud the song is
 ///   mastered, and how much louder or softer than usual this part is, gathering over a second
 ///   or so and letting go over a couple more, so a chorus deepens and a verse softens.
@@ -178,10 +179,25 @@ public nonisolated struct LivingCoverFeel: Equatable, Sendable {
         static let sway = (rise: 1.5, fall: 1.0)
         /// How a phrase's swell is followed, for a quiet passage's breath.
         static let phrase = (rise: 0.6, fall: 1.5)
+        /// The bass the swell follows, for a song whose hits drive it: its line over half a
+        /// second, so it swells with the bass part rather than leaping with each kick.
+        static let bassLine = 0.5
+        /// A snare or a cymbal only stirs or glints when it's among the strongest lately, and
+        /// not again for a while: on a big hit, not on every one of a steady backbeat or every
+        /// hat. How long the strongest is remembered, how long each may push, and the gaps.
+        static let accentMemory = (mids: 2.5, highs: 1.5)
+        static let accentWindow = (mids: 0.2, highs: 0.12)
+        static let accentGap = (mids: 1.6, highs: 1.4)
     }
 
     public private(set) var frame = Frame.rest
     private var mids = 0.0
+    private var bassLine: Double?
+    /// The strongest snare and cymbal lately, and how long since each last stirred or glinted.
+    private var midPeak = 0.0
+    private var highPeak = 0.0
+    private var sinceStir = Double.infinity
+    private var sinceGlint = Double.infinity
     private var usualBass: Double?
     private var usualAll: Double?
     private var highs = 0.0
@@ -254,8 +270,12 @@ public nonisolated struct LivingCoverFeel: Equatable, Sendable {
             self.usualAll = Self.ease(usualAll, toward: all, elapsed: dt, rise: Pace.usual.all, fall: Pace.usual.all)
         }
 
-        // With no sure beat, the swell follows the music's slow envelope, not each chord.
-        let swell = isPlaying ? unit(0.35 + (bass - usualBass) * 2.5) * (0.6 + 0.4 * song.intensity) : 0
+        // The bass line against where it's been: a ballad's chords bloom, a drop surges, and a
+        // driving song's steady kick doesn't swell it on every beat.
+        let follow = max(0.01, Pace.bassLine * song.emphasis * song.emphasis)
+        let line = Self.ease(bassLine ?? bass, toward: bass, elapsed: dt, rise: follow, fall: follow)
+        bassLine = line
+        let swell = isPlaying ? unit(0.35 + (line - usualBass) * 2.5) * (0.6 + 0.4 * song.intensity) : 0
         let swellRise = Pace.swell.rise * (1 + Pace.swellGlide * (1 - song.emphasis) * song.gentleness)
         next.swell = Self.ease(frame.swell, toward: swell, elapsed: dt, rise: swellRise, fall: fall(Pace.swell.fall))
 
@@ -263,8 +283,9 @@ public nonisolated struct LivingCoverFeel: Equatable, Sendable {
         let thump = unit(kick * 1.6) * (0.4 + 0.6 * song.punch)
         next.thump = Self.ease(frame.thump, toward: thump, elapsed: dt, rise: Pace.thumpRise, fall: fall(Pace.thumpFall + Pace.thumpSoftness * (1 - song.punch)))
 
-        // A ballad's piano glints less than a dance track's hats.
-        let shimmer = isPlaying ? unit(highFresh * 4) * (0.25 + 0.75 * song.emphasis) : 0
+        // A ballad's piano glints less than a dance track's hats; only the strongest hits glint.
+        let glints = accent(highFresh, peak: &highPeak, since: &sinceGlint, memory: Pace.accentMemory.highs, window: Pace.accentWindow.highs, gap: Pace.accentGap.highs, isPlaying: isPlaying, elapsed: dt)
+        let shimmer = isPlaying && glints ? unit(highFresh * 4) * (0.25 + 0.75 * song.emphasis) : 0
         next.shimmer = Self.ease(frame.shimmer, toward: shimmer, elapsed: dt, rise: Pace.shimmer.rise, fall: fall(Pace.shimmer.fall))
 
         // How loud it's mastered sets the depth; louder than it's been, a chorus, deepens it.
@@ -292,7 +313,8 @@ public nonisolated struct LivingCoverFeel: Equatable, Sendable {
         next.warmth = hasWarmth ? Self.ease(frame.warmth, toward: warmth, elapsed: dt, rise: Pace.warmth, fall: Pace.warmth) : warmth
         hasWarmth = true
 
-        stirred = stir(from: stirred, push: midFresh * 36 * song.emphasis, swing: Pace.swing * (1 + 0.6 * song.gentleness), isPlaying: isPlaying, elapsed: dt)
+        let stirs = accent(midFresh, peak: &midPeak, since: &sinceStir, memory: Pace.accentMemory.mids, window: Pace.accentWindow.mids, gap: Pace.accentGap.mids, isPlaying: isPlaying, elapsed: dt)
+        stirred = stir(from: stirred, push: stirs ? midFresh * 36 * song.emphasis : 0, swing: Pace.swing * (1 + 0.6 * song.gentleness), isPlaying: isPlaying, elapsed: dt)
         // Once a bar, to one side and back, on the song's own beat: in its fuller parts, a
         // chorus or a drop, so it comes and goes with the song rather than rocking throughout.
         let fuller = unit((all - usualAll) * 8 + 0.1)
@@ -367,6 +389,20 @@ public nonisolated struct LivingCoverFeel: Equatable, Sendable {
         bloom *= exp(-elapsed / 0.8)
         if !isPlaying { bloom = 0 }
         return Self.ease(frame.lift, toward: bloom, elapsed: elapsed, rise: Pace.bloom.rise, fall: isPlaying ? Pace.bloom.fall : min(Pace.bloom.fall, Pace.rest))
+    }
+
+    /// Whether what's new, a snare or a cymbal, may push now: within a moment of a hit as strong
+    /// as the strongest lately, and only once a gap has passed since the last.
+    private func accent(_ fresh: Double, peak: inout Double, since: inout Double, memory: Double, window: Double, gap: Double, isPlaying: Bool, elapsed: Double) -> Bool {
+        peak = max(fresh, peak * exp(-elapsed / memory))
+        since += elapsed
+        guard isPlaying else { return false }
+        if since < window { return true }
+        if since > gap, fresh > 0.02, fresh >= 0.8 * peak {
+            since = 0
+            return true
+        }
+        return false
     }
 
     /// A phase kept to a size a float holds exactly enough, wrapping rarely: every five and a

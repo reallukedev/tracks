@@ -135,6 +135,9 @@ nonisolated final class AudioLevelMeter: @unchecked Sendable {
 nonisolated struct HeardLevels: Sendable {
     var bands: [Float]
     var beat: BeatFollower.Reading
+    /// When the moment measured is heard, by `CFAbsoluteTimeGetCurrent`: what draws later
+    /// carries the beat on from here to the moment it reaches the screen.
+    var heardAt: Double
 }
 
 /// Measures what's heard, off the main thread: as often as what draws with it asks, thirty or
@@ -238,6 +241,7 @@ nonisolated final class LevelAnalysis: @unchecked Sendable {
     private func measure(_ sources: [Source], elapsed: Double, at now: Double) -> HeardLevels? {
         var total: [Float]?
         var heard: ObjectIdentifier?
+        var heardAt = now
         #if DEBUG
         if let rehearsed = rehearsal(at: now) {
             total = rehearsed
@@ -247,16 +251,21 @@ nonisolated final class LevelAnalysis: @unchecked Sendable {
         for source in sources {
             guard CMTimebaseGetRate(source.timebase) != 0 else { continue }
             let time = CMTimebaseGetTime(source.timebase)
-            guard time.isNumeric, let decibels = measure(source.sound, at: time.seconds) else { continue }
+            guard time.isNumeric, let (decibels, centre) = measure(source.sound, at: time.seconds) else { continue }
             // Two songs meeting, gaplessly, add up as sound does; the beat is the newer one's.
             total = total.map { zip($0, decibels).map { 10 * log10(pow(10, $0 / 10) + pow(10, $1 / 10)) } } ?? decibels
             heard = ObjectIdentifier(source.sound)
+            heardAt = now - (time.seconds - centre)
         }
         #if os(macOS)
         // Apple Music, or anything else playing on the Mac, heard as it goes to the speakers.
         let mac = SystemAudioListener.shared
         if total == nil, mac.isHearing {
-            total = measure(mac.sound, at: SystemAudioListener.now())
+            let time = SystemAudioListener.now()
+            if let (decibels, centre) = measure(mac.sound, at: time) {
+                total = decibels
+                heardAt = now - (time - centre)
+            }
             heard = ObjectIdentifier(mac.sound)
         }
         #endif
@@ -270,7 +279,7 @@ nonisolated final class LevelAnalysis: @unchecked Sendable {
         // The beat from the sound only evened out: the stretch moves with the music and would
         // read as new sound.
         let reading = beat.step(even, elapsed: elapsed)
-        return HeardLevels(bands: contrast.apply(even, elapsed: elapsed), beat: reading)
+        return HeardLevels(bands: contrast.apply(even, elapsed: elapsed), beat: reading, heardAt: heardAt)
     }
 
     private func analyzer(for rate: Double) -> SpectrumAnalyzer? {
@@ -280,13 +289,15 @@ nonisolated final class LevelAnalysis: @unchecked Sendable {
         return made
     }
 
-    private func measure(_ sound: HeardSound, at time: Double) -> [Float]? {
+    /// The moment around `time`, and where its window's centre fell, which is earlier when the
+    /// sound around `time` hasn't all arrived yet.
+    private func measure(_ sound: HeardSound, at time: Double) -> (decibels: [Float], centre: Double)? {
         guard let rate = sound.sampleRate, let analyzer = analyzer(for: rate) else { return nil }
         let size = analyzer.size
         if window.count != size { window = [Float](repeating: 0, count: size) }
         // Centred on the moment heard, so the picture is neither early nor late.
-        guard sound.copy(around: time, into: &window) else { return nil }
-        return analyzer.decibels(of: window)
+        guard let centre = sound.copy(around: time, into: &window) else { return nil }
+        return (analyzer.decibels(of: window), centre)
     }
 
     private static func now() -> Double { CFAbsoluteTimeGetCurrent() }
@@ -428,11 +439,12 @@ nonisolated final class HeardSound: @unchecked Sendable {
         }
     }
 
-    /// Fills `window` with the sound around `time` in the song. False if that moment isn't
-    /// here: not yet handed over, long gone, or from before a seek.
-    func copy(around time: Double, into window: inout [Float]) -> Bool {
-        ring.withLockUnchecked { ring in
-            guard ring.sampleRate > 0, ring.written > 0 else { return false }
+    /// Fills `window` with the sound around `time` in the song, and says the song's time at
+    /// its centre. Nil if that moment isn't here: not yet handed over, long gone, or from
+    /// before a seek.
+    func copy(around time: Double, into window: inout [Float]) -> Double? {
+        ring.withLockUnchecked { ring -> Double? in
+            guard ring.sampleRate > 0, ring.written > 0 else { return nil }
             let size = window.count
             let capacity = ring.samples.count
             let oldest = max(ring.runStart, ring.written - capacity)
@@ -441,10 +453,10 @@ nonisolated final class HeardSound: @unchecked Sendable {
             var first = min(heard - size / 2, ring.written - size)
             if first < oldest {
                 // Over a quarter of a second off, it's not this moment any more.
-                guard oldest - first < Int(ring.sampleRate / 4), ring.written - oldest >= size else { return false }
+                guard oldest - first < Int(ring.sampleRate / 4), ring.written - oldest >= size else { return nil }
                 first = oldest
             }
-            guard heard > oldest - Int(ring.sampleRate / 4), heard < ring.written + Int(ring.sampleRate / 4) else { return false }
+            guard heard > oldest - Int(ring.sampleRate / 4), heard < ring.written + Int(ring.sampleRate / 4) else { return nil }
             let mask = capacity - 1
             // In at most two runs, as the ring wraps: copied whole, since this is asked for
             // every frame something moves with the music.
@@ -457,7 +469,7 @@ nonisolated final class HeardSound: @unchecked Sendable {
                     if head < size { (to + head).update(from: from, count: size - head) }
                 }
             }
-            return true
+            return ring.end - Double(ring.written - (first + size / 2)) / ring.sampleRate
         }
     }
 }

@@ -57,6 +57,16 @@ public nonisolated struct Groove: Codable, Equatable, Sendable {
         self.texture = texture
     }
 
+    /// Beats counted `position` seconds into the song, the first of each four a downbeat, when
+    /// where they fall is known: from the preview's first downbeat, where the preview sits in
+    /// the song, at the song's own tempo. Nil when the preview couldn't be placed, or has no
+    /// beat to keep.
+    public func beats(at position: Double) -> Double? {
+        guard let songOffset, let texture, texture.isPlayable, texture.chunkSeconds != GrooveTexture.freeChunk,
+              position.isFinite, songOffset.isFinite else { return nil }
+        return (position - songOffset - texture.start) / texture.chunkSeconds * 4
+    }
+
     /// How strongly the song moves a drawing as a whole, 0 to 1, by how loud it is.
     public var intensity: Double { Loudness.intensity(lufs: loudness) }
 
@@ -126,6 +136,8 @@ public nonisolated struct Groove: Codable, Equatable, Sendable {
                 high: lane(eighths), shape: [], dynamics: 0.6, punch: 0.4, brightness: 0.4, loudness: -15
             )
         }
+        // Its bars count from the song's start: it's made up, so that's where they are.
+        groove.songOffset = 0
         // Fuller low down, as music is, with a lift in the presence range.
         groove.shape = (0..<24).map { band in
             let place = Double(band) / 23

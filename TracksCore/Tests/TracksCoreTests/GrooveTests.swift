@@ -651,13 +651,19 @@ struct GrooveTextureTests {
         #expect(groove.lock >= 0.85)
     }
 
-    @Test("A replay's hits count fully only once the preview is placed in the song")
-    func lock() {
+    @Test("A replay's hits count fully, and its beats fall where the song's do, only once the preview is placed in the song")
+    func lock() throws {
         var groove = Groove.calm
         #expect(groove.lock == 0)
         groove.confidence = 0.8
+        // A bar of four at 100, its first downbeat half a second into the preview.
+        groove.texture = GrooveTexture(chunkSeconds: 2.4, bandCount: 1, levels: Data(repeating: 0, count: 2 * GrooveTexture.framesPerChunk), start: 0.5)
         #expect(groove.lock > 0.5 && groove.lock < 1)
+        #expect(groove.beats(at: 60) == nil)
         groove.songOffset = 42
         #expect(groove.lock == 1)
+        // The preview's first downbeat, then a minute on, far past the preview: a hundred beats.
+        #expect(try #require(groove.beats(at: 42.5)) == 0)
+        #expect(abs(try #require(groove.beats(at: 102.5)) - 100) < 1e-9)
     }
 }

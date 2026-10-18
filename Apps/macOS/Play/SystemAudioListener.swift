@@ -105,6 +105,11 @@ nonisolated final class SystemAudioListener: @unchecked Sendable {
         }
         sound.prepare(format)
         let sound = sound
+        // The tap hears sound as it's sent out; it's heard this much later. Timed by when it's
+        // heard, the beat lands with the speakers rather than ahead of them: a fifth of a
+        // second ahead, on Bluetooth headphones.
+        let latency = Self.outputLatency()
+        log.notice("Output latency \(latency * 1000, format: .fixed(precision: 1)) ms")
         var proc: AudioDeviceIOProcID?
         let made = AudioDeviceCreateIOProcIDWithBlock(&proc, aggregate, queue) { [unowned self] _, input, inputTime, _, _ in
             let list = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
@@ -122,7 +127,7 @@ nonisolated final class SystemAudioListener: @unchecked Sendable {
                 vDSP_maxmgv(samples, 4, &loudest, vDSP_Length((count + 3) / 4))
                 if loudest > 1e-4 { self.lastHeard.store(UInt64(host * 1e9), ordering: .relaxed) }
             }
-            sound.hear(UnsafeMutablePointer(mutating: input), frames: frames, at: CMTime(seconds: host, preferredTimescale: 1_000_000_000))
+            sound.hear(UnsafeMutablePointer(mutating: input), frames: frames, at: CMTime(seconds: host + latency, preferredTimescale: 1_000_000_000))
         }
         guard check(made, "listen to the device"), let proc else {
             end()
@@ -187,6 +192,32 @@ nonisolated final class SystemAudioListener: @unchecked Sendable {
         size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
         guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, &uid) == noErr else { return nil }
         return uid?.takeRetainedValue() as String?
+    }
+
+    /// Seconds from the tap to the speakers: the output's own latency, its safety offset, a
+    /// buffer, and its stream's latency.
+    static func outputLatency() -> Double {
+        var address = defaultOutputAddress
+        var device = AudioObjectID(kAudioObjectUnknown)
+        var size = UInt32(MemoryLayout<AudioObjectID>.size)
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &device) == noErr else { return 0 }
+        func value<T>(_ selector: AudioObjectPropertySelector, of object: AudioObjectID, scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeOutput, _ empty: T) -> T {
+            var address = AudioObjectPropertyAddress(mSelector: selector, mScope: scope, mElement: kAudioObjectPropertyElementMain)
+            var found = empty
+            var size = UInt32(MemoryLayout<T>.size)
+            return AudioObjectGetPropertyData(object, &address, 0, nil, &size, &found) == noErr ? found : empty
+        }
+        let rate = value(kAudioDevicePropertyNominalSampleRate, of: device, scope: kAudioObjectPropertyScopeGlobal, Float64(0))
+        guard rate > 0 else { return 0 }
+        var frames = value(kAudioDevicePropertyLatency, of: device, UInt32(0))
+            + value(kAudioDevicePropertySafetyOffset, of: device, UInt32(0))
+            + value(kAudioDevicePropertyBufferFrameSize, of: device, UInt32(0))
+        let stream = value(kAudioDevicePropertyStreams, of: device, AudioObjectID(kAudioObjectUnknown))
+        if stream != kAudioObjectUnknown {
+            frames += value(kAudioStreamPropertyLatency, of: stream, scope: kAudioObjectPropertyScopeGlobal, UInt32(0))
+        }
+        let seconds = Double(frames) / rate
+        return seconds.isFinite ? min(max(seconds, 0), 3) : 0
     }
 
     private static func format(of tap: AudioObjectID) -> AudioStreamBasicDescription? {
