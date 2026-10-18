@@ -35,6 +35,8 @@ extension LiveMix {
     ) -> LiveMix {
         let affinity = AutoplayAffinity(seeds: seeds, history: history)
         let seedIdentities = Set(seeds.map(\.songIdentity))
+        let taste = TasteGraph(history: history, now: now)
+        let close = closeness(toSeeds: seedIdentities, in: taste)
         let rested = now.addingTimeInterval(-restPeriod)
         let yours: [Candidate] = MixBuilder.aggregate(history, signals: signals, now: now, calendar: calendar).compactMap { aggregate in
             guard !seedIdentities.contains(aggregate.identity) else { return nil }
@@ -42,7 +44,8 @@ extension LiveMix {
             let likeness = affinity.likeness(artistName: aggregate.song.artistName, genre: metadata?.genre, releaseYear: metadata?.releaseYear)
             return Candidate(
                 song: aggregate.song,
-                weight: weight(plays: aggregate.dates.count, lastHeard: aggregate.lastHeard, now: now) * likeness,
+                weight: weight(plays: aggregate.dates.count, lastHeard: aggregate.lastHeard, now: now)
+                    * likeness * (1 + seedCloseness * (close[aggregate.identity] ?? 0)),
                 isResting: aggregate.lastHeard >= rested,
                 genre: metadata?.genre,
                 releaseYear: metadata?.releaseYear
@@ -55,6 +58,7 @@ extension LiveMix {
                 Candidate(song: song, weight: affinity.likeness(artistName: song.artistName, genre: song.genre, releaseYear: nil), isNew: true)
             }
         return LiveMix(candidates: yours + new, newShare: affinity.newShare(closeMatches: yours), seed: seed)
+            .following(history, now: now, leaningToward: seeds.map(\.songIdentity), graph: taste)
     }
 }
 

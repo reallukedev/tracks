@@ -154,6 +154,7 @@ extension LiveMix {
         default: 0.3
         }
         return LiveMix(candidates: balancedByArtist(yours) + new, newShare: share, seed: seed)
+            .following(history, now: now)
     }
 
     /// Fewer songs of yours in a genre than this and its station leans on new finds.

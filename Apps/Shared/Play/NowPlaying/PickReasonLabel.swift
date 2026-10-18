@@ -30,6 +30,7 @@ struct PickReasonLabel: View {
     let reasons: [LiveMix.Reason] = [
         .newFind, .newFromYourArtist, .newFindLike("Mara Solis"), .onTheRoad, .aroundNow, .leaningInto("Hip-Hop"),
         .oldFavorite(lastHeard: .now.addingTimeInterval(-200 * 86_400)), .mostPlayed, .moreOf("Alternative"), .moreLike("Nova Harbor"),
+        .probing, .goesWith("Paper Lanterns"),
     ]
     VStack(alignment: .leading, spacing: 10) {
         ForEach(reasons.enumerated(), id: \.offset) { _, reason in

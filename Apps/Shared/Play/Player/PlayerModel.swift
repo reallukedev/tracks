@@ -360,6 +360,7 @@ final class PlayerModel {
             waitingSession?.time = 0
             return
         }
+        noteReplayIfRestarting()
         isGoingBack = true
         goingBackCount += 1
         let tap = goingBackCount
@@ -1173,6 +1174,8 @@ final class PlayerModel {
         var songs: [MixSong] = []
         if let first {
             mix.note(picked: first.songIdentity)
+            // The song it starts from says what you're in the mood for.
+            mix.lean(toward: first.songIdentity)
             songs.append(first)
         }
         let engine = self.engine
@@ -1416,6 +1419,19 @@ final class PlayerModel {
 
     /// How long a new find waits in Up Next to be ready before it's let go.
     private static let longestWait: TimeInterval = 20 * 60
+
+    /// Previous well into a live mix's song starts it over: wanting to hear it again, which
+    /// says more than letting it play.
+    private func noteReplayIfRestarting() {
+        guard picksLive, let current, live?.knows(current.songIdentity) == true,
+              let lastSample, lastSample.trackID == current.id, lastSample.time >= Self.restartsAfter
+        else { return }
+        live?.noteReplayed(current.songIdentity)
+        followSteering()
+    }
+
+    /// How far into a song Previous starts it over, rather than going back a song.
+    private static let restartsAfter: TimeInterval = 3
 
     /// Tells the live mix how a song went, so the next picks follow.
     private func noteLive(_ track: PlayerTrack, _ listen: LiveMix.Listen) {

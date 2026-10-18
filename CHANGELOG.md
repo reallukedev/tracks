@@ -56,6 +56,16 @@ with the app in the background, so your history no longer depends on having Trac
 - Follows the time of day: your morning songs in the morning, calmer late at night
 - Notices when you're driving, on iPhone, and plays for the road: songs you play in the car,
   steady energy and fewer surprises
+- Knows which of your songs go together, from the songs you play in the same sitting. Let one
+  play, play it again or make it a Favorite, and the songs you play with it come up from the
+  very next pick, saying "Because you played" it; skip and they step back. It follows where
+  you are and eases off over the next few songs, whether you have fifty songs or fifty
+  thousand. The moods, genre stations, Handpicked and Autoplay do the same, from Apple Music
+  or your own music
+- Reads how you listen: a skip from someone who seldom skips counts for more, and a song let
+  play counts for more from someone who skips freely
+- A small library plays more new finds, so the first listens don't go round the same few
+  songs, and one skip of a song you play all the time barely counts against it
 
 ### Play on the Mac
 

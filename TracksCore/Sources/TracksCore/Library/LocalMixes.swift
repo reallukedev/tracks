@@ -16,7 +16,7 @@ extension LiveMix {
         seed: UInt64
     ) -> LiveMix {
         let played = MixBuilder.aggregate(history, signals: signals, now: now, calendar: calendar)
-        let fit = RadioMomentFit(moment: moment, songs: played, drives: drives)
+        let fit = RadioMomentFit(moment: moment, songs: played, drives: drives, now: now)
         let mostPlayed = mostPlayedThreshold(played.map(\.dates.count))
         let mix = local(
             tracks, played: played, metadata: history.songMetadata, signals: signals, now: now, seed: seed,
@@ -35,7 +35,9 @@ extension LiveMix {
         )
         let yours = mix.candidates.filter { !$0.isNew }
         let new = mix.candidates.filter(\.isNew)
-        return LiveMix(candidates: balancedByArtist(yours) + balancedByArtist(new), newShare: mix.newShare, moment: moment, seed: seed)
+        let share = fit.newShare(firstListens(tuning.discovery.newShare, yourSongs: yours.count, hasNewFinds: !new.isEmpty))
+        return LiveMix(candidates: balancedByArtist(yours) + balancedByArtist(new), newShare: share, moment: moment, seed: seed)
+            .following(history, now: now)
     }
 
     /// A mood from your own music: the songs whose genre suits it, played ones by how much,
@@ -59,6 +61,7 @@ extension LiveMix {
             suited + finds, played: played, metadata: history.songMetadata, signals: signals, now: now, seed: seed,
             newShare: finds.isEmpty ? 0.3 : 0.4
         ) { _, _ in 1 }
+        .following(history, now: now)
     }
 
     /// A genre's station from your own music: your songs in it, played ones by how much and
@@ -77,6 +80,7 @@ extension LiveMix {
         return local(inIt, played: played, metadata: history.songMetadata, signals: signals, now: now, seed: seed, newShare: 0.25) { _, aggregate in
             aggregate.map { freshness(lastHeard: $0.lastHeard, now: now) } ?? 1
         }
+        .following(history, now: now)
     }
 
     /// Handpicked from your own music: your picks, your songs like them, the ones you've never
@@ -99,9 +103,12 @@ extension LiveMix {
             return AutoplaySeed(songIdentity: pick.identity, artistName: pick.artist, genre: pick.genre ?? known?.genre, releaseYear: pick.year ?? known?.releaseYear)
         }
         let affinity = AutoplayAffinity(seeds: seeds, history: history)
+        let taste = TasteGraph(history: history, now: now)
+        let close = closeness(toSeeds: picks.map(\.identity), in: taste)
         func likeness(_ track: LocalTrack) -> Double {
             let known = history.songMetadata[track.identity]
             return affinity.likeness(artistName: track.artist, genre: track.genre ?? known?.genre, releaseYear: track.year ?? known?.releaseYear)
+                + seedCloseness * (close[track.identity] ?? 0)
         }
         let picked = Set(picks.map(\.identity))
         let found = Set(finds.map(\.identity))
@@ -134,12 +141,13 @@ extension LiveMix {
             let song = aggregate.map { track.mixSong(plays: $0.dates.count, lastHeard: $0.lastHeard) } ?? track.mixSong()
             return Candidate(song: song, weight: typical, isResting: (aggregate?.lastHeard ?? .distantPast) >= rested, genre: track.genre)
         }
-        let close = yours.count { $0.weight >= 0.5 }
+        let nearby = yours.count { $0.weight >= 0.5 }
         return LiveMix(
             candidates: pickCandidates + mix.candidates,
-            newShare: close < handpickedFewClose ? 0.65 : 0.45,
+            newShare: nearby < handpickedFewClose ? 0.65 : 0.45,
             seed: seed
         )
+        .following(history, now: now, graph: taste)
     }
 
     /// Autoplay from your own music: your songs like the last few played, the ones you've
@@ -155,13 +163,17 @@ extension LiveMix {
     ) -> LiveMix {
         let affinity = AutoplayAffinity(seeds: seeds, history: history)
         let seedIdentities = Set(seeds.map(\.songIdentity))
+        let taste = TasteGraph(history: history, now: now)
+        let close = closeness(toSeeds: seedIdentities, in: taste)
         let played = MixBuilder.aggregate(history, signals: signals, now: now, calendar: calendar)
         let others = tracks.filter { !seedIdentities.contains($0.identity) }
         let mix = local(others, played: played, metadata: history.songMetadata, signals: signals, now: now, seed: seed, newShare: 0.25) { track, _ in
             let known = history.songMetadata[track.identity]
             return affinity.likeness(artistName: track.artist, genre: track.genre ?? known?.genre, releaseYear: track.year ?? known?.releaseYear)
+                * (1 + seedCloseness * (close[track.identity] ?? 0))
         }
         return LiveMix(candidates: mix.candidates, newShare: affinity.newShare(closeMatches: mix.candidates.filter { !$0.isNew }), seed: seed)
+            .following(history, now: now, leaningToward: seeds.map(\.songIdentity), graph: taste)
     }
 
     /// Your songs as candidates: one per song, the file before a server's copy, played ones

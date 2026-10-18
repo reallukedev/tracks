@@ -67,6 +67,10 @@ public struct RadioHabits: Codable, Sendable, Equatable {
 
     /// By ``Band`` raw value.
     var bands: [String: BandHabits] = [:]
+    /// Every song heard on Tracks Radio, let play or not, at any moment: how readily this
+    /// person skips, so a skip from someone who seldom does counts for more. Nil in habits kept
+    /// before it was, which read as nothing heard.
+    var listening: Tally?
     /// When it was last brought up to date, for fading it.
     public private(set) var updated: Date?
 
@@ -120,9 +124,21 @@ public struct RadioHabits: Codable, Sendable, Equatable {
         bands[band.rawValue] = habits
     }
 
+    /// A song heard, let play or not, for ``listening``.
+    mutating func recordListen(landed: Bool) {
+        var tally = listening ?? Tally()
+        tally.add(landed: landed ? 1 : 0, missed: landed ? 0 : 1)
+        listening = tally
+    }
+
     /// These habits with what another listen added, capped as each tally is.
     func adding(_ other: RadioHabits) -> RadioHabits {
         var sum = self
+        if let theirs = other.listening {
+            var tally = sum.listening ?? Tally()
+            tally.add(landed: theirs.landed, missed: theirs.missed)
+            sum.listening = tally
+        }
         for (key, theirs) in other.bands {
             var habits = sum.bands[key] ?? BandHabits()
             for (genre, tally) in theirs.genres { habits.genres[genre, default: Tally()].add(landed: tally.landed, missed: tally.missed) }
@@ -140,6 +156,7 @@ public struct RadioHabits: Codable, Sendable, Equatable {
         faded.updated = now
         guard let updated, now > updated else { return faded }
         let factor = pow(0.5, now.timeIntervalSince(updated) / Self.halfLife)
+        faded.listening = listening?.scaled(factor)
         faded.bands = bands.compactMapValues { habits in
             var habits = habits
             habits.genres = habits.genres.mapValues { $0.scaled(factor) }.filter { $0.value.total >= Self.forgotten }

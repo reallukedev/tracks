@@ -18,6 +18,16 @@ import Foundation
 /// Each pick leans a little toward the genre of the song before it, so one song flows into the
 /// next, and an artist heard a few songs ago is less likely to come round again so soon.
 ///
+/// Given a ``TasteGraph``, it also knows which songs go together for you. A song let play,
+/// loved or played again lifts the songs you play with it from the very next pick, and the
+/// songs those go with a little; a skip dims them. That fades over a few songs, so the listen
+/// follows where you are now. And a song that you've often played straight after the one
+/// before is likelier, so your own flow carries on.
+///
+/// What a skip or a song let play says depends on who's listening: from someone who seldom
+/// skips, a skip says a lot, and from someone who skips freely, a song let play does. See
+/// ``expectedSkipRate(settingAside:)``.
+///
 /// Tracks Radio started from nothing in particular opens with a probe: a few songs from
 /// different directions, to hear what you're in the mood for, and remembers what landed at
 /// that moment for next time. See ``RadioProbe`` and ``RadioHabits``.
@@ -115,6 +125,8 @@ public struct LiveMix: Sendable {
         /// One of the first few songs of Tracks Radio, each from a different direction, to
         /// hear which one you're in the mood for.
         case probing
+        /// One you play with a song that landed this listen: its title.
+        case goesWith(String)
     }
 
     /// How a song went, told by when it gave way.
@@ -200,6 +212,29 @@ public struct LiveMix: Sendable {
     private let remembersArtists: Int
     private var random: SeededGenerator
 
+    /// Which songs go together, for following what lands. Empty for a mix made without one,
+    /// which then follows genres and artists only.
+    public var taste = TasteGraph.empty
+    /// How much likelier each song has become this listen for going with what landed, as a
+    /// power of e: above 0 lifted, below 0 dimmed. Fades with each pick.
+    private var interest: [String: Double] = [:]
+    /// The same for artists, for new finds, which the graph can't know.
+    private var artistInterest: [String: Double] = [:]
+    /// For each song lifted, the song that lifted it most and by how much, for saying so.
+    private var liftedBy: [String: (source: String, amount: Double)] = [:]
+    /// Songs let play and not this listen, for ``expectedSkipRate(settingAside:)``.
+    private var listenTally = ListenTally()
+
+    private struct ListenTally: Sendable {
+        var landed = 0.0
+        var missed = 0.0
+
+        mutating func add(landed: Double, missed: Double) {
+            self.landed += landed
+            self.missed += missed
+        }
+    }
+
     /// Artists who can't come straight back.
     private static let artistGap = 2
     /// Picks over which an artist heard lately stays less likely, halving for each time, in a
@@ -229,6 +264,27 @@ public struct LiveMix: Sendable {
     static let runLength = 2
     /// Picks that stay clear of what a run of skips shared.
     static let avoidFor = 5
+    /// How far a song landing lifts the songs that go with it, as a power of e, for the closest.
+    static let landingLift = 1.0
+    /// How far a skip dims them.
+    static let skipDim = 0.6
+    /// What the songs two steps away get, against the songs one step away.
+    static let secondStep = 0.35
+    /// How much of the lift each song keeps after a pick.
+    static let interestFade = 0.85
+    /// The most a lift can make a song likelier, and less likely, as powers of e.
+    static let mostLift = 1.5
+    static let mostDim = -1.2
+    /// How much likelier a song is for having often come straight after the song before, at
+    /// most.
+    static let leadLift = 1.5
+    /// The lift, as a power of e, that a song of yours must have before it says it goes with
+    /// the song that lifted it.
+    static let goesWithLift = 0.55
+    /// How readily people skip, before anything is known about this one: what the calibration
+    /// starts from, worth this many songs.
+    static let usualSkipRate = 0.3
+    static let usualWeight = 8.0
 
     private struct Outcome: Sendable {
         let skipped: Bool
@@ -302,7 +358,7 @@ public struct LiveMix: Sendable {
         let fresh = rested.isEmpty ? pool : rested
         let recent = Set(picks.suffix(Self.artistGap).compactMap { byIdentity[$0].map { candidates[$0].song.artistKey } })
         let spaced = fresh.filter { !recent.contains($0.song.artistKey) }
-        let choices = clear(of: avoiding, spaced.isEmpty ? fresh : spaced)
+        let choices = followingWhatLanded(clear(of: avoiding, spaced.isEmpty ? fresh : spaced))
 
         guard let choice = draw(from: choices, learning: true) else { return nil }
         // As it is now, even when nothing stands out: a song come round again doesn't keep
@@ -381,14 +437,16 @@ public struct LiveMix: Sendable {
         guard let index = byIdentity[identity] else { return }
         let candidate = candidates[index]
         let artist = candidate.song.artistKey
+        let says = skipWeight
         // A skip is a nudge, not a verdict: it may only have been that song, or that moment.
         // Each one makes its artist and genre rarer for a while, never gone, and they ease back.
-        artistBias[artist] = max(0.15, (artistBias[artist] ?? 1) * 0.55)
+        artistBias[artist] = max(0.15, (artistBias[artist] ?? 1) * pow(0.55, says))
         if let genre = candidate.genreKey {
             // A probe song skipped says a little more about its genre than one skipped later.
-            genreBias[genre] = max(0.4, (genreBias[genre] ?? 1) * (isProbePick(identity) ? 0.75 : 0.85))
+            genreBias[genre] = max(0.4, (genreBias[genre] ?? 1) * pow(isProbePick(identity) ? 0.75 : 0.85, says))
         }
-        if candidate.isNew { newShare = (newShare * 0.7).clamped(to: shareRange) }
+        if candidate.isNew { newShare = (newShare * pow(0.7, says)).clamped(to: shareRange) }
+        spread(from: candidate, by: -Self.skipDim * says)
         record(candidate, skipped: true)
         learn(identity, candidate, landed: false)
         steerAfterSkips()
@@ -401,11 +459,13 @@ public struct LiveMix: Sendable {
         guard let index = byIdentity[identity] else { return }
         let candidate = candidates[index]
         let artist = candidate.song.artistKey
-        artistBias[artist] = max(0.02, (artistBias[artist] ?? 1) * 0.7)
+        let says = skipWeight
+        artistBias[artist] = max(0.02, (artistBias[artist] ?? 1) * pow(0.7, says))
         if let genre = candidate.genreKey {
-            genreBias[genre] = max(0.4, (genreBias[genre] ?? 1) * 0.9)
+            genreBias[genre] = max(0.4, (genreBias[genre] ?? 1) * pow(0.9, says))
         }
-        if candidate.isNew { newShare = (newShare * 0.9).clamped(to: shareRange) }
+        if candidate.isNew { newShare = (newShare * pow(0.9, says)).clamped(to: shareRange) }
+        spread(from: candidate, by: -Self.skipDim * 0.5 * says)
         record(candidate, skipped: true, movedOn: true)
         learn(identity, candidate, landed: false, counting: 0.5)
         steerAfterSkips()
@@ -416,14 +476,17 @@ public struct LiveMix: Sendable {
         guard let index = byIdentity[identity] else { return }
         let candidate = candidates[index]
         let artist = candidate.song.artistKey
-        artistBias[artist] = min(3, (artistBias[artist] ?? 1) * 1.25)
+        let says = landingWeight
+        artistBias[artist] = min(3, (artistBias[artist] ?? 1) * pow(1.25, says))
         let wasSearching = isSearching || probe.map { $0.isOpen && $0.extended > 0 } == true
         if let genre = candidate.genreKey {
             // After a run of skips, the song that finally plays through is the one to follow,
             // and a probe song let play says more than one let play later.
-            genreBias[genre] = min(4, (genreBias[genre] ?? 1) * (wasSearching ? 2 : isProbePick(identity) ? 1.6 : 1.15))
+            genreBias[genre] = min(4, (genreBias[genre] ?? 1) * (wasSearching ? 2 : pow(isProbePick(identity) ? 1.6 : 1.15, says)))
         }
-        if candidate.isNew { newShare = (newShare * 1.2 + 0.02).clamped(to: shareRange) }
+        if candidate.isNew { newShare = (newShare * pow(1.2, says) + 0.02).clamped(to: shareRange) }
+        // Found after a run of skips, it says the most it can.
+        spread(from: candidate, by: Self.landingLift * (wasSearching ? 1.5 : says))
         record(candidate, skipped: false)
         learn(identity, candidate, landed: true)
         if wasSearching {
@@ -443,10 +506,36 @@ public struct LiveMix: Sendable {
         }
         lovedGenre = candidate.genreKey
         avoiding = nil
+        spread(from: candidate, by: Self.landingLift * 2)
         learn(identity, candidate, landed: true, counting: 2)
         // Nothing more to probe for: it knows what you want.
         probe?.isOpen = false
         steering = .towardArtist(candidate.song.artistName)
+    }
+
+    /// Played again: gone back to from its end, or started over. Says more than letting it
+    /// play, less than loving it.
+    public mutating func noteReplayed(_ identity: String) {
+        guard let index = byIdentity[identity] else { return }
+        let candidate = candidates[index]
+        let artist = candidate.song.artistKey
+        artistBias[artist] = min(4, (artistBias[artist] ?? 1) * 1.5)
+        if let genre = candidate.genreKey {
+            genreBias[genre] = min(4, (genreBias[genre] ?? 1) * 1.3)
+        }
+        avoiding = nil
+        spread(from: candidate, by: Self.landingLift * 1.5)
+        learn(identity, candidate, landed: true, counting: 1.5)
+        // As with a love, nothing more to probe for.
+        probe?.isOpen = false
+    }
+
+    /// Leans the listen toward the songs that go with this one, as if it had just landed: the
+    /// song a station is started from, or the songs Autoplay follows on from. It needn't be one
+    /// of the mix's own.
+    public mutating func lean(toward identity: String, by amount: Double = 1) {
+        let song = byIdentity[identity].map { candidates[$0].song }
+        spread(from: identity, artist: song?.artistKey, by: Self.landingLift * amount)
     }
 
     /// Why a song came up, as it was when drawn, or for one it didn't draw, like the song a
@@ -470,6 +559,12 @@ public struct LiveMix: Sendable {
             || (lovedGenre != nil && choice.genreKey == lovedGenre && (lovedGenre.flatMap { genreBias[$0] } ?? 1) >= Self.homingIn):
             return .moreLike(artist)
         default:
+            // What it goes with says more than what it is, except that it's new.
+            if !choice.isNew, (interest[choice.song.songIdentity] ?? 0) >= Self.goesWithLift,
+               let source = liftedBy[choice.song.songIdentity]?.source,
+               let index = byIdentity[source] {
+                return .goesWith(candidates[index].song.title)
+            }
             return choice.reason
         }
     }
@@ -499,7 +594,9 @@ public struct LiveMix: Sendable {
         // The probe is already trying a different direction with every song.
         guard probe?.isOpen != true else { return }
         let run = Array(outcomes.reversed().prefix { $0.skipped })
-        guard run.count >= Self.runLength else { return }
+        // Someone who skips freely takes a longer run to mean something.
+        let runLength = expectedSkipRate(settingAside: run.count) > 0.5 ? Self.runLength + 1 : Self.runLength
+        guard run.count >= runLength else { return }
         // Songs only moved on from, heard a minute or two each, make a run only once there are
         // a few of them: plenty of people let the radio go on like that.
         guard run.prefix(Self.runLength).contains(where: { !$0.movedOn }) || run.count > Self.runLength else { return }
@@ -527,6 +624,94 @@ public struct LiveMix: Sendable {
         avoiding = avoid
     }
 
+    // MARK: Following what lands
+
+    /// Now and then, just after a song has landed, only the songs that go with it: as often as
+    /// what landed says, from most picks after a song played again to some after one let play,
+    /// fading as the lift does. Drawn as a share rather than left to the weights, so it follows
+    /// as surely in a library of thousands as in one of fifty.
+    private mutating func followingWhatLanded(_ choices: [Candidate]) -> [Candidate] {
+        let lifted = choices.filter { (interest[$0.song.songIdentity] ?? 0) >= Self.followsFrom }
+        guard !lifted.isEmpty, let peak = lifted.map({ interest[$0.song.songIdentity] ?? 0 }).max() else { return choices }
+        let chance = min(Self.mostFollowing, peak * Self.followingPerLift)
+        return Double.random(in: 0..<1, using: &random) < chance ? lifted : choices
+    }
+
+    /// The lift a song needs to be among the ones that go with what landed.
+    static let followsFrom = 0.3
+    /// The share of picks drawn only from them, for each unit of lift, and at most: some are
+    /// always left to everything else, so a listen never closes in on one corner.
+    static let followingPerLift = 0.45
+    static let mostFollowing = 0.7
+
+    /// How likely this person is to skip a song, 0 to 1: what's usual for anyone, then what
+    /// they've done on Tracks Radio before, then this listen, each outweighing the last as there's
+    /// more of it.
+    /// - Parameter settingAside: the latest skips to leave out, such as the run being judged,
+    ///   so a run doesn't excuse itself.
+    func expectedSkipRate(settingAside: Int = 0) -> Double {
+        let before = habitsBase?.listening ?? RadioHabits.Tally()
+        let missedNow = max(0, listenTally.missed - Double(settingAside))
+        let skipped = Self.usualSkipRate * Self.usualWeight + before.missed + missedNow
+        let heard = Self.usualWeight + before.total + listenTally.landed + missedNow
+        return skipped / heard
+    }
+
+    /// What a skip says, against what it says from someone who skips as often as most: more
+    /// from someone who seldom skips, less from someone who skips freely.
+    private var skipWeight: Double {
+        ((1 - expectedSkipRate()) / (1 - Self.usualSkipRate)).clamped(to: 0.5...1.5)
+    }
+
+    /// What a song let play says, the other way round: little from someone who lets
+    /// everything play, a lot from someone who doesn't.
+    private var landingWeight: Double {
+        (expectedSkipRate() / Self.usualSkipRate).clamped(to: 0.7...1.6)
+    }
+
+    /// How much likelier a song is for going with what's landed this listen.
+    private func lift(of candidate: Candidate) -> Double {
+        var power = interest[candidate.song.songIdentity] ?? 0
+        // The graph knows no new finds: their artists say what it can. Your own songs have
+        // the graph, and their artists' skips and keeps besides.
+        if candidate.isNew {
+            power += artistInterest[candidate.song.artistKey] ?? 0
+            if case .newFindLike(let like) = candidate.reason {
+                power += 0.7 * (artistInterest[StatsCalculator.folded(like)] ?? 0)
+            }
+        }
+        return exp(power.clamped(to: Self.mostDim...Self.mostLift))
+    }
+
+    private mutating func spread(from candidate: Candidate, by amount: Double) {
+        spread(from: candidate.song.songIdentity, artist: candidate.song.artistKey, by: amount)
+    }
+
+    /// Lifts the songs that go with this one, or dims them for a negative amount: its
+    /// neighbors by how close they are, theirs a little, and the artists of all of them.
+    ///
+    /// By the square root of closeness, so the whole circle a song belongs to moves, not only
+    /// the two or three songs it's played next to most.
+    private mutating func spread(from identity: String, artist: String?, by amount: Double) {
+        guard amount != 0 else { return }
+        if let artist { artistInterest[artist, default: 0] += 0.5 * amount }
+        for neighbor in taste.neighbors(of: identity) {
+            let change = amount * neighbor.closeness.squareRoot()
+            add(change, to: neighbor.identity, from: identity)
+            if let index = byIdentity[neighbor.identity] {
+                artistInterest[candidates[index].song.artistKey, default: 0] += 0.3 * change
+            }
+            for further in taste.neighbors(of: neighbor.identity).prefix(8) where further.identity != identity {
+                add(change * further.closeness.squareRoot() * Self.secondStep, to: further.identity, from: identity)
+            }
+        }
+    }
+
+    private mutating func add(_ change: Double, to identity: String, from source: String) {
+        interest[identity, default: 0] += change
+        if change > (liftedBy[identity]?.amount ?? 0) { liftedBy[identity] = (source, change) }
+    }
+
     /// The choices that stay clear of what a run of skips shared, while any do.
     private func clear(of avoidance: Avoidance?, _ choices: [Candidate]) -> [Candidate] {
         guard let avoidance else { return choices }
@@ -538,12 +723,14 @@ public struct LiveMix: Sendable {
     }
 
     /// After each pick, genres drift a tenth of the way back to even, skipped artists a little,
-    /// and what's being avoided
-    /// comes one pick closer to coming back.
+    /// lifts fade, and what's being avoided comes one pick closer to coming back.
     private mutating func easeBack() {
         for (genre, bias) in genreBias { genreBias[genre] = 1 + (bias - 1) * 0.9 }
         // A skipped artist comes back more slowly, but comes back.
         for (artist, bias) in artistBias where bias < 1 { artistBias[artist] = 1 + (bias - 1) * 0.96 }
+        interest = interest.compactMapValues { abs($0) < 0.03 ? nil : $0 * Self.interestFade }
+        artistInterest = artistInterest.compactMapValues { abs($0) < 0.03 ? nil : $0 * Self.interestFade }
+        liftedBy = liftedBy.compactMapValues { $0.amount < 0.03 ? nil : ($0.source, $0.amount * Self.interestFade) }
         guard var avoid = avoiding else { return }
         avoid.picksLeft -= 1
         avoiding = avoid.picksLeft > 0 ? avoid : nil
@@ -582,7 +769,8 @@ public struct LiveMix: Sendable {
             lately[candidates[index].song.artistKey, default: 0] += 1
         }
         // The song before: the next leans toward its genre, so one flows into the next.
-        let before = picks.last.flatMap { byIdentity[$0] }.flatMap { candidates[$0].genreKey }
+        let previous = picks.last
+        let before = previous.flatMap { byIdentity[$0] }.flatMap { candidates[$0].genreKey }
         let lifts = learning ? lifts(for: choices) : nil
         let weights = choices.map { candidate in
             candidate.weight
@@ -591,6 +779,8 @@ public struct LiveMix: Sendable {
                 * (candidate.genreKey.flatMap { genreBias[$0] } ?? 1)
                 * pow(0.5, Double(lately[candidate.song.artistKey] ?? 0))
                 * (before != nil && candidate.genreKey == before ? Self.flow : 1)
+                * lift(of: candidate)
+                * (previous.map { 1 + Self.leadLift * taste.leads(from: $0, into: candidate.song.songIdentity) } ?? 1)
         }
         .map { emphasis == 1 ? $0 : pow($0, emphasis) }
         let total = weights.reduce(0, +)
@@ -628,7 +818,7 @@ extension LiveMix {
         seed: UInt64
     ) -> LiveMix {
         let songs = MixBuilder.aggregate(history, signals: signals, now: now, calendar: calendar)
-        let fit = RadioMomentFit(moment: moment, songs: songs, drives: drives)
+        let fit = RadioMomentFit(moment: moment, songs: songs, drives: drives, now: now)
         let mostPlayed = mostPlayedThreshold(songs.map(\.dates.count))
         let rested = now.addingTimeInterval(-restPeriod)
         let yours = songs.map { aggregate in
@@ -658,9 +848,52 @@ extension LiveMix {
         }
         return LiveMix(
             candidates: balancedByArtist(yours) + balancedByArtist(new),
-            newShare: fit.newShare(tuning.discovery.newShare), moment: moment, seed: seed
+            newShare: fit.newShare(firstListens(tuning.discovery.newShare, yourSongs: yours.count, hasNewFinds: !new.isEmpty)),
+            moment: moment, seed: seed
         )
+        .following(history, now: now)
     }
+
+    /// The share of new finds for a history too small to carry a radio by itself: more of them,
+    /// so the first listens don't go round the same few songs. As tuned otherwise.
+    static func firstListens(_ tuned: Double, yourSongs: Int, hasNewFinds: Bool) -> Double {
+        guard hasNewFinds else { return tuned }
+        return switch yourSongs {
+        case ..<15: max(tuned, 0.5)
+        case ..<40: max(tuned, 0.35)
+        default: tuned
+        }
+    }
+
+    /// The mix with what it needs to know which of its songs go together, leaning toward the
+    /// seeds' companions from its first pick.
+    /// - Parameter seeds: songs to follow on from: Autoplay's, a station's, your picks.
+    func following(_ history: ListeningHistory, now: Date, leaningToward seeds: [String] = [], graph: TasteGraph? = nil) -> LiveMix {
+        var mix = self
+        mix.taste = graph ?? TasteGraph(history: history, keeping: Set(candidates.map(\.song.songIdentity)).union(seeds), now: now)
+        for seed in seeds { mix.lean(toward: seed, by: Self.seedLean) }
+        return mix
+    }
+
+    /// How far each song Autoplay, a handpicked station or the like follows on from leans
+    /// the start of it.
+    static let seedLean = 0.8
+
+    /// How close each song is to the closest of the seeds in the graph, 0 to 1: for mixes
+    /// that follow on from songs, to weigh what you've played with them as well as what they
+    /// share on paper.
+    static func closeness(toSeeds seeds: some Sequence<String>, in taste: TasteGraph) -> [String: Double] {
+        var closeness: [String: Double] = [:]
+        for seed in seeds {
+            for neighbor in taste.neighbors(of: seed) {
+                closeness[neighbor.identity] = max(closeness[neighbor.identity] ?? 0, neighbor.closeness)
+            }
+        }
+        return closeness
+    }
+
+    /// How much likelier a song is at its closest to the seeds.
+    static let seedCloseness = 2.0
 
     /// Each artist's songs made rarer by how many there are, so an artist with fifty songs in
     /// your history comes up more than one with a single song, but not fifty times as often.
@@ -709,6 +942,11 @@ extension LiveMix {
         }
         for (artist, bias) in earlier.artistBias { artistBias[artist] = bias }
         genreBias = earlier.genreBias
+        interest = earlier.interest
+        artistInterest = earlier.artistInterest
+        liftedBy = earlier.liftedBy
+        listenTally = earlier.listenTally
+        if taste.isEmpty { taste = earlier.taste }
         lovedGenre = earlier.lovedGenre
         outcomes = earlier.outcomes
         avoiding = earlier.avoiding
@@ -743,6 +981,7 @@ extension LiveMix {
         default: 0.25
         }
         return LiveMix(candidates: yours + new(newFinds, besides: yours, signals: signals, now: now), newShare: share, seed: seed)
+            .following(history, now: now)
     }
 
     /// New finds as candidates, leaving out any already in the history or suggested less.
@@ -951,7 +1190,9 @@ extension LiveMix {
     /// - Parameter counting: how much the outcome counts: less for a song moved on from than
     ///   one skipped, more for one loved.
     private mutating func learn(_ identity: String, _ candidate: Candidate, landed: Bool, counting: Double = 1) {
+        listenTally.add(landed: landed ? 1 : 0, missed: landed ? 0 : 1)
         guard habitsBase != nil else { return }
+        learned.recordListen(landed: landed)
         let slot = probe?.slots.firstIndex { $0.identity == identity }
         let weight = counting * (slot != nil ? Self.probeCounts : 1)
         // A skip remembered for next time counts for half a song let play: what you skip one

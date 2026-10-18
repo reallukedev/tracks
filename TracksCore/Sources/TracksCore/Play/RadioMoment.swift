@@ -95,9 +95,13 @@ struct RadioMomentFit {
     /// The share of all your listening near the moment: what a song's own share is measured against.
     private let baseline: Double
 
-    init(moment: RadioMoment, songs: [MixBuilder.Aggregate], drives: DriveLog) {
+    /// For counting a song's plays against its recent skips.
+    private let now: Date
+
+    init(moment: RadioMoment, songs: [MixBuilder.Aggregate], drives: DriveLog, now: Date = .now) {
         self.moment = moment
         self.drives = drives
+        self.now = now
         let nearness = (0..<48).map { slot in Self.nearness(hourSlot: slot, to: moment) }
         self.nearness = nearness
         var near = 0.0
@@ -133,7 +137,10 @@ struct RadioMomentFit {
     /// on the road, where a skip takes a hand off the wheel.
     func factor(for song: MixBuilder.Aggregate, genre: String?, recentSkips: Int) -> Double {
         var factor = habit(song) * energy(genre)
-        if recentSkips > 0 { factor *= 0.6 }
+        if recentSkips > 0 {
+            let recentPlays = song.dates.count { now.timeIntervalSince($0) < ListeningSignals.skipMemory }
+            factor *= Self.skipFactor(skips: recentSkips, plays: recentPlays)
+        }
         if moment.isDriving {
             factor *= 1 + 0.8 * Double(min(3, drivePlays(song)))
             factor *= roadGenre(genre)
@@ -149,6 +156,14 @@ struct RadioMomentFit {
         if moment.isDriving, drivePlays(song) > 0 { return .onTheRoad }
         if moment.hour != nil, song.hours.count >= 3, habit(song) >= Self.aroundNowHabit { return .aroundNow }
         return nil
+    }
+
+    /// A skip weighed against the plays around it: one skip of a song you've played a dozen
+    /// times lately was the moment, and barely counts; one of a song you never let play counts
+    /// in full. From 0.35 to just under 1.
+    static func skipFactor(skips: Int, plays: Int) -> Double {
+        guard skips > 0 else { return 1 }
+        return max(0.35, Double(plays + 1) / (Double(plays + 1) + 1.5 * Double(skips)))
     }
 
     /// How much likelier the hour makes a song before it's said to be one for around now: well

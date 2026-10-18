@@ -35,13 +35,17 @@ extension LiveMix {
         }
         let affinity = AutoplayAffinity(seeds: seeds, history: history)
         let picked = Set(picks.map(\.songIdentity))
+        let taste = TasteGraph(history: history, now: now)
+        let close = closeness(toSeeds: picked, in: taste)
         let rested = now.addingTimeInterval(-restPeriod)
 
         let scored: [(candidate: Candidate, likeness: Double)] = MixBuilder.aggregate(history, signals: signals, now: now, calendar: calendar)
             .compactMap { aggregate in
                 guard !picked.contains(aggregate.identity) else { return nil }
                 let metadata = history.songMetadata[aggregate.identity]
+                // What you've played with the picks counts as much as what they share on paper.
                 let likeness = affinity.likeness(artistName: aggregate.song.artistName, genre: metadata?.genre, releaseYear: metadata?.releaseYear)
+                    + seedCloseness * (close[aggregate.identity] ?? 0)
                 let candidate = Candidate(
                     song: aggregate.song,
                     weight: weight(plays: aggregate.dates.count, lastHeard: aggregate.lastHeard, now: now) * likeness,
@@ -71,12 +75,13 @@ extension LiveMix {
                     reason: newFindReasons[song.songIdentity] ?? .newFind
                 )
             }
-        let close = yours.count { $0.weight >= 0.5 }
+        let nearby = yours.count { $0.weight >= 0.5 }
         return LiveMix(
             candidates: picksAsCandidates + yours + new,
-            newShare: close < handpickedFewClose ? 0.65 : 0.45,
+            newShare: nearby < handpickedFewClose ? 0.65 : 0.45,
             seed: seed
         )
+        .following(history, now: now, graph: taste)
     }
 
     /// A song of yours at least this like the picks is close to them.

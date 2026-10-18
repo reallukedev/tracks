@@ -114,6 +114,8 @@ extension LiveMix {
     /// Only songs the player can find: ones with a catalog id, or all of them with sample data.
     nonisolated func playable(isDemo: Bool) -> LiveMix {
         guard !isDemo else { return self }
-        return LiveMix(candidates: candidates.filter { !$0.song.songID.isEmpty }, newShare: newShare, moment: moment, seed: .random(in: 0...UInt64.max))
+        var mix = LiveMix(candidates: candidates.filter { !$0.song.songID.isEmpty }, newShare: newShare, moment: moment, seed: .random(in: 0...UInt64.max))
+        mix.taste = taste
+        return mix
     }
 }
