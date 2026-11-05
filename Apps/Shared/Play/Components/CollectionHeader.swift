@@ -318,7 +318,6 @@ struct CollectionHeader<Cover: View, More: View>: View {
                     .font(.body.weight(.semibold))
                     .frame(width: 28, height: 28)
                     .contentShape(.circle)
-                    .glassEffect(.regular.interactive(), in: .circle)
                     .accessibilityLabel("More")
             }
             .menuStyle(.button)
