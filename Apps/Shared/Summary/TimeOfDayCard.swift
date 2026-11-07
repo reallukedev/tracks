@@ -1,5 +1,5 @@
 import SwiftUI
-import MotifCore
+import TracksCore
 
 /// Morning, afternoon, evening and night as shares of the listening time, the busiest one
 /// named up top and its bar picked out.

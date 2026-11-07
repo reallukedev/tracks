@@ -1,5 +1,5 @@
 import SwiftUI
-import MotifCore
+import TracksCore
 
 /// The phase 0 diagnostic screen. Dumps what the player reports so radio and on-demand
 /// playback can be told apart from real data. Reachable from a DEBUG-only entry point.

@@ -2,7 +2,7 @@
 import CoreData
 import Foundation
 import SwiftData
-import MotifCore
+import TracksCore
 
 /// Creates every record type and field in the iCloud container's Development schema.
 ///
@@ -22,13 +22,13 @@ enum CloudSchema {
             print("No iCloud container in this build.")
             return 1
         }
-        guard let model = NSManagedObjectModel.makeManagedObjectModel(for: MotifSchemaV1.models) else {
+        guard let model = NSManagedObjectModel.makeManagedObjectModel(for: TracksSchemaV1.models) else {
             print("Couldn't build a Core Data model from the SwiftData schema.")
             return 1
         }
 
         let directory = FileManager.default.temporaryDirectory
-            .appending(path: "MotifCloudSchema-\(UUID().uuidString)", directoryHint: .isDirectory)
+            .appending(path: "TracksCloudSchema-\(UUID().uuidString)", directoryHint: .isDirectory)
         defer { try? FileManager.default.removeItem(at: directory) }
 
         do {
@@ -40,7 +40,7 @@ enum CloudSchema {
             )
             description.shouldAddStoreAsynchronously = false
 
-            let container = NSPersistentCloudKitContainer(name: "Motif", managedObjectModel: model)
+            let container = NSPersistentCloudKitContainer(name: "Tracks", managedObjectModel: model)
             container.persistentStoreDescriptions = [description]
             var loadError: (any Error)?
             container.loadPersistentStores { _, error in loadError = error }

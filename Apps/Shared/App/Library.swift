@@ -1,9 +1,9 @@
 import SwiftUI
+import Combine
 import SwiftData
-import CoreData
 import Observation
-import MotifCore
-import MotifMusic
+import TracksCore
+import TracksMusic
 
 /// The listening history as plain values, kept up to date as the store changes.
 ///
@@ -42,12 +42,17 @@ final class Library {
     @ObservationIgnored private var refreshing: Task<Void, Never>?
     /// A change arrived while a refresh was already running, so another is owed.
     @ObservationIgnored private var needsAnotherRefresh = false
+    /// Failed attempts at the first read, which is tried again a few times on its own.
+    @ObservationIgnored private var failedFirstReads = 0
 
     private static let lookupPublishInterval: Duration = .seconds(2)
 
     /// How long to let a burst of saves settle before reading. A Mac capture saves the row,
     /// then its id and cover, then the playlist write and scrobble, within seconds.
     private static let settle: Duration = .milliseconds(400)
+
+    /// How many times a failed first read is tried again before waiting for the store to change.
+    private static let firstReadRetries = 5
 
     /// Sample data brings its own genres and years: its made-up songs mustn't reach Apple
     /// Music or the caches.
@@ -57,9 +62,10 @@ final class Library {
     ///
     /// - Parameter looksUpCatalog: false for sample data, whose made-up artists and songs
     ///   mustn't reach Apple Music or the caches.
-    func connect(to store: MotifStore, looksUpCatalog: Bool) {
+    func connect(to store: TracksStore, looksUpCatalog: Bool) {
         guard reader == nil else { return }
         self.looksUpCatalog = looksUpCatalog
+        if !looksUpCatalog { CatalogCredits.shared.update(from: Self.sampleMetadata) }
         // The store's own reader, which the merge shares, so the history is read in full once.
         reader = store.historyReader
         refresh()
@@ -85,16 +91,24 @@ final class Library {
                         if looksUpCatalog, !hasLoadedSongMetadata {
                             songMetadata = await Self.loadSongMetadata(from: songMetadataCache)
                             hasLoadedSongMetadata = true
+                            CatalogCredits.shared.update(from: songMetadata)
                         }
                         let (history, sessions) = await Self.build(snapshot)
                         publish(history, sessions: sessions)
                     }
+                    if !isLoaded {
+                        isLoaded = true
+                        revision += 1
+                    }
                 } catch {
-                    // Keep showing what was there. The next change reads again.
-                }
-                if !isLoaded {
-                    isLoaded = true
-                    revision += 1
+                    // Keep showing what was there; the next change reads again. Until a first
+                    // read works there's nothing to show, and calling it loaded would greet
+                    // someone with years of listening as new, so that one is retried, backing off.
+                    if !isLoaded, failedFirstReads < Self.firstReadRetries {
+                        failedFirstReads += 1
+                        try? await Task.sleep(for: .seconds(1 << failedFirstReads))
+                        needsAnotherRefresh = true
+                    }
                 }
             } while needsAnotherRefresh
         }
@@ -167,7 +181,7 @@ final class Library {
                 publishLookups(force: true)
             }
             while looksUpCatalog {
-                let requests = await Self.pendingSongs(in: history, lookedUp: Set(songMetadata.keys))
+                let requests = await Self.pendingSongs(in: history, known: songMetadata)
                 guard !requests.isEmpty,
                       let found = try? await CatalogLookup().songMetadata(for: requests),
                       looksUpCatalog
@@ -179,6 +193,7 @@ final class Library {
                     into: songMetadata,
                     cache: songMetadataCache
                 )
+                CatalogCredits.shared.update(from: songMetadata)
                 hasUnpublishedLookups = true
                 publishLookups(force: false)
             }
@@ -199,9 +214,9 @@ final class Library {
     @concurrent
     private nonisolated static func pendingSongs(
         in history: ListeningHistory,
-        lookedUp: Set<String>
+        known: [String: SongMetadata]
     ) async -> [SongMetadataLookup.Request] {
-        SongMetadataLookup.pending(in: history, lookedUp: lookedUp, limit: 200, searchLimit: 20)
+        SongMetadataLookup.pending(in: history, known: known, limit: 200, searchLimit: 20)
     }
 
     @concurrent
@@ -248,29 +263,6 @@ final class Library {
     }
 }
 
-/// Keeps `Library` in step with the store. Put it once at the root of each scene.
-struct LibraryObserver: ViewModifier {
-    let library: Library
-
-    func body(content: Content) -> some View {
-        content
-            // Any context's save, not just the main one: merges and repairs save on their own.
-            .onReceive(NotificationCenter.default.publisher(for: ModelContext.didSave)) { _ in
-                library.refresh()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: SyncReconciler.didReconcileNotification)) { _ in
-                library.refresh()
-            }
-            // Synced rows arrive without a save of any context in this process.
-            .onReceive(NotificationCenter.default.publisher(for: .NSPersistentStoreRemoteChange)) { _ in
-                library.refresh()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in
-                library.invalidate()
-            }
-    }
-}
-
 extension Capture {
     var stat: CaptureStat {
         CaptureStat(
@@ -311,15 +303,11 @@ extension View {
     /// has been folded in: the moments rows can change in place, which a query's count and
     /// ends don't show.
     func onStoreChange(of context: ModelContext, perform action: @escaping () -> Void) -> some View {
-        onReceive(NotificationCenter.default.publisher(for: ModelContext.didSave, object: context)) { _ in
+        onReceive(NotificationCenter.default.publisher(for: ModelContext.didSave, object: context).receive(on: DispatchQueue.main)) { _ in
             action()
         }
-        .onReceive(NotificationCenter.default.publisher(for: SyncReconciler.didReconcileNotification)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: SyncReconciler.didReconcileNotification).receive(on: DispatchQueue.main)) { _ in
             action()
         }
-    }
-
-    func observesLibrary(_ library: Library) -> some View {
-        modifier(LibraryObserver(library: library))
     }
 }

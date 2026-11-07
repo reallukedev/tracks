@@ -4,12 +4,19 @@
 set -e
 
 # An archive is what reaches TestFlight. Without the Last.fm credentials it still builds
-# and uploads, and every tester gets "This build has no Last.fm API key", so stop here.
-# Build and test actions don't need them.
+# and uploads, and every tester gets "This build has no Last.fm API key". Without the relay,
+# the App Clip can never reach the host's iPhone. So stop here. Build and test actions don't
+# need them.
 if [ "$CI_XCODEBUILD_ACTION" = "archive" ]; then
-  if [ -z "$MOTIF_LASTFM_API_KEY" ] || [ -z "$MOTIF_LASTFM_SECRET" ]; then
-    echo "error: MOTIF_LASTFM_API_KEY and MOTIF_LASTFM_SECRET must be set as secret"
-    echo "environment variables in this workflow's Environment settings to archive."
+  missing=""
+  for name in TRACKS_LASTFM_API_KEY TRACKS_LASTFM_SECRET TRACKS_RELAY_HOST TRACKS_RELAY_KEY; do
+    if [ -z "$(printenv "$name" || true)" ]; then
+      missing="$missing $name"
+    fi
+  done
+  if [ -n "$missing" ]; then
+    echo "error: set$missing as secret environment variables in this workflow's"
+    echo "Environment settings to archive."
     exit 1
   fi
 fi

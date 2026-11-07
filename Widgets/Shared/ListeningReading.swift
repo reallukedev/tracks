@@ -1,6 +1,6 @@
 import Foundation
 import SwiftData
-import MotifCore
+import TracksCore
 
 /// What the Listening widget reads, without loading the whole history.
 ///
@@ -25,7 +25,7 @@ enum ListeningReading {
     ) throws -> (history: ListeningHistory, start: Date) {
         let today = calendar.startOfDay(for: now)
         let start = calendar.date(byAdding: .day, value: -(days - 1), to: today) ?? today
-        var descriptor = MotifStore.allCaptures(since: start)
+        var descriptor = TracksStore.allCaptures(since: start)
         // Only what `CaptureStat` is built from. Artwork URLs and the queue bookkeeping aren't.
         descriptor.propertiesToFetch = [
             \.songKey, \.title, \.artistName, \.albumTitle, \.capturedAt, \.kindRawValue,

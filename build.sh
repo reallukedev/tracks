@@ -7,7 +7,7 @@
 #   ./build.sh [all]   signed macOS build with its checks, iOS simulator build, tests
 #   ./build.sh mac     signed macOS build, then checks the entitlements actually landed
 #   ./build.sh ios     iOS simulator build
-#   ./build.sh test    MotifCore tests on macOS and the iOS Simulator
+#   ./build.sh test    TracksCore tests on macOS and the iOS Simulator
 #   ./build.sh ci      what CI runs: tests on both, then unsigned iOS and macOS builds
 set -e
 # Uses whichever Xcode `xcode-select -p` points at; set DEVELOPER_DIR to override.
@@ -29,7 +29,7 @@ ios_test() {
   # Without -collect-test-diagnostics never, a failing test waits 10 minutes for a
   # simulator sysdiagnose.
   (
-    cd MotifCore && xcodebuild test -scheme MotifCore-Package -destination "platform=iOS Simulator,id=$udid" \
+    cd TracksCore && xcodebuild test -scheme TracksCore-Package -destination "platform=iOS Simulator,id=$udid" \
       -skipPackagePluginValidation -collect-test-diagnostics never 2>&1 \
       | grep -E "error:|recorded an issue|Test run with"
     exit "${PIPESTATUS[0]}"
@@ -41,7 +41,7 @@ case "${1:-all}" in
     echo "── macOS (signed)"
     # Automatic signing creates the iCloud container. Without -allowProvisioningUpdates the
     # build fails with "no profiles were found", which doesn't mention iCloud.
-    xcodebuild -project Motif.xcodeproj -scheme "Motif (macOS)" \
+    xcodebuild -project Tracks.xcodeproj -scheme "Tracks (macOS)" \
       -configuration Debug -allowProvisioningUpdates build 2>&1 | grep -E "error:|warning: .*deprecat|BUILD" | sort -u
     # xcodebuild's status, not grep's. Otherwise a failed build carries on and the checks
     # below inspect the previous build's product.
@@ -49,7 +49,7 @@ case "${1:-all}" in
       echo "✗ macOS build failed"
       exit 1
     fi
-    APP=$(xcodebuild -project Motif.xcodeproj -scheme "Motif (macOS)" \
+    APP=$(xcodebuild -project Tracks.xcodeproj -scheme "Tracks (macOS)" \
       -configuration Debug -showBuildSettings 2>/dev/null \
       | awk -F' = ' '/ BUILT_PRODUCTS_DIR/{d=$2} / FULL_PRODUCT_NAME/{n=$2} END{print d"/"n}')
     if ! codesign -d --entitlements - "$APP" 2>&1 | grep -q "application-groups"; then
@@ -71,7 +71,7 @@ case "${1:-all}" in
       exit 1
     fi
     echo "✓ key-value store entitlement present"
-    WIDGET="$APP/Contents/PlugIns/MotifWidgets.appex"
+    WIDGET="$APP/Contents/PlugIns/TracksWidgets.appex"
     if [ ! -d "$WIDGET" ]; then
       echo "✗ widget extension not embedded, so the widget would simply not appear."
       exit 1
@@ -88,7 +88,7 @@ esac
 case "${1:-all}" in
   ios|all)
     echo "── iOS"
-    xcodebuild -project Motif.xcodeproj -scheme "Motif (iOS)" -configuration Debug \
+    xcodebuild -project Tracks.xcodeproj -scheme "Tracks (iOS)" -configuration Debug \
       -destination "platform=iOS Simulator,name=iPhone Air" CODE_SIGNING_ALLOWED=NO \
       build 2>&1 | grep -E "error:|BUILD" | sort -u
     if [ "${PIPESTATUS[0]}" -ne 0 ]; then
@@ -102,7 +102,7 @@ case "${1:-all}" in
   test|all)
     echo "── tests (macOS)"
     (
-      cd MotifCore && swift test 2>&1 | grep -E "Test run with|recorded an issue"
+      cd TracksCore && swift test 2>&1 | grep -E "Test run with|recorded an issue"
       if [ "${PIPESTATUS[0]}" -ne 0 ]; then
         echo "✗ tests failed"
         exit 1
@@ -124,7 +124,7 @@ case "${1:-all}" in
     xcodebuild -version
 
     echo "── tests (macOS)"
-    if ! (cd MotifCore && swift test); then
+    if ! (cd TracksCore && swift test); then
       echo "✗ tests failed"
       exit 1
     fi
@@ -145,7 +145,7 @@ case "${1:-all}" in
     # Uses xcbeautify if installed, otherwise greps like the modes above.
     ci_build() {
       local args=(
-        -project Motif.xcodeproj -scheme "$1" -configuration Debug -destination "$2"
+        -project Tracks.xcodeproj -scheme "$1" -configuration Debug -destination "$2"
         -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
       )
       if command -v xcbeautify >/dev/null 2>&1; then
@@ -157,13 +157,13 @@ case "${1:-all}" in
     }
 
     echo "── iOS (unsigned)"
-    if ! ci_build "Motif (iOS)" "generic/platform=iOS Simulator"; then
+    if ! ci_build "Tracks (iOS)" "generic/platform=iOS Simulator"; then
       echo "✗ iOS build failed"
       exit 1
     fi
 
     echo "── macOS (unsigned, compile check only)"
-    if ! ci_build "Motif (macOS)" "generic/platform=macOS"; then
+    if ! ci_build "Tracks (macOS)" "generic/platform=macOS"; then
       echo "✗ macOS build failed"
       exit 1
     fi

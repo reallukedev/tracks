@@ -2,8 +2,8 @@ import Foundation
 import Observation
 import SwiftData
 import MusicKit
-import MotifCore
-import MotifMusic
+import TracksCore
+import TracksMusic
 
 /// Drives the phase 0 probe: samples the platform's now-playing surface once a second and
 /// exercises the playlist write path on demand.
@@ -27,7 +27,7 @@ final class ProbeModel {
     /// screen.
     private let storeStatus: String = {
         do {
-            return try MotifStore.shared().backing.description
+            return try TracksStore.shared().backing.description
         } catch {
             return "failed: \(error)"
         }
@@ -109,7 +109,7 @@ final class ProbeModel {
         isWriting = true
         defer { isWriting = false }
 
-        let name = "Motif Probe \(Date.now.formatted(date: .abbreviated, time: .shortened))"
+        let name = "Tracks Probe \(Date.now.formatted(date: .abbreviated, time: .shortened))"
         let writer = MusicKitPlaylistWriter { [log] transport in
             Task { @MainActor in
                 log.append(.playlistWrite, "Transport used", fields: [("transport", transport.rawValue)])
@@ -119,7 +119,7 @@ final class ProbeModel {
         do {
             let id = try await writer.createPlaylist(
                 name: name,
-                description: "Throwaway playlist from the Motif phase 0 probe. Safe to delete."
+                description: "Throwaway playlist from the Tracks phase 0 probe. Safe to delete."
             )
             probePlaylistID = id
             log.append(.playlistWrite, "Created playlist", fields: [
@@ -132,7 +132,7 @@ final class ProbeModel {
     }
 
     /// Prefix of every playlist the probe creates.
-    static let probePlaylistPrefix = "Motif Probe"
+    static let probePlaylistPrefix = "Tracks Probe"
 
     /// Lists the probe's throwaway playlists so they can be deleted by hand. The Apple Music
     /// API can't delete a library playlist: DELETE returns 401 even with tokens that can
@@ -162,8 +162,8 @@ final class ProbeModel {
     /// back in the playlist queue.
     func retryUnresolved() async {
         do {
-            let store = try MotifStore.shared()
-            let captures = try store.context.fetch(MotifStore.allCaptures())
+            let store = try TracksStore.shared()
+            let captures = try store.context.fetch(TracksStore.allCaptures())
             let stuck = captures.filter { $0.songID.isEmpty && $0.catalogLookupAttempts > 0 }
             for capture in stuck {
                 capture.catalogLookupAttempts = 0
@@ -189,8 +189,8 @@ final class ProbeModel {
     /// earlier build marked at queue time instead of on playback.
     func resetPlayback() {
         do {
-            let store = try MotifStore.shared()
-            let captures = try store.context.fetch(MotifStore.radioCaptures())
+            let store = try TracksStore.shared()
+            let captures = try store.context.fetch(TracksStore.radioCaptures())
             let marked = captures.filter { $0.playedBackAt != nil }
             for capture in marked { capture.playedBackAt = nil }
             try store.context.save()
@@ -205,9 +205,9 @@ final class ProbeModel {
     /// Plays back today's captures through the platform's playback service.
     func playBackToday() async {
         do {
-            let store = try MotifStore.shared()
+            let store = try TracksStore.shared()
             let controller = PlaybackController(store: store, service: PlatformPlaybackService.make())
-            let all = try store.context.fetch(MotifStore.radioCaptures())
+            let all = try store.context.fetch(TracksStore.radioCaptures())
             let selection = PlaybackSelection.todaysUnplayed(from: all)
             guard !selection.isEmpty else {
                 log.append(.environment, "Nothing to play back today")
@@ -312,8 +312,8 @@ final class ProbeModel {
         #endif
 
         do {
-            let store = try MotifStore.shared()
-            let all = try store.context.fetch(MotifStore.radioCaptures())
+            let store = try TracksStore.shared()
+            let all = try store.context.fetch(TracksStore.radioCaptures())
             let unplayed = PlaybackSelection.todaysUnplayed(from: all)
             fields.append(("captures today unplayed", String(unplayed.count)))
             fields.append(("oldest unplayed", unplayed.first.map { "\($0.title) by \($0.artistName)" } ?? "‹none›"))
@@ -332,13 +332,13 @@ final class ProbeModel {
     /// batching can be tested without waiting for a capture.
     func sendScrobbles() async {
         do {
-            let store = try MotifStore.shared()
+            let store = try TracksStore.shared()
             let scrobbler = ScrobbleService(store: store)
             guard scrobbler.isConnected else {
                 log.append(.error, "No Last.fm account is connected")
                 return
             }
-            let owedBefore = try store.context.fetch(MotifStore.pendingScrobbles(
+            let owedBefore = try store.context.fetch(TracksStore.pendingScrobbles(
                 includingImported: CaptureSettings().scrobblesImported
             )).count
             let sent = await scrobbler.drain()
@@ -362,13 +362,13 @@ final class ProbeModel {
             ("includes imported", String(CaptureSettings().scrobblesImported)),
         ]
         do {
-            let store = try MotifStore.shared()
-            let owed = try store.context.fetch(MotifStore.pendingScrobbles(
+            let store = try TracksStore.shared()
+            let owed = try store.context.fetch(TracksStore.pendingScrobbles(
                 includingImported: CaptureSettings().scrobblesImported
             ))
             fields.append(("owed a scrobble", String(owed.count)))
             fields.append(("oldest owed", owed.first.map { "\($0.title) by \($0.artistName)" } ?? "‹none›"))
-            let failed = try store.context.fetch(MotifStore.allCaptures())
+            let failed = try store.context.fetch(TracksStore.allCaptures())
                 .filter { $0.lastScrobbleError != nil }
             fields.append(("rows with a scrobble error", String(failed.count)))
             if let first = failed.first, let error = first.lastScrobbleError {
@@ -384,9 +384,9 @@ final class ProbeModel {
     /// argument is a substring.
     func forgetSong(matching text: String) {
         do {
-            let store = try MotifStore.shared()
+            let store = try TracksStore.shared()
             let needle = text.lowercased()
-            let matches = try store.context.fetch(MotifStore.allCaptures()).filter {
+            let matches = try store.context.fetch(TracksStore.allCaptures()).filter {
                 $0.title.lowercased().contains(needle)
             }
             guard !matches.isEmpty else {
@@ -462,16 +462,16 @@ final class ProbeModel {
     /// succeeded.
     func dumpCaptures(limit: Int = 20) {
         do {
-            let store = try MotifStore.shared()
+            let store = try TracksStore.shared()
             // All kinds, not only radio.
-            let captures = try store.context.fetch(MotifStore.allCaptures(limit: limit))
+            let captures = try store.context.fetch(TracksStore.allCaptures(limit: limit))
             guard !captures.isEmpty else {
                 log.append(.environment, "No captures stored")
                 return
             }
             for capture in captures {
                 log.append(.environment, "\(capture.title) by \(capture.artistName)", fields: [
-                    ("capturedAt", ISO8601DateFormatter().string(from: capture.capturedAt)),
+                    ("capturedAt", capture.capturedAt.formatted(.iso8601)),
                     ("songID", capture.songID.isEmpty ? "‹unresolved›" : capture.songID),
                     // Kind and songKey are the dedupe identity; two rows for one song differ here.
                     ("kind", capture.kind.rawValue),
@@ -480,8 +480,8 @@ final class ProbeModel {
                     ("device", capture.capturedByDeviceID.isEmpty ? "‹pre-sync›" : String(capture.capturedByDeviceID.prefix(8))),
                     ("albumTitle", capture.albumTitle ?? "‹none›"),
                     ("artworkURL", capture.artworkURL ?? "‹none›"),
-                    ("addedToPlaylist", capture.addedToPlaylistAt.map { ISO8601DateFormatter().string(from: $0) } ?? "no"),
-                    ("playedBackAt", capture.playedBackAt.map { ISO8601DateFormatter().string(from: $0) } ?? "no"),
+                    ("addedToPlaylist", capture.addedToPlaylistAt?.formatted(.iso8601) ?? "no"),
+                    ("playedBackAt", capture.playedBackAt?.formatted(.iso8601) ?? "no"),
                     ("needsPlaylistWrite", String(capture.needsPlaylistWrite)),
                     ("catalogLookupAttempts", String(capture.catalogLookupAttempts)),
                     ("lastError", capture.lastPlaylistWriteError ?? "‹none›"),
@@ -499,8 +499,8 @@ final class ProbeModel {
     /// empty station counts can mean thin data rather than a bug.
     func dumpStats() {
         do {
-            let store = try MotifStore.shared()
-            let captures = try store.context.fetch(MotifStore.radioCaptures())
+            let store = try TracksStore.shared()
+            let captures = try store.context.fetch(TracksStore.radioCaptures())
             let sessions = try store.context.fetch(FetchDescriptor<Session>())
 
             let captureStats = captures.map {

@@ -2,123 +2,125 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Motif iPhone Screenshots</title>
+<title>Tracks iPhone Screenshots</title>
 <link rel="stylesheet" href="shared.css">
 <script src="components.js"></script>
 </head>
 <body>
 <div class="canvas" id="canvas"></div>
 <script>
-// iPhone 6.9": 1320 × 2868 per frame, seven frames side by side on one canvas so the
-// grooves run unbroken from one screenshot into the next.
-const W = 1320, H = 2868, N = 7;
-const RAW = "../../build/raw/iphone/";
-const NATURAL = [1320, 2868];
+// iPhone 6.9": 1320 x 2868 per frame, nine frames side by side on one canvas, laid out the
+// way Apple lays out its own App Store screenshots: a plain light field, a two-line caption
+// at the top in the app's accent, and one iPhone, whole, in the lower four fifths.
+const W = 1320, H = 2868, N = 9;
+const RAW2 = "../../build/raw2/iphone/", RAW3 = "../../build/raw3/iphone/";
 
 const canvas = document.getElementById("canvas");
 Object.assign(canvas.style, { width: px(W * N), height: px(H) });
 
-const back = el("div"); back.className = "layer";
-const front = el("div"); front.className = "layer";
-canvas.append(back);
-
-// One giant record's grooves, centred on the hero record, reaching across the whole set.
-const hero = { cx: 660, cy: 1300, r: 520 };
-back.append(grooves({ cx: hero.cx, cy: hero.cy, from: 640, to: 9400, step: 96, opacity: 0.1, width: 3, fade: [520, 900, 7600, 9300] }));
-
-// The closing record gets its own, tighter rings.
-const finale = { cx: 6 * W + 660, cy: 1360, r: 580 };
-back.append(grooves({ cx: finale.cx, cy: finale.cy, from: 660, to: 1500, step: 44, opacity: 0.08, width: 2.5, fade: [580, 740, 1150, 1500] }));
-
-const S = 2.045;                         // phone scale: a 900 px wide screen
-const PHONE_W = 462 * S;                 // 945 px including the band and bezel
-const phoneLeft = (i, offset = 0) => i * W + (W - PHONE_W) / 2 + offset;
-
-const HEAD = { size: 132, subSize: 50, subWidth: 1040 };
+// One phone, the same size and place in every frame.
+const S = 2.45;
+const PH = phoneSize(S);
+const PHONE_AT = { left: (W - PH.w) / 2, top: H - PH.h - 84, s: S };
+const CAPTION = { left: 80, width: W - 160, top: 262, size: 62 };
 
 const frames = [
   {
-    // 1. Hero: the record slides out of the phone like a sleeve.
-    headline: "You listen.\nMotif remembers.",
-    sub: "Every song you play in Apple Music, kept and counted. Radio included.",
-    build(f, i) {
-      front.append(record({ cx: i * W + hero.cx, cy: hero.cy, r: hero.r }));
-      front.append(iphone({ src: RAW + "summary.png", left: phoneLeft(i), top: 1580, s: S }));
+    idea: "Flip through your music.",
+    detail: "Stations, mixes and moods in Cover Flow.",
+    src: RAW2 + "play.png",
+    build(f) {
+      // The crate on the screen carries on past the phone: the same mix tiles on the same
+      // centre line, turned the same way, spaced the way the app spaces them, with no
+      // reflections. Measured on play.png: centre line at y 863, side tiles 597 px tall at
+      // their outer edge, which sits 31 px past the screen edge; the app's Mac crate puts
+      // each further tile about 210 px out and 5% smaller. The app fades its crate out over
+      // the last 140 px at each screen edge; here it fades the same way at the frame's edges.
+      const k = onPhone(PHONE_AT, 0, 0).k;
+      const centre = onPhone(PHONE_AT, 0, 863).y;
+      const crate = el("div", {
+        position: "absolute", inset: "0",
+        maskImage: `linear-gradient(90deg, transparent 0, #000 ${140 * k}px, #000 calc(100% - ${140 * k}px), transparent 100%)`,
+        webkitMaskImage: `linear-gradient(90deg, transparent 0, #000 ${140 * k}px, #000 calc(100% - ${140 * k}px), transparent 100%)`,
+      });
+      const mixes = [
+        ["Island Time", "Lanterns", "Coastal Drive", "Glasshouse"],
+        ["Quiet Hours", "Satellite Hearts", "Evergreen", "Paper Moons"],
+        ["Afterglow", "Golden Hour", "Monsoon", "Night Swim"],
+        ["Daydream", "Static Bloom", "Northbound", "Honey Circuit"],
+        ["Low Tide", "Heatwave", "Velvet Rain", "Driftwood"],
+        ["Tides", "Weathervane", "Silver Coast", "Open Ocean"],
+      ];
+      // The first tile, which only overhangs the screen by 31 px, would show as a sliver against
+      // the phone, so the continuation starts with the next one.
+      [2, 1].forEach((step) => {
+        const size = 597 * Math.pow(0.95, step) * k;
+        const reach = (31 + step * 210) * k;
+        for (const side of [-1, 1]) {
+          const edge = side < 0 ? onPhone(PHONE_AT, 0, 0).x - reach : onPhone(PHONE_AT, 1206, 0).x + reach;
+          const left = side < 0 ? edge : edge - size;
+          crate.append(mixTile({ seeds: mixes[(side < 0 ? 0 : 3) + step], size, left, top: centre - size / 2, turn: side < 0 ? 6 : -6, perspective: 1800 }));
+        }
+      });
+      f.append(crate);
     },
   },
   {
-    headline: "Charts,\nbut yours.",
-    sub: "Top songs, artists and albums for any week, month or year, and how far each one moved.",
-    build(f, i) {
-      // A closer look: the phone is drawn larger and runs off the foot of the frame.
-      const big = 2.3;
-      front.append(iphone({ src: RAW + "charts-songs.png", left: i * W + (W - 462 * big) / 2, top: 780, s: big }));
-    },
+    idea: "Radio that learns your taste.",
+    detail: "It starts wide, then finds your sound.",
+    src: RAW3 + "radio-queue.png",
   },
   {
-    headline: "Your day has a rhythm.",
-    sub: "A 24-hour listening clock shows the hours you listen most.",
-    build(f, i) {
-      const phone = { left: phoneLeft(i), top: 780, s: S };
-      front.append(iphone({ src: RAW + "rhythm.png", ...phone }));
-      const c = onPhone(phone, 660, 1023);
-      front.append(breakout({ src: RAW + "rhythm.png", natural: NATURAL, crop: [48, 452, 1224, 1142], k: c.k * 1.16, cx: c.x, cy: c.y, radius: 58 }));
-    },
+    idea: "Music for every mood.",
+    detail: "Chill, Feel Good, Focus and more.",
+    src: RAW3 + "mood-chill.png",
   },
   {
-    headline: "Even radio\ncounts here.",
-    sub: "Apple Music doesn't count songs heard on a station as plays. Motif keeps every one.",
-    build(f, i) {
-      const phone = { left: phoneLeft(i), top: 780, s: S };
-      front.append(iphone({ src: RAW + "history.png", ...phone }));
-      const c = onPhone(phone, 660, 734);
-      front.append(breakout({ src: RAW + "history.png", natural: NATURAL, crop: [61, 625, 1198, 219], k: c.k * 1.26, cx: c.x, cy: c.y + 8, radius: 44 }));
-    },
+    idea: "Turn your phone into a stage.",
+    detail: "The visualizer moves to every beat.",
+    src: RAW3 + "stage-orb.png",
   },
   {
-    headline: "Every artist,\nthe whole story.",
-    sub: "Plays over time, all-time rank and the day you first heard them.",
-    build(f, i) {
-      const phone = { left: phoneLeft(i), top: 780, s: S };
-      front.append(iphone({ src: RAW + "artist.png", ...phone }));
-      const c = onPhone(phone, 660, 1355);
-      front.append(breakout({ src: RAW + "artist.png", natural: NATURAL, crop: [50, 1257, 1220, 197], k: c.k * 1.22, cx: c.x, cy: c.y, radius: 64 }));
-    },
+    idea: "Just ask Siri.",
+    detail: "Play from Apple Music or your own music.",
+    src: RAW2 + "nowplaying-dark.png",
   },
   {
-    headline: "Records worth\nkeeping.",
-    sub: "Your biggest day, your longest session, and the song you had on repeat.",
-    build(f, i) {
-      const phone = { left: phoneLeft(i), top: 780, s: S };
-      front.append(iphone({ src: RAW + "records.png", ...phone }));
-      const c = onPhone(phone, 352, 1597);
-      front.append(breakout({ src: RAW + "records.png", natural: NATURAL, crop: [62, 1447, 580, 300], k: c.k * 1.5, cx: c.x - 70, cy: c.y - 10, radius: 60 }));
-    },
+    idea: "Every song you play, kept.",
+    detail: "Even the ones on the radio.",
+    src: RAW3 + "history-radio.png",
   },
   {
-    // 7. Closing: the ring is complete.
-    headline: "Yours, and only yours.",
-    sub: "Your history stays on your devices and syncs through your own iCloud.",
-    build(f, i) {
-      front.append(record({ cx: finale.cx, cy: finale.cy, r: finale.r, played: 360 }));
-      front.append(pills({ top: 2200, left: i * W + 260, width: W - 520, items: ["No account", "No servers", "No ads", "No tracking"], size: 46, gap: 26 }));
-      const note = copy({ top: 2540, headline: "", sub: "Scrobbles to Last.fm, if you want it to.", size: 0, subSize: 44, subWidth: 1000, left: i * W, right: (N - 1 - i) * W });
-      note.querySelector(".sub").style.marginTop = "0";
-      note.querySelector(".sub").style.color = "rgba(255,255,255,0.78)";
-      front.append(note);
-    },
+    idea: "Your day has a rhythm.",
+    detail: "See the hours you listen most.",
+    src: RAW2 + "rhythm.png",
+  },
+  {
+    idea: "Ready when the party starts.",
+    detail: "Dance mixes from your most-played songs.",
+    src: RAW3 + "party.png",
+  },
+  {
+    // The close: type only, in the same plain style.
+    idea: "Yours, and only yours.",
+    detail: "No account, no ads, no tracking.",
+    type: true,
   },
 ];
 
 frames.forEach((spec, i) => {
   const f = frame(i, W, H);
   canvas.append(f);
-  front.append(copy({ top: 200, headline: spec.headline, sub: spec.sub, ...HEAD, left: i * W + 60, right: (N - 1 - i) * W + 60 }));
-  spec.build(f, i);
+  if (spec.type) {
+    f.append(caption({ ...CAPTION, top: H / 2 - 110, size: 84, idea: spec.idea, detail: spec.detail }));
+    return;
+  }
+  f.append(caption({ ...CAPTION, idea: spec.idea, detail: spec.detail }));
+  if (spec.build) spec.build(f);
+  f.append(iphone({ src: spec.src, ...PHONE_AT }));
 });
 
-canvas.append(front);
-document.fonts.ready.then(() => { document.body.dataset.ready = "1"; });
+ready();
 </script>
 </body>
 </html>

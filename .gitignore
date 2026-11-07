@@ -29,3 +29,8 @@ Config/Local.xcconfig
 # Agent worktrees and local tool settings.
 .claude/worktrees/
 .claude/settings.local.json
+
+# Gradle build caches.
+.gradle/
+Android/**/.gradle/
+Android/**/build/

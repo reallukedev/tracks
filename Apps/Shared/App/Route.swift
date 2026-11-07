@@ -1,5 +1,5 @@
 import SwiftUI
-import MotifCore
+import TracksCore
 
 /// Places a navigation stack can push.
 nonisolated enum Route: Hashable, Sendable {
@@ -7,7 +7,8 @@ nonisolated enum Route: Hashable, Sendable {
     case song(String)
     /// A `CaptureStat.albumIdentity`.
     case album(String)
-    case highlights(StatsRange)
+    /// A range, and how many periods back from the current one.
+    case highlights(StatsRange, periodOffset: Int)
 }
 
 /// Which ranked list the Charts tab, and the Mac's Top Charts sidebar items, are showing.
@@ -47,14 +48,17 @@ nonisolated enum ChartKind: String, CaseIterable, Identifiable, Hashable, Sendab
 
 extension View {
     /// The destinations every stack in the app understands.
-    func motifDestinations() -> some View {
+    func tracksDestinations() -> some View {
         navigationDestination(for: Route.self) { route in
-            switch route {
-            case .artist(let id): ArtistDetailView(artistID: id)
-            case .song(let id): SongDetailView(songID: id)
-            case .album(let id): AlbumDetailView(albumID: id)
-            case .highlights(let range): HighlightsList(range: range)
+            Group {
+                switch route {
+                case .artist(let id): ArtistDetailView(artistID: id)
+                case .song(let id): SongDetailView(songID: id)
+                case .album(let id): AlbumDetailView(albumID: id)
+                case .highlights(let range, let offset): HighlightsList(range: range, periodOffset: offset)
+                }
             }
+            .pageChrome()
         }
     }
 }

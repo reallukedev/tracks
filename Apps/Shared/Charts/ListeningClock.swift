@@ -1,6 +1,6 @@
 import SwiftUI
 import Accessibility
-import MotifCore
+import TracksCore
 
 /// A 24-hour dial: one wedge per hour, reaching further out where there was more listening.
 /// Midnight is at the top and the day runs clockwise.

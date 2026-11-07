@@ -1,5 +1,5 @@
 import SwiftUI
-import MotifCore
+import TracksCore
 
 /// One album's listening: how often you played it, which of its songs, and when.
 ///
@@ -8,8 +8,12 @@ struct AlbumDetailView: View {
     let albumID: String
     @Environment(AppModel.self) private var model
     @Environment(PlaybackController.self) private var playback
+    @Environment(\.playSongs) private var playSongs
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var profile: AlbumProfile?
+    /// The id whose profile was last worked out from a loaded library, so "No Plays" waits
+    /// for the answer instead of showing while the first one is still on its way.
+    @State private var loadedID: String?
     @State private var showsAllSongs = false
 
     var body: some View {
@@ -19,8 +23,12 @@ struct AlbumDetailView: View {
                     .padding()
                     .frame(maxWidth: 760)
                     .frame(maxWidth: .infinity)
-            } else if model.library.isLoaded {
+            } else if loadedID == albumID {
                 ContentUnavailableView("No Plays", systemImage: "square.stack")
+            } else {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 120)
             }
         }
         .groupedBackground()
@@ -29,12 +37,16 @@ struct AlbumDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .task(id: "\(albumID)|\(model.library.revision)") {
-            let (id, history) = (albumID, model.library.history)
+            let (id, history, isLoaded) = (albumID, model.library.history, model.library.isLoaded)
             let next = await OffMainActor.run { StatsCalculator.albumProfile(id: id, history: history) }
             guard !Task.isCancelled else { return }
-            LiveUpdate.apply(isLive: profile?.album.id == albumID, reduceMotion: reduceMotion) {
-                profile = next
+            // A lookup that changed nothing on this page doesn't redraw it.
+            if next != profile {
+                LiveUpdate.apply(isLive: profile?.album.id == albumID, reduceMotion: reduceMotion) {
+                    profile = next
+                }
             }
+            if isLoaded { loadedID = id }
         }
     }
 
@@ -107,10 +119,13 @@ struct AlbumDetailView: View {
         let playable = profile.songs.filter { !$0.songID.isEmpty }
         if !playable.isEmpty, !model.isShowingSampleData {
             Button("Play", systemImage: "play.fill") {
-                Task {
-                    await playback.play(playable.map {
-                        PlaybackItem(songID: $0.songID, title: $0.title, artistName: $0.artistName)
-                    })
+                let items = playable.map {
+                    PlaybackItem(songID: $0.songID, title: $0.title, artistName: $0.artistName)
+                }
+                if let playSongs {
+                    playSongs(items, title: profile.album.title)
+                } else {
+                    Task { await playback.play(items) }
                 }
             }
             .buttonStyle(.borderedProminent)

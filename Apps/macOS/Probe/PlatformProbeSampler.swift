@@ -1,7 +1,7 @@
 import Foundation
 import AppKit
-import MotifCore
-import MotifMusic
+import TracksCore
+import TracksMusic
 
 /// Dumps everything macOS reports about the current track, from two sources:
 ///

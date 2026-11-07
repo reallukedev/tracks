@@ -1,6 +1,6 @@
 import SwiftUI
 import SwiftData
-import MotifCore
+import TracksCore
 
 /// Every play, newest first, grouped by day.
 ///
@@ -8,17 +8,19 @@ import MotifCore
 /// view, so opening History costs the same however long the history is.
 struct HistoryScreen: View {
     @Environment(AppModel.self) private var model
-    @State private var filter: HistoryFilter = .all
+    @State private var filter: HistoryFilter = LaunchScene.historyFilter.flatMap(HistoryFilter.init(rawValue:)) ?? .all
     @State private var limit = HistoryPage.size
     @State private var pendingDelete: Capture?
     @State private var isScrobbling = false
     /// Written last when Settings connects or disconnects Last.fm, so the rows follow it.
     @AppStorage(LastFMSessionStore.usernameDefaultsKey, store: CaptureSettings.sharedDefaults)
     private var lastFMUsername: String?
+    private var sources = SourceScopeSetting()
 
     var body: some View {
         HistoryList(
             filter: filter,
+            source: sources.scope,
             limit: limit,
             isScrobbling: isScrobbling,
             canDelete: !model.isShowingSampleData,
@@ -26,12 +28,22 @@ struct HistoryScreen: View {
             loadMore: { limit += HistoryPage.size }
         )
         .navigationTitle("History")
+        .sourceScopeSubtitle(sources.scope)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Menu("Filter", systemImage: filter == .all ? "line.3.horizontal.decrease" : "line.3.horizontal.decrease.circle.fill") {
+                Menu("Filter", systemImage: isFiltered ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease") {
                     Picker("Show", selection: $filter) {
                         ForEach(HistoryFilter.allCases) { filter in
                             Label(filter.title, systemImage: filter.symbol).tag(filter)
+                        }
+                    }
+                    if sources.isOffered {
+                        Section("Music") {
+                            Picker("Music", selection: sources.selection) {
+                                ForEach(SourceScope.allCases) { scope in
+                                    Label(scope.title, systemImage: scope.symbol).tag(scope)
+                                }
+                            }
                         }
                     }
                 }
@@ -40,15 +52,21 @@ struct HistoryScreen: View {
         .deleteConfirmation(for: $pendingDelete)
         // A different filter starts again from the top.
         .onChange(of: filter) { limit = HistoryPage.size }
+        .onChange(of: sources.scope) { limit = HistoryPage.size }
         .onChange(of: lastFMUsername, initial: true) {
             isScrobbling = LastFMSessionStore.current != nil
         }
+    }
+
+    private var isFiltered: Bool {
+        filter != .all || sources.scope != .all
     }
 }
 
 /// The list itself, whose query is rebuilt when the filter or the page count changes.
 private struct HistoryList: View {
     let filter: HistoryFilter
+    let source: SourceScope
     let limit: Int
     let isScrobbling: Bool
     let canDelete: Bool
@@ -66,6 +84,7 @@ private struct HistoryList: View {
 
     init(
         filter: HistoryFilter,
+        source: SourceScope,
         limit: Int,
         isScrobbling: Bool,
         canDelete: Bool,
@@ -73,12 +92,13 @@ private struct HistoryList: View {
         loadMore: @escaping () -> Void
     ) {
         self.filter = filter
+        self.source = source
         self.limit = limit
         self.isScrobbling = isScrobbling
         self.canDelete = canDelete
         _pendingDelete = pendingDelete
         self.loadMore = loadMore
-        _captures = Query(filter.descriptor(limit: limit), animation: .default)
+        _captures = Query(filter.descriptor(source: source, limit: limit), animation: .default)
     }
 
     var body: some View {
@@ -116,7 +136,9 @@ private struct HistoryList: View {
         .listStyle(.insetGrouped)
         .overlay {
             if captures.isEmpty {
-                if filter == .all {
+                if filter == .all, source != .all {
+                    ContentUnavailableView("Nothing from \(Text(source.title))", systemImage: source.symbol)
+                } else if filter == .all {
                     ContentUnavailableView(
                         "No History Yet",
                         systemImage: "clock.arrow.circlepath",
@@ -129,8 +151,10 @@ private struct HistoryList: View {
         }
         .onStoreChange(of: context) { storeChanges += 1 }
         // Day headers move at midnight even when no play does.
-        .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in
-            storeChanges += 1
+        .task {
+            for await _ in NotificationCenter.default.notifications(named: .NSCalendarDayChanged) {
+                storeChanges += 1
+            }
         }
     }
 
@@ -148,7 +172,7 @@ private struct HistoryList: View {
             // store rather than from the rows that happen to be loaded.
             if hasMore, let last = days.last,
                let interval = Calendar.current.dateInterval(of: .day, for: last.day),
-               let count = try? context.fetchCount(filter.descriptor(in: interval)) {
+               let count = try? context.fetchCount(filter.descriptor(in: interval, source: source)) {
                 days[days.count - 1].count = count
             }
             return days
@@ -163,7 +187,8 @@ private struct HistoryList: View {
             newest: captures.first?.persistentModelID,
             oldest: captures.last?.persistentModelID,
             storeChanges: storeChanges,
-            filter: filter
+            filter: filter,
+            source: source
         )
     }
 }
@@ -174,6 +199,7 @@ struct HistoryDaysKey: Equatable {
     var oldest: PersistentIdentifier?
     var storeChanges: Int
     var filter: HistoryFilter
+    var source: SourceScope
 }
 
 /// One day's plays, newest first.

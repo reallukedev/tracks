@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// Whether Motif is actually catching up in the background, and when it last did.
+/// Whether Tracks is actually catching up in the background, and when it last did.
 ///
-/// Background App Refresh is opportunistic: iOS decides when, from how often Motif is used
+/// Background App Refresh is opportunistic: iOS decides when, from how often Tracks is used
 /// and the battery, and it may be hours or not at all. Without this the feature is invisible,
 /// and "iOS hasn't woken us yet" looks exactly like "this never worked".
 struct BackgroundRefreshNotice: View {
@@ -14,42 +14,48 @@ struct BackgroundRefreshNotice: View {
 
     var body: some View {
         if let blocker = availability.blocker {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: SettingsSpacing.standard) {
                 Label {
                     Text(message(for: blocker))
+                        .font(.subheadline)
                 } icon: {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(.ink(.orange))
                 }
-                // Opens Motif's page in Settings, which has the Background App Refresh switch.
+                // Opens Tracks’ page in Settings, which has the Background App Refresh switch.
                 if blocker == .turnedOff, let url = URL(string: UIApplication.openSettingsURLString) {
-                    Button("Open Settings") { openURL(url) }
+                    Button("Open Settings…") { openURL(url) }
                 }
+            }
+            .padding(.vertical, 2)
+        } else if let lastError {
+            // An unaccepted request is the more useful thing to say, since it means no
+            // wake-up is even pending. It's a sentence, so it goes under the label.
+            LabeledContent {
+                Text("Not Scheduled")
+            } label: {
+                Text("Last Background Check")
+                Text(lastError)
             }
         } else {
-            LabeledContent("Last Background Check") {
-                Text(status)
-                    .foregroundStyle(.secondary)
-            }
+            LabeledContent("Last Background Check", value: status)
         }
     }
 
-    /// When iOS last woke Motif. An unaccepted request is the more useful thing to say, since
-    /// it means no wake-up is even pending.
+    /// When iOS last woke Tracks.
     private var status: String {
-        if let lastError { return lastError }
-        guard let lastRun else { return "Not yet" }
+        guard let lastRun else { return String(localized: "Not Yet") }
         return Format.relativeTime(lastRun)
     }
 
     private func message(for blocker: BackgroundRefreshAvailability.Blocker) -> LocalizedStringKey {
         switch blocker {
         case .lowPowerMode:
-            "Low Power Mode is on, so Motif only catches up when you open it."
+            "Low Power Mode is on, so Tracks only catches up when you open it."
         case .turnedOff:
-            "Background App Refresh is off for Motif, so it only catches up when you open it."
+            "Background App Refresh is off for Tracks, so it only catches up when you open it."
         case .restricted:
-            "Background App Refresh isn't allowed on this device, so Motif only catches up when you open it."
+            "Background App Refresh isn't allowed on this device, so Tracks only catches up when you open it."
         }
     }
 }

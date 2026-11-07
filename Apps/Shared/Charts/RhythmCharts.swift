@@ -1,6 +1,6 @@
 import SwiftUI
 import Charts
-import MotifCore
+import TracksCore
 
 /// Plays per day of the week, weekends in a lighter shade.
 struct WeekdayChart: View {
@@ -16,7 +16,7 @@ struct WeekdayChart: View {
                 x: .value("Day", String(day.weekday)),
                 y: .value("Plays", day.count)
             )
-            .foregroundStyle(day.isWeekend ? AnyShapeStyle(Color.accentColor.opacity(0.5)) : AnyShapeStyle(Color.accentColor.gradient))
+            .foregroundStyle(day.isWeekend ? Self.weekendStyle : Self.weekdayStyle)
             .cornerRadius(4)
             .accessibilityLabel(Calendar.current.weekdaySymbols[day.weekday - 1])
             .accessibilityValue(Text("\(day.count) plays"))
@@ -32,7 +32,11 @@ struct WeekdayChart: View {
         }
         .chartYAxis(.hidden)
         .frame(minHeight: height ?? 140, maxHeight: height ?? .infinity)
+        .chartTextSize()
     }
+
+    static let weekdayStyle = AnyShapeStyle(Color.accentColor.gradient)
+    static let weekendStyle = AnyShapeStyle(Color.accentColor.opacity(0.5))
 }
 
 /// On demand vs radio vs recovered, as a ring with a legend.

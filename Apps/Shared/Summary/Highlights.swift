@@ -1,5 +1,5 @@
 import SwiftUI
-import MotifCore
+import TracksCore
 
 /// One highlight, as a card: coloured heading, symbol, sentence.
 struct HighlightCard: View {
@@ -78,11 +78,14 @@ struct HighlightSentence: View {
     }
 }
 
-/// Every highlight for a range, pushed from "Show All".
+/// Every highlight for a range, pushed from "See All".
 struct HighlightsList: View {
     let range: StatsRange
+    var periodOffset = 0
     @Environment(AppModel.self) private var model
     @State private var insights: [Insight] = []
+    @State private var hasLoaded = false
+    private var sources = SourceScopeSetting()
 
     var body: some View {
         ScrollView {
@@ -95,15 +98,30 @@ struct HighlightsList: View {
             .frame(maxWidth: 700)
             .frame(maxWidth: .infinity)
         }
+        .overlay {
+            if !hasLoaded {
+                ProgressView()
+            } else if insights.isEmpty {
+                ContentUnavailableView("No Highlights", systemImage: "sparkles", description: Text("Play a few more songs and highlights will show up here."))
+            }
+        }
         .groupedBackground()
         .navigationTitle("Highlights")
-        .task(id: model.library.revision) {
-            let (range, history, sessions) = (range, model.library.history, model.library.sessions)
+        .sourceScopeSubtitle(sources.scope)
+        .task(id: "\(sources.scope.rawValue)|\(model.library.revision)") {
+            let (range, offset, scope, history, sessions) = (range, periodOffset, sources.scope, model.library.history, model.library.sessions)
+            let includesStations = scope.includesStations
             let next = await OffMainActor.run {
-                StatsCalculator.summary(range: range, history: history, sessions: sessions).insights
+                StatsCalculator.summary(
+                    range: range,
+                    history: history.scoped(to: scope),
+                    sessions: includesStations ? sessions : [],
+                    periodOffset: offset
+                ).insights
             }
             guard !Task.isCancelled else { return }
             insights = next
+            hasLoaded = model.library.isLoaded
         }
     }
 }

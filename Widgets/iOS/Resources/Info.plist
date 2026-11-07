@@ -5,7 +5,7 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleDisplayName</key>
-    <string>Motif</string>
+    <string>Tracks</string>
     <key>CFBundleExecutable</key>
     <string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleIdentifier</key>
@@ -24,9 +24,9 @@
         <string>com.apple.widgetkit-extension</string>
     </dict>
 
-    <!-- Read by MotifCore to find the shared store. Same reason as the app's copy: the
+    <!-- Read by TracksCore to find the shared store. Same reason as the app's copy: the
          identifier differs by platform, so it comes from the xcconfig rather than a literal. -->
-    <key>MotifAppGroupIdentifier</key>
-    <string>$(MOTIF_APP_GROUP)</string>
+    <key>TracksAppGroupIdentifier</key>
+    <string>$(TRACKS_APP_GROUP)</string>
 </dict>
 </plist>

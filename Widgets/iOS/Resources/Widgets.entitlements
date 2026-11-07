@@ -6,7 +6,7 @@
          default and outbound network needs no entitlement. -->
     <key>com.apple.security.application-groups</key>
     <array>
-        <string>$(MOTIF_APP_GROUP)</string>
+        <string>$(TRACKS_APP_GROUP)</string>
     </array>
 </dict>
 </plist>

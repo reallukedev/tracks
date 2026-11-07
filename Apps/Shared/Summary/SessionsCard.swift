@@ -1,6 +1,6 @@
 import SwiftUI
 import Charts
-import MotifCore
+import TracksCore
 
 /// How long people listen for once they start: the average session up top, how the
 /// sessions spread across lengths, and the longest one.
@@ -47,6 +47,7 @@ struct SessionsCard: View {
                 // Headroom for the counts above the tallest bar.
                 .chartYScale(domain: 0...Double(max(1, sessions.lengths.map(\.count).max() ?? 1)) * 1.25)
                 .frame(minHeight: 110, maxHeight: .infinity)
+                .chartTextSize()
 
                 AdaptiveStack(spacing: 8) {
                     if let longest = sessions.longest {

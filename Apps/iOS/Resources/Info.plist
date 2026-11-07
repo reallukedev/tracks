@@ -6,18 +6,42 @@
 	<array>
 		<string>$(PRODUCT_BUNDLE_IDENTIFIER).refresh</string>
 	</array>
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>Motif</string>
+	<string>Tracks</string>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Audio</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.audio</string>
+				<string>org.xiph.flac</string>
+				<string>public.mp3</string>
+				<string>public.mpeg-4-audio</string>
+				<string>com.microsoft.waveform-audio</string>
+				<string>public.aiff-audio</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleName</key>
-	<string>$(PRODUCT_NAME)</string>
+	<string>Tracks</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -25,38 +49,122 @@
 			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>motif</string>
+				<string>tracks</string>
 			</array>
 		</dict>
 	</array>
-	<key>CFBundleShortVersionString</key>
-	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>INIntentsSupported</key>
+	<array>
+		<string>INPlayMediaIntent</string>
+		<string>INUpdateMediaAffinityIntent</string>
+		<string>INAddMediaIntent</string>
+	</array>
+	<key>INSupportedMediaCategories</key>
+	<array>
+		<string>INMediaCategoryMusic</string>
+	</array>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.music</string>
-	<key>MotifAppGroupIdentifier</key>
-	<string>$(MOTIF_APP_GROUP)</string>
-	<key>MotifCloudContainerIdentifier</key>
-	<string>$(MOTIF_ICLOUD_CONTAINER)</string>
-	<key>MotifLastFMAPIKey</key>
-	<string>$(MOTIF_LASTFM_API_KEY)</string>
-	<key>MotifLastFMSecret</key>
-	<string>$(MOTIF_LASTFM_SECRET)</string>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>NSAppleMusicUsageDescription</key>
-	<string>Motif reads what Apple Music is playing so it can keep your listening history, scrobble it to Last.fm, and save songs you hear on the radio to your library.</string>
+	<string>Tracks plays Apple Music and reads what's playing so it can keep your listening history, scrobble it to Last.fm, and save songs you hear on the radio to your library.</string>
+	<key>NSUserActivityTypes</key>
+	<array>
+		<string>$(PRODUCT_BUNDLE_IDENTIFIER).playing</string>
+	</array>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_tracks._tcp</string>
+		<string>_tracksshareplay._tcp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Tracks reaches your own music server on your network, finds Tracks on your other devices nearby to show and control what they're playing, and connects the people with you who scan your SharePlay code.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>With Always, Louder at Speed starts whenever you drive with music playing, even with iPhone in a pocket or a bag. Tracks uses only your speed, only while you drive, and your location never leaves this iPhone.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>With Louder at Speed on, Tracks turns your music up as the car speeds up and back down as it slows. It uses only your speed, only while you drive, and your location never leaves this iPhone.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Identify Song listens for a few seconds to name the song playing near you. Only a fingerprint of the sound goes to Shazam, and nothing is recorded or kept.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>Tracks notices when you're driving, so Tracks Radio can play the songs you like on the road and Louder at Speed can follow the car. Your drives stay on this iPhone.</string>
+	<key>NSSiriUsageDescription</key>
+	<string>Siri can play your music in Tracks when you ask, so every song you hear is kept.</string>
+	<key>TracksAppClipBundleID</key>
+	<string>$(TRACKS_BUNDLE_ID).Clip</string>
+	<key>TracksAppClipIsLive</key>
+	<string>$(TRACKS_APP_CLIP_LIVE)</string>
+	<key>TracksAppGroupIdentifier</key>
+	<string>$(TRACKS_APP_GROUP)</string>
+	<key>TracksCloudContainerIdentifier</key>
+	<string>$(TRACKS_ICLOUD_CONTAINER)</string>
+	<key>TracksLastFMAPIKey</key>
+	<string>$(TRACKS_LASTFM_API_KEY)</string>
+	<key>TracksLastFMSecret</key>
+	<string>$(TRACKS_LASTFM_SECRET)</string>
+	<key>TracksMotifAppGroupIdentifier</key>
+	<string>$(TRACKS_MOTIF_APP_GROUP)</string>
+	<key>TracksRelayHost</key>
+	<string>$(TRACKS_RELAY_HOST)</string>
+	<key>TracksRelayKey</key>
+	<string>$(TRACKS_RELAY_KEY)</string>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<true/>
+		<key>UISceneConfigurations</key>
+		<dict>
+			<key>CPTemplateApplicationSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneConfigurationName</key>
+					<string>CarPlay</string>
+					<key>UISceneDelegateClassName</key>
+					<string>$(PRODUCT_MODULE_NAME).CarPlaySceneDelegate</string>
+				</dict>
+			</array>
+		</dict>
+	</dict>
 	<key>UIBackgroundModes</key>
 	<array>
+		<string>audio</string>
 		<string>fetch</string>
 		<string>remote-notification</string>
+		<string>location</string>
 	</array>
+	<key>UIFileSharingEnabled</key>
+	<true/>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Songs from Tracks</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.luke.tracks.songs</string>
+		</dict>
 	</array>
 </dict>
 </plist>

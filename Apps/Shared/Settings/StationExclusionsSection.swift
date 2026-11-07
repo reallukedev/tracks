@@ -1,8 +1,8 @@
 import SwiftUI
 import SwiftData
-import MotifCore
+import TracksCore
 
-/// Which stations Motif captures from. Edits the exclusion set ``CapturePolicy`` reads.
+/// Which stations Tracks captures from. Edits the exclusion set ``CapturePolicy`` reads.
 ///
 /// Stations are picked from a list rather than typed, because an exclusion only works if
 /// it matches the name the platform reports exactly.
@@ -35,7 +35,7 @@ struct StationExclusionsSection: View {
         .onSettingsChangedRemotely { excluded = settings.excludedStations }
     }
 
-    /// Apple's live stations, then the others Motif has heard. See ``AppleMusicStations``.
+    /// Apple's live stations, then the others Tracks has heard. See ``AppleMusicStations``.
     private var names: [String] {
         AppleMusicStations.choices(heard: stations.map(\.name), excluded: excluded)
     }

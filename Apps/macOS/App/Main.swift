@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Chooses between the app and the headless probe before any UI exists. `MotifApp` isn't
+/// Chooses between the app and the headless probe before any UI exists. `TracksApp` isn't
 /// `@main` because `App.main()` creates a window.
 @main
 struct Main {
@@ -12,6 +12,6 @@ struct Main {
             HeadlessProbe.run(arguments)
         }
         #endif
-        MotifApp.main()
+        TracksApp.main()
     }
 }

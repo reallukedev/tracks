@@ -1,5 +1,5 @@
 import SwiftUI
-import MotifCore
+import TracksCore
 
 /// The top card: how much you listened in the range, how that compares, and the bars.
 struct ListeningCard: View {
@@ -9,6 +9,7 @@ struct ListeningCard: View {
     /// without leaving empty space.
     var fillsHeight = false
     @State private var selected: TimeBucket?
+    @Environment(\.statsPaging) private var paging
 
     var body: some View {
         Card {
@@ -16,9 +17,13 @@ struct ListeningCard: View {
                 AdaptiveStack(verticalAlignment: .firstTextBaseline) {
                     CardLabel(title: "Listening", systemImage: "headphones", tint: .accentColor)
                     Spacer(minLength: 0)
-                    Text(rangeTitle)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    if let paging, summary.range != .allTime {
+                        PeriodPager(summary: summary, paging: paging)
+                    } else {
+                        Text(summary.periodTitle)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -56,26 +61,11 @@ struct ListeningCard: View {
         }
     }
 
-    private var rangeTitle: String {
-        guard let interval = summary.interval else { return String(localized: "All Time") }
-        let end = interval.end.addingTimeInterval(-1)
-        switch summary.range {
-        case .week:
-            return (interval.start..<end).formatted(.interval.day().month(.abbreviated))
-        case .month:
-            return interval.start.formatted(.dateTime.month(.wide).year())
-        case .year:
-            return interval.start.formatted(.dateTime.year())
-        case .allTime:
-            return String(localized: "All Time")
-        }
-    }
-
     @ViewBuilder
     private var comparison: some View {
         if let change = summary.listeningChange, abs(change) < 0.03, summary.range != .allTime {
             Label {
-                Text("About the same as \(Text(summary.range.previousPhrase))")
+                Text("About the same as \(summary.previousPhrase)")
             } icon: {
                 Image(systemName: "equal")
             }
@@ -84,7 +74,7 @@ struct ListeningCard: View {
         } else if let change = summary.listeningChange, summary.range != .allTime {
             let symbol = change >= 0 ? "arrow.up.right" : "arrow.down.right"
             Label {
-                Text("\(Format.percentChange(change)) from \(Text(summary.range.previousPhrase))")
+                Text("\(Format.percentChange(change)) from \(summary.previousPhrase)")
             } icon: {
                 Image(systemName: symbol)
             }

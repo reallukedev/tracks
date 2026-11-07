@@ -9,7 +9,7 @@ struct TodaySection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: rowStyle.spacing) {
-            // Not "Today on Radio": Motif keeps every song now, not just radio.
+            // Not "Today on Radio": Tracks keeps every song now, not just radio.
             WidgetSectionHeader(title: "Today", systemImage: "music.note.list") {
                 if showsPlayButton {
                     PlayBackButton()

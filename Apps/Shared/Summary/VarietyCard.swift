@@ -1,5 +1,5 @@
 import SwiftUI
-import MotifCore
+import TracksCore
 
 /// How widely the listening ranged: plays per song up top, then the figures behind it.
 struct VarietyCard: View {

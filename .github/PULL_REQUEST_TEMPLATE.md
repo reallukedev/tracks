@@ -1,6 +1,6 @@
 ## What this changes
 
-<!-- What changes for the person using Motif, and why. Link the issue if there is one. -->
+<!-- What changes for the person using Tracks, and why. Link the issue if there is one. -->
 
 ## How it was verified
 
@@ -11,9 +11,9 @@ Say what you couldn't verify, too. "It builds" is not "it works".
 
 ## Checklist
 
-- [ ] `cd MotifCore && swift test` passes
+- [ ] `cd TracksCore && swift test` passes
 - [ ] `./build.sh ci` passes, or CI is green
-- [ ] New logic in `MotifCore` has tests
+- [ ] New logic in `TracksCore` has tests
 - [ ] I ran the change, not only compiled it (and on the Mac, a signed build)
 - [ ] Nothing here inflates a play count or plays music nobody hears
 - [ ] `xcodegen generate` was run if files were added, moved or removed

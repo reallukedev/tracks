@@ -1,11 +1,11 @@
 import SwiftUI
-import MotifCore
+import TracksCore
 
 extension View {
     /// Re-reads a setting into the view's own state when another device changes it.
     ///
     /// Settings live in `UserDefaults`, which SwiftUI can't observe, and `CaptureSettings`
-    /// isn't `@Observable`, so these sections keep a `@State` copy — a `Toggle` bound straight
+    /// isn't `@Observable`, so these sections keep a `@State` copy: a `Toggle` bound straight
     /// through the struct snaps back after each tap. `@AppStorage` redraws itself when
     /// ``SettingsSync`` writes a pulled value, but a `@State` copy taken when the view was
     /// first built would keep showing the old value until something else rebuilt it.

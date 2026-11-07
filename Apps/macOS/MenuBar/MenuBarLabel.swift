@@ -1,6 +1,6 @@
 import SwiftUI
 import AppKit
-import MotifCore
+import TracksCore
 
 /// The status item itself: symbol, album cover, text, or a format the user wrote.
 ///
@@ -106,12 +106,12 @@ struct MenuBarLabel: View {
 
     private var accessibilityText: String {
         guard showsSong else {
-            return isCapturing ? "Motif, nothing playing" : "Motif, capture paused"
+            return isCapturing ? "Tracks, nothing playing" : "Tracks, capture paused"
         }
         guard let song else {
-            return isCapturing ? "Motif, capturing" : "Motif, capture paused"
+            return isCapturing ? "Tracks, capturing" : "Tracks, capture paused"
         }
-        return "Motif, \(song.title) by \(song.artistName)"
+        return "Tracks, \(song.title) by \(song.artistName)"
     }
 }
 

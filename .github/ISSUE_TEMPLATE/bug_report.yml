@@ -1,11 +1,11 @@
 name: Bug report
-description: Something in Motif doesn't work the way it should.
+description: Something in Tracks doesn't work the way it should.
 labels: [bug]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to report this. For a security problem, please don't use this form: see [SECURITY.md](https://github.com/reallukedev/motif/blob/main/SECURITY.md).
+        Thanks for taking the time to report this. For a security problem, please don't use this form: see [SECURITY.md](https://github.com/reallukedev/tracks/blob/main/SECURITY.md).
 
   - type: textarea
     id: what-happened
@@ -54,9 +54,9 @@ body:
       required: true
 
   - type: input
-    id: motif-version
+    id: tracks-version
     attributes:
-      label: Motif version or commit
+      label: Tracks version or commit
       description: The version you're running, or `git rev-parse --short HEAD` if you built it yourself.
     validations:
       required: true
@@ -86,4 +86,4 @@ body:
       options:
         - label: I searched existing issues and this hasn't been reported.
           required: true
-        - label: If I built Motif myself, the Mac build was signed (an unsigned Mac build runs with an empty, in-memory store).
+        - label: If I built Tracks myself, the Mac build was signed (an unsigned Mac build runs with an empty, in-memory store).
