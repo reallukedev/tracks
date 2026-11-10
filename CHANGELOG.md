@@ -21,8 +21,8 @@ with the app in the background, so your history no longer depends on having Trac
   the song: how many times you've heard it, when you first heard it and where, a year of it
   month by month, and when in the day it's yours
 - Albums, playlists and mixes glow with the colour of their cover
-- Now Playing's background is yours to choose in Settings: the cover's colour, the artwork
-  itself, Living Colour, the cover's colours flowing while the music plays, or Pulse, the
+- Now Playing's background is yours to choose in Settings: Full Cover, the cover edge to
+  edge flowing on into its own colours with the type light or dark to suit, the artwork itself, Living Colour, the cover's colours flowing while the music plays, or Pulse, the
   cover's colours beating with the song, quick for lively songs and slow for calm ones.
   Choose how it changes between songs too: crossfade, slide or bloom
 - Top Songs, Top Artists and Top Albums travel through time: any day, week, month or year.

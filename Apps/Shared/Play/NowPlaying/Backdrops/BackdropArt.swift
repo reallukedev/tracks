@@ -3,6 +3,8 @@ import MusicKit
 import TracksCore
 import CoreImage
 import CoreImage.CIFilterBuiltins
+import Vision
+import CoreML
 
 /// A cover made ready for the player's backgrounds: the picture small, softened two ways, the
 /// colours it's made of, and its field. Every cover has one: a picture from the web, the
@@ -24,6 +26,15 @@ struct BackdropArt: Sendable {
     let lights: [Color]
     /// The cover's colour, deep enough for white type (see ``CoverTint``).
     let field: Color
+    /// How it carries on past its edges, for Full Cover. Nil only for a picture with no
+    /// pixels to read.
+    let bleed: CoverBleed?
+    /// Where what the cover is of sits in it (a face, a figure, a title), as Vision's attention
+    /// finds it: parts of the side, from the top left. Nil when nothing stands out.
+    let subject: CGRect?
+    /// Who or what the cover is of, to bring closer: its people, as Vision finds them, or
+    /// failing those its most object-like thing. Parts of the side, from the top left.
+    let focus: CGRect?
     /// Where its flow starts, in seconds, so no two songs' backgrounds start alike.
     let start: Double
     /// Made from a stand-in because the cover's picture wouldn't come, this time: not kept,
@@ -93,14 +104,18 @@ final class BackdropArtStore {
 
     private static func make(_ cover: CoverArt) async -> BackdropArt? {
         guard let (picture, isStandIn) = await picture(of: cover) else { return nil }
-        let prepared = await OffMainActor.run { () -> (CGImage, CGImage, CGImage, [CoverPalette.Colour])? in
+        // A larger copy for Vision, which can't find a small figure in a few dozen pixels.
+        let looked = await CoverTint.smallImage(for: cover, pixels: CoverSubject.pixels) ?? picture
+        let pixels = BackdropArt.pixels
+        let prepared = await OffMainActor.run { () -> (CGImage, CGImage, CGImage, [CoverPalette.Colour], CoverBleed?, CGRect?, CGRect?)? in
             guard let clear = SoftCover.soften(picture, by: 1.5),
                   let flowing = SoftCover.soften(picture, by: 3.5),
                   let soft = SoftCover.soften(picture, by: 8)
             else { return nil }
-            return (clear, flowing, soft, CoverPalette.colours(rgba: CoverPixels.rgba(of: picture, side: 24)))
+            let bleed = CoverBleed(rgba: CoverPixels.rgba(of: picture, side: pixels), side: pixels)
+            return (clear, flowing, soft, CoverPalette.colours(rgba: CoverPixels.rgba(of: picture, side: 24)), bleed, CoverSubject.bounds(in: looked), CoverSubject.focus(in: looked))
         }
-        guard let (clear, flowing, soft, found) = prepared else { return nil }
+        guard let (clear, flowing, soft, found, bleed, subject, focus) = prepared else { return nil }
         let colours = CoverPalette.filled(found, to: 4).map { Color(red: $0.red, green: $0.green, blue: $0.blue) }
         let field = await CoverTint.color(for: cover) ?? found.first.map { colour in
             let deep = CoverTint.deepened((colour.red, colour.green, colour.blue))
@@ -114,6 +129,9 @@ final class BackdropArtStore {
             deep: CoverTint.deepPalette(found),
             lights: lights(from: CoverPalette.filled(found, to: 3)),
             field: field,
+            bleed: bleed,
+            subject: subject,
+            focus: focus,
             start: Double(UInt(bitPattern: cover.hashValue) % 600),
             isStandIn: isStandIn
         )
@@ -172,6 +190,88 @@ final class BackdropArtStore {
     }
 }
 
+/// What a cover is of, found by Vision: the part of it the eye goes to first (attention-based
+/// saliency), and any words on it (a title the eye may skip, but nobody wants cut off). Full
+/// Cover places a cover by it: on the Mac a figure cut off at the waist stands on the window's
+/// bottom edge; on iPhone a cover whose subject sits low rises under the top bar.
+nonisolated enum CoverSubject {
+    /// The salient objects' and words' bounds together, from the top left, in parts of the side.
+    static func bounds(in image: CGImage) -> CGRect? {
+        let salient = VNGenerateAttentionBasedSaliencyImageRequest()
+        let words = VNDetectTextRectanglesRequest()
+        onDevicesItRuns(salient, words)
+        // Each on its own: one that can't read so small a picture mustn't lose the other.
+        for request in [salient, words] as [VNRequest] {
+            try? VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
+        }
+        let boxes = (salient.results?.first?.salientObjects ?? []).map(\.boundingBox)
+            + (words.results ?? []).map(\.boundingBox)
+        let union = boxes.reduce(CGRect.null) { $0.union($1) }
+        // Vision's boxes run from the bottom left.
+        let found = boxes.isEmpty ? nil : CGRect(x: union.minX, y: 1 - union.maxY, width: union.width, height: union.height)
+        // Vision misses some lettering (a hand-drawn script) and the top of a head of hair, so
+        // the first row where anything stands out from the top edge counts as the subject's
+        // top too.
+        guard let standsOut = firstRowStandingOut(in: image) else { return found }
+        guard let found else { return CGRect(x: 0, y: standsOut, width: 1, height: 1 - standsOut) }
+        guard standsOut < found.minY else { return found }
+        return CGRect(x: found.minX, y: standsOut, width: found.width, height: found.maxY - standsOut)
+    }
+
+    /// The Simulator has no Neural Engine or GPU for Vision's models, and its requests fail
+    /// there unless they're told to use the processor.
+    private static func onDevicesItRuns(_ requests: VNRequest...) {
+        #if targetEnvironment(simulator)
+        guard let cpu = MLComputeDevice.allComputeDevices.first(where: { if case .cpu = $0 { true } else { false } }) else { return }
+        for request in requests {
+            request.setComputeDevice(cpu, for: .main)
+        }
+        #endif
+    }
+
+    /// The side of the copy Vision reads.
+    static let pixels = 512
+
+    /// Who or what the cover is of: its people together, or failing those the most
+    /// object-like thing in it. Nil when there's neither.
+    static func focus(in image: CGImage) -> CGRect? {
+        let people = VNDetectHumanRectanglesRequest()
+        people.upperBodyOnly = false
+        onDevicesItRuns(people)
+        try? VNImageRequestHandler(cgImage: image, options: [:]).perform([people])
+        var boxes = (people.results ?? []).filter { $0.confidence > 0.5 }.map(\.boundingBox)
+        if boxes.isEmpty {
+            let objects = VNGenerateObjectnessBasedSaliencyImageRequest()
+            onDevicesItRuns(objects)
+            try? VNImageRequestHandler(cgImage: image, options: [:]).perform([objects])
+            boxes = (objects.results?.first?.salientObjects ?? []).sorted { $0.confidence > $1.confidence }.prefix(1).map(\.boundingBox)
+        }
+        guard !boxes.isEmpty else { return nil }
+        let union = boxes.reduce(CGRect.null) { $0.union($1) }
+        return CGRect(x: union.minX, y: 1 - union.maxY, width: union.width, height: union.height)
+    }
+
+    /// The first row, from the top, in which more than 2% of the cover differs in lightness (as
+    /// the eye has it) by more than 0.3 from its top edge's own: in parts of the side, nil when
+    /// nothing does.
+    private static func firstRowStandingOut(in image: CGImage) -> CGFloat? {
+        let side = 64
+        let rgba = CoverPixels.rgba(of: image, side: side)
+        guard rgba.count == side * side * 4 else { return nil }
+        func lightness(_ index: Int) -> Double {
+            let y = CoverBleed.Colour(red: Double(rgba[index]) / 255, green: Double(rgba[index + 1]) / 255, blue: Double(rgba[index + 2]) / 255).luminance
+            return (y > 0.008856 ? 116 * cbrt(y) - 16 : 903.3 * y) / 100
+        }
+        let band = (1..<4).flatMap { row in (0..<side).map { lightness((row * side + $0) * 4) } }.sorted()
+        let typical = band[band.count / 2]
+        for row in 1..<side {
+            let standing = (0..<side).filter { abs(lightness((row * side + $0) * 4) - typical) > 0.3 }.count
+            if Double(standing) / Double(side) > 0.02 { return CGFloat(row) / CGFloat(side) }
+        }
+        return nil
+    }
+}
+
 /// A cover's pixels, drawn small, for its colours.
 nonisolated enum CoverPixels {
     static func rgba(of image: CGImage, side: Int) -> [UInt8] {
@@ -209,6 +309,8 @@ nonisolated enum SoftCover {
     }
 }
 
+enum BackdropFocusMarking { case bounds, none }
+
 /// Where the cover sits in the player, for a background that lights it from behind.
 struct BackdropFocusKey: PreferenceKey {
     static let defaultValue: Anchor<CGRect>? = nil
@@ -222,5 +324,13 @@ extension View {
     /// Marks this as the cover the background centres on.
     func backdropFocus() -> some View {
         anchorPreference(key: BackdropFocusKey.self, value: .bounds) { $0 }
+    }
+
+    /// Marks this as the cover the background centres on, or, with `.none`, leaves it to
+    /// something inside it to say where the cover is.
+    func backdropFocus(_ marking: BackdropFocusMarking) -> some View {
+        transformAnchorPreference(key: BackdropFocusKey.self, value: .bounds) { value, bounds in
+            if marking == .bounds { value = bounds }
+        }
     }
 }

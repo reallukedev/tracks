@@ -223,6 +223,24 @@ public struct SubsonicClient: Sendable {
         _ = try await call("unstar", ["id": songID])
     }
 
+    /// An album's animated cover, the square loop Apple Music plays in place of it, where the
+    /// server can find one: Octo's `getAnimatedArt`, asked by name so it serves any album, not
+    /// only the server's own. Nil when the album has none; throws when the server has no such
+    /// thing, or has it turned off.
+    public func animatedCover(artist: String, album: String) async throws -> URL? {
+        let body = try await call("getAnimatedArt", ["artist": artist, "album": album])
+        return Self.squareLoop(in: body, server: server.url)
+    }
+
+    /// The square loop's address in an answer: Apple's own, or one on the server when it
+    /// relays them, which it gives from its root.
+    static func squareLoop(in body: SubsonicResponse.Body, server: URL) -> URL? {
+        guard let video = body.animatedArt?.square?.video.trimmingCharacters(in: .whitespaces), !video.isEmpty else { return nil }
+        if let url = URL(string: video), url.scheme == "https" || url.scheme == "http" { return url }
+        let path = video.hasPrefix("/") ? String(video.dropFirst()) : video
+        return server.appending(path: path)
+    }
+
     private func call(_ endpoint: String, _ parameters: [String: String] = [:]) async throws -> SubsonicResponse.Body {
         let (data, status) = try await transport.data(for: url(endpoint, parameters))
         return try Self.decode(data, status: status)
@@ -385,6 +403,17 @@ struct SubsonicResponse: Decodable {
         let topSongs: SongList?
         let randomSongs: SongList?
         let artistInfo2: ArtistInfo?
+        /// Octo's, for getAnimatedArt.
+        let animatedArt: AnimatedArt?
+    }
+
+    struct AnimatedArt: Decodable {
+        let square: Loop?
+        let tall: Loop?
+
+        struct Loop: Decodable {
+            let video: String
+        }
     }
 
     struct ErrorBody: Decodable {

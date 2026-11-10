@@ -164,6 +164,31 @@ struct SubsonicTests {
         #expect(!query.contains("+"))
     }
 
+    @Test("an album's animated cover: Apple's loop as given, a relayed one from the server's root, none when there's none")
+    func animatedCover() async throws {
+        let direct = #"{"subsonic-response":{"status":"ok","animatedArt":{"square":{"video":"https://mvod.itunes.apple.com/itunes-assets/x/P123_default.m3u8","width":1080,"height":1080},"tall":{"video":"https://mvod.itunes.apple.com/t.m3u8"}}}}"#
+        let found = try await SubsonicClient(server: server, password: "x", transport: StubTransport(body: direct)).animatedCover(artist: "SZA", album: "SOS")
+        #expect(found?.absoluteString == "https://mvod.itunes.apple.com/itunes-assets/x/P123_default.m3u8")
+
+        var relayed = server
+        relayed.url = URL(string: "https://music.example.com/octo")!
+        let relay = #"{"subsonic-response":{"status":"ok","animatedArt":{"square":{"video":"animated/tok3n/square.m3u8"}}}}"#
+        let viaServer = try await SubsonicClient(server: relayed, password: "x", transport: StubTransport(body: relay)).animatedCover(artist: "SZA", album: "SOS")
+        #expect(viaServer?.absoluteString == "https://music.example.com/octo/animated/tok3n/square.m3u8")
+
+        // Only a tall loop, or none at all: nothing to play in a square.
+        let tallOnly = #"{"subsonic-response":{"status":"ok","animatedArt":{"tall":{"video":"https://a/t.m3u8"}}}}"#
+        #expect(try await SubsonicClient(server: server, password: "x", transport: StubTransport(body: tallOnly)).animatedCover(artist: "A", album: "B") == nil)
+        let none = #"{"subsonic-response":{"status":"ok"}}"#
+        #expect(try await SubsonicClient(server: server, password: "x", transport: StubTransport(body: none)).animatedCover(artist: "A", album: "B") == nil)
+
+        // Turned off on the server: said so, rather than taken for an album with none.
+        let off = #"{"subsonic-response":{"status":"failed","error":{"code":0,"message":"Animated art is off on this server"}}}"#
+        await #expect(throws: SubsonicError.self) {
+            try await SubsonicClient(server: server, password: "x", transport: StubTransport(body: off)).animatedCover(artist: "A", album: "B")
+        }
+    }
+
     @Test("streams the original file unless a bit rate is asked for")
     func stream() {
         let client = SubsonicClient(server: server, password: "sesame")

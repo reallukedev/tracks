@@ -1,8 +1,8 @@
 import SwiftUI
 import TracksCore
 
-/// What fills Stage behind the song. Two of its own that move with the music, then Now
-/// Playing's.
+/// What fills Stage behind the song. Two of its own that move with the music, the cover's
+/// colour, then Now Playing's.
 enum StageBackground: String, CaseIterable, Identifiable {
     /// The cover's colours as a mesh that drifts with the song and swells on the bass.
     case flow
@@ -18,6 +18,7 @@ enum StageBackground: String, CaseIterable, Identifiable {
         switch self {
         case .flow: "Flow"
         case .bloom: "Bloom"
+        case .colour: "Cover Colour"
         default: nowPlaying?.title ?? ""
         }
     }
@@ -26,6 +27,7 @@ enum StageBackground: String, CaseIterable, Identifiable {
         switch self {
         case .flow: "The cover's colours flow into one another and swell with the bass."
         case .bloom: "The cover fills the screen, soft and slowly turning, and breathes with the music."
+        case .colour: "Stage takes the colour of the cover."
         default: nowPlaying?.footer ?? ""
         }
     }
@@ -33,8 +35,8 @@ enum StageBackground: String, CaseIterable, Identifiable {
     /// The same background as Now Playing's, for the ones they share.
     var nowPlaying: NowPlayingBackground? {
         switch self {
-        case .flow, .bloom: nil
-        case .colour: .colour
+        // Full Cover runs the cover off the screen's edges, which Stage's layouts can't follow.
+        case .flow, .bloom, .colour: nil
         case .artwork: .artwork
         case .living: .living
         case .glass: .glass
@@ -63,6 +65,8 @@ struct StageBackdrop: View {
                 FlowBackdrop(colors: colors, levels: levels, energy: energy, isPlaying: isPlaying)
             case .bloom:
                 BloomBackdrop(cover: cover, levels: levels, energy: energy, isPlaying: isPlaying)
+            case .colour:
+                CoverStage(tint: tint)
             default:
                 NowPlayingBackdrop(cover: cover, tint: tint, isPlaying: isPlaying, style: style.nowPlaying, focus: focus)
                     .environment(\.backdropLevels, levels)
