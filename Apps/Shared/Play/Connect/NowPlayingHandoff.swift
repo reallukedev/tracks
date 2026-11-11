@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import TracksCore
 
 /// The song playing here, offered to your other devices through Handoff: in the Dock on a
@@ -21,6 +22,8 @@ final class NowPlayingHandoff: NSObject, NSUserActivityDelegate {
     private let deviceName: String
     private var activity: NSUserActivity?
     private var offered: NearbyState?
+    /// The last song offered, for Handoff asking from another thread.
+    private nonisolated let saved = Mutex<(data: Data, device: String)?>(nil)
 
     init(deviceName: String, current: @escaping () -> NearbyState?) {
         self.deviceName = deviceName
@@ -34,6 +37,7 @@ final class NowPlayingHandoff: NSObject, NSUserActivityDelegate {
             activity?.invalidate()
             activity = nil
             offered = nil
+            saved.withLock { $0 = nil }
             return
         }
         if let offered, offered.isSame(as: state) { return }
@@ -58,21 +62,21 @@ final class NowPlayingHandoff: NSObject, NSUserActivityDelegate {
     private func fill(_ activity: NSUserActivity, with state: NearbyState) {
         guard let data = try? JSONEncoder().encode(state) else { return }
         activity.userInfo = [Self.stateKey: data, Self.deviceKey: deviceName]
+        saved.withLock { $0 = (data, deviceName) }
     }
 
     nonisolated func userActivityWillSave(_ userActivity: NSUserActivity) {
-        // Read on the main actor; written here, on whichever thread Handoff asks from.
-        let read = { @MainActor [weak self] () -> (Data, String)? in
-            guard let self, let state = self.current(), state.hasSong,
-                  let data = try? JSONEncoder().encode(state)
-            else { return nil }
-            return (data, self.deviceName)
+        // Never waits for the main thread, which can be the one waiting on this save.
+        if Thread.isMainThread {
+            MainActor.assumeIsolated { refresh() }
         }
-        let fresh = Thread.isMainThread
-            ? MainActor.assumeIsolated { read() }
-            : DispatchQueue.main.sync { MainActor.assumeIsolated { read() } }
-        guard let (data, name) = fresh else { return }
+        guard let (data, name) = saved.withLock({ $0 }) else { return }
         userActivity.userInfo = [Self.stateKey: data, Self.deviceKey: name]
+    }
+
+    private func refresh() {
+        guard let state = current(), state.hasSong, let data = try? JSONEncoder().encode(state) else { return }
+        saved.withLock { $0 = (data, deviceName) }
     }
 
     /// The song another device offered, and its name.

@@ -273,9 +273,7 @@ final class AppModel {
     /// nothing while nothing changes.
     func followSpeakers() {
         guard routeObserver == nil else { return }
-        // Never `.main`: the audio session posts this from its own queue, and a `.main`
-        // observer makes that queue wait for the main thread. A car connecting changes the
-        // route while the main thread can be waiting on Apple's player (see SettingsSync).
+        // Not `.main`: that would make the audio session's queue wait on the main thread.
         routeObserver = NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: nil) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
@@ -729,7 +727,10 @@ final class AppModel {
     /// settings or at rows another device has already merged.
     func syncOnForeground() {
         guard !isDemoLaunch else { return }
-        refreshMusicAuthorization()
+        Task {
+            await PlayerQuiet.settled()
+            refreshMusicAuthorization()
+        }
         settingsSync?.reconcileAll()
         reconciler?.reconcile()
     }

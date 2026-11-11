@@ -96,8 +96,6 @@ struct RoutePicker: UIViewRepresentable {
                 view?.accessibilityValue = SpeakerRouteObserver.currentRoute.map { $0.names.formatted(.list(type: .and)) }
             }
             describe()
-            // Never `.main`: the audio session posts this from its own queue (see
-            // AppModel.followSpeakers).
             observer = NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: nil) { _ in
                 Task { @MainActor in describe() }
             }

@@ -1,6 +1,7 @@
 import SwiftUI
 import MusicKit
 import TracksCore
+import TracksMusic
 
 struct RootView: View {
     @Bindable var model: AppModel
@@ -157,8 +158,14 @@ struct RootView: View {
                     wasInBackground = true
                 } else if phase == .active, wasInBackground, !model.isDemoLaunch {
                     wasInBackground = false
-                    Task { await capture.catchUp() }
-                    Task { await model.yourMusic.playlistMerge.mergeIfOn() }
+                    Task {
+                        await PlayerQuiet.settled()
+                        await capture.catchUp()
+                    }
+                    Task {
+                        await PlayerQuiet.settled()
+                        await model.yourMusic.playlistMerge.mergeIfOn()
+                    }
                     model.nearby.resume()
                     // Songs dropped into Files while Tracks was away.
                     if model.musicSource == .yourMusic { Task { await model.yourMusic.scan() } }
