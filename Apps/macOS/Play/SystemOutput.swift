@@ -57,6 +57,10 @@ final class SystemOutputFollower {
         { _, _ in MainActor.assumeIsolated { changed() } }
     }
 
+    isolated deinit {
+        stop()
+    }
+
     func stop() {
         guard isListening else { return }
         isListening = false
@@ -87,8 +91,8 @@ final class SystemOutputObserver {
     func start() {
         guard follower == nil else { return }
         follower = SystemOutputFollower { [weak self] in self?.readOutput() }
-        observer = NotificationCenter.default.addObserver(forName: .AVRouteDetectorMultipleRoutesDetectedDidChange, object: detector, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.readDetector() }
+        observer = NotificationCenter.default.addObserver(forName: .AVRouteDetectorMultipleRoutesDetectedDidChange, object: detector, queue: nil) { [weak self] _ in
+            Task { @MainActor in self?.readDetector() }
         }
         detector.isRouteDetectionEnabled = true
         readOutput()
