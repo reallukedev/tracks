@@ -273,8 +273,11 @@ final class AppModel {
     /// nothing while nothing changes.
     func followSpeakers() {
         guard routeObserver == nil else { return }
-        routeObserver = NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated {
+        // Never `.main`: the audio session posts this from its own queue, and a `.main`
+        // observer makes that queue wait for the main thread. A car connecting changes the
+        // route while the main thread can be waiting on Apple's player (see SettingsSync).
+        routeObserver = NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: nil) { [weak self] _ in
+            Task { @MainActor in
                 guard let self else { return }
                 self.nearby.publish(self.nearbyState ?? NearbyState())
             }

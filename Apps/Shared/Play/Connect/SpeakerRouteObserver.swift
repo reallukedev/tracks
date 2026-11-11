@@ -38,11 +38,13 @@ final class SpeakerRouteObserver {
             return
         }
         let center = NotificationCenter.default
-        observers.append(center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.readRoute() }
+        // Never `.main`: both are posted off the main thread, and a `.main` observer makes the
+        // poster wait for it (see AppModel.followSpeakers).
+        observers.append(center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: nil) { [weak self] _ in
+            Task { @MainActor in self?.readRoute() }
         })
-        observers.append(center.addObserver(forName: .AVRouteDetectorMultipleRoutesDetectedDidChange, object: detector, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.readDetector() }
+        observers.append(center.addObserver(forName: .AVRouteDetectorMultipleRoutesDetectedDidChange, object: detector, queue: nil) { [weak self] _ in
+            Task { @MainActor in self?.readDetector() }
         })
         detector.isRouteDetectionEnabled = true
         readRoute()
