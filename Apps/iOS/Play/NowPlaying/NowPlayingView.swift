@@ -21,6 +21,9 @@ struct NowPlayingView: View {
     /// Turns of the sleeve, for the haptic: only the person turns it.
     @State private var turns = 0
     @State private var tint: Color?
+    @AppStorage(NowPlayingBackground.storageKey) private var background = NowPlayingBackground.defaultValue
+    /// How the song's cover carries on past its edges, for Full Cover's type.
+    @State private var bleed: CoverBleed?
     /// The heights of what stands above and below the cover, which grow with the text.
     @State private var topBarHeight: CGFloat = 0
     @State private var detailsHeight: CGFloat = 0
@@ -33,8 +36,8 @@ struct NowPlayingView: View {
             Color.clear
             if let track = player.current {
                 content(track)
-                    .environment(\.colorScheme, .dark)
-                    .foregroundStyle(.white)
+                    .environment(\.colorScheme, ink(.bottom).colorScheme)
+                    .foregroundStyle(.primary)
                     // Music stops growing its player here too: past it, the song's own name
                     // no longer fits beside the cover and the controls.
                     .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
@@ -48,6 +51,12 @@ struct NowPlayingView: View {
             DevicesSheet { showsDevices = false }
         }
         .coverTint(of: player.current?.cover, into: $tint)
+        .task(id: player.current?.cover) {
+            guard let cover = player.current?.cover else { return }
+            let found = await BackdropArtStore.shared.art(for: cover)?.bleed
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.6)) { bleed = found }
+        }
         .onChange(of: player.hasQueue) { _, hasQueue in
             if !hasQueue { dismiss() }
         }
@@ -75,6 +84,15 @@ struct NowPlayingView: View {
         .sheet(isPresented: Bindable(SharePlayController.shared).showsCode) { SharePlayCodeSheet() }
     }
 
+    private var isFullCover: Bool { background == .fullCover }
+
+    /// The type past one of Full Cover's edges: dark on a light one. White on every other
+    /// background, and on Full Cover's colour while Up Next is up.
+    private func ink(_ edge: CoverBleed.Edge) -> CoverBleed.Ink {
+        guard isFullCover, !showsQueue, let bleed else { return .light }
+        return bleed.ink(edge)
+    }
+
     // MARK: - Layout
 
     private func content(_ track: PlayerTrack) -> some View {
@@ -85,6 +103,7 @@ struct NowPlayingView: View {
             let bottomInset = Self.bottomInset(proxy)
             VStack(spacing: 0) {
                 topBar
+                    .environment(\.colorScheme, ink(.top).colorScheme)
                     .onGeometryChange(for: CGFloat.self, of: \.size.height) { topBarHeight = $0 }
                 if showsQueue {
                     QueueView(track: track)
@@ -119,7 +138,7 @@ struct NowPlayingView: View {
                     Text("Autoplay")
                         .font(.caption2.weight(.semibold))
                         .textCase(.uppercase)
-                        .foregroundStyle(.white.opacity(0.6))
+                        .foregroundStyle(.primary.opacity(0.6))
                     Text(player.autoplayFollows.map { "Songs Like \($0)" } ?? "Similar Songs")
                         .font(.footnote.weight(.semibold))
                         .lineLimit(1)
@@ -127,12 +146,16 @@ struct NowPlayingView: View {
                     Text(context.isStation ? "Playing from Radio" : "Playing From")
                         .font(.caption2.weight(.semibold))
                         .textCase(.uppercase)
-                        .foregroundStyle(.white.opacity(0.6))
+                        .foregroundStyle(.primary.opacity(0.6))
                     Text(player.isRadioDriving ? "\(Image(systemName: "car.fill")) \(context.title) · Driving" : "\(context.title)")
                         .font(.footnote.weight(.semibold))
                         .lineLimit(1)
                 }
             }
+            // On Full Cover the bar may sit over the cover itself: on glass, as Music's is.
+            .padding(.horizontal, isFullCover ? 14 : 0)
+            .padding(.vertical, isFullCover ? 6 : 0)
+            .glassEffect(isFullCover ? .regular : .identity, in: .capsule)
             .padding(.horizontal, 56)
             .accessibilityElement(children: .combine)
 
@@ -141,7 +164,8 @@ struct NowPlayingView: View {
                     .labelStyle(.iconOnly)
                     .font(.title3.weight(.semibold))
                     .frame(width: 44, height: 44)
-                    .contentShape(.rect)
+                    .contentShape(.circle)
+                    .glassEffect(isFullCover ? .regular.interactive() : .identity, in: .circle)
                 Spacer()
             }
         }
@@ -160,39 +184,60 @@ struct NowPlayingView: View {
         let room = available.height + proxy.safeAreaInsets.bottom - Self.bottomInset(proxy)
             - topBarHeight - detailsHeight - controlsHeight - 48
         let side = max(0, min(available.width - 56, available.height * share, room, 420))
+        // Full Cover's is always the screen's width, as Music's is. With room, its top tucks
+        // under the top bar by as much as it fades out there; without, it runs on up under
+        // the bar, whose controls sit on glass over it. The room is what's marked.
+        let lift = (available.width * Self.fullCoverLift).rounded()
+        let fullHeight = max(0, min(available.width, room + lift))
         // Music's gesture: the cover sinks back while paused. Not while its back is up, which
-        // is being read.
-        let sinks = !player.isPlaying && !reduceMotion && !showsBack
+        // is being read. Full Cover's cover is the background itself, which stays put.
+        let sinks = !player.isPlaying && !reduceMotion && !showsBack && !isFullCover
         let shape = RoundedRectangle(cornerRadius: CoverImage.radius(for: side), style: .continuous)
         // A single tap on either side does nothing: the cover is where a thumb lands to swipe
         // Now Playing closed, and a short swipe mustn't read as a tap and turn it instead. A
         // double tap turns it, which no swipe can be; the history button below always does.
         return SleeveFlip(showsBack: showsBack) {
-            CoverImage(cover: track.cover, size: side)
-                .contentShape(shape)
-                .onTapGesture(count: 2, perform: turnSleeve)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Artwork")
-                .accessibilityAction(named: "Your History", turnSleeve)
+            Group {
+                if isFullCover {
+                    // The background draws the cover; this marks where, and takes its gestures.
+                    Color.clear
+                        .frame(width: available.width, height: fullHeight)
+                        .contentShape(.rect)
+                        .backdropFocus()
+                        .padding(.top, -lift)
+                } else {
+                    CoverImage(cover: track.cover, size: side)
+                        .contentShape(shape)
+                }
+            }
+            .onTapGesture(count: 2, perform: turnSleeve)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Artwork")
+            .accessibilityAction(named: "Your History", turnSleeve)
         } back: {
             LinerNotes(track: track, isCompact: true, fillsCard: true) {
                 navigate(.stats(.song(track.songIdentity)))
             }
             .padding(22)
             .frame(width: side, height: side, alignment: .topLeading)
-            .background(.white.opacity(0.1), in: shape)
-            .overlay { shape.strokeBorder(.white.opacity(0.14), lineWidth: 1) }
+            // Over Full Cover's sharp picture, frosted, so the history reads on any cover.
+            .background(isFullCover ? AnyShapeStyle(.regularMaterial) : AnyShapeStyle(.white.opacity(0.1)), in: shape)
+            .overlay { shape.strokeBorder(.primary.opacity(0.14), lineWidth: 1) }
             .contentShape(shape)
             .onTapGesture(count: 2, perform: turnSleeve)
             .accessibilityElement(children: .contain)
             .accessibilityAction(named: "Show the Cover", turnSleeve)
         }
-        .backdropFocus()
-        .shadow(color: .black.opacity(sinks ? 0.2 : 0.4), radius: sinks ? 14 : 30, y: sinks ? 6 : 16)
+        .backdropFocus(isFullCover ? .none : .bounds)
+        .shadow(color: .black.opacity(isFullCover && !showsBack ? 0 : sinks ? 0.2 : 0.4), radius: sinks ? 14 : 30, y: sinks ? 6 : 16)
         .scaleEffect(sinks ? 0.82 : 1)
         .animation(reduceMotion ? nil : .spring(duration: 0.34, bounce: 0.2), value: sinks)
         .frame(maxWidth: .infinity)
     }
+
+    /// How far Full Cover's cover runs up under the top bar, as a part of its width: as far
+    /// as it fades there (see ``FullCoverBackdrop``).
+    private static let fullCoverLift = 0.07
 
     private func turnSleeve() {
         turns += 1
@@ -211,7 +256,7 @@ struct NowPlayingView: View {
                         Text(track.artistName)
                             .font(.title3)
                             // Strong enough to read on the brightest moving backgrounds.
-                            .foregroundStyle(.white.opacity(0.82))
+                            .foregroundStyle(.primary.opacity(0.82))
                             .lineLimit(1)
                     }
                     .multilineTextAlignment(.leading)
@@ -240,7 +285,7 @@ struct NowPlayingView: View {
             HStack(spacing: 10) {
                 Image(systemName: "speaker.fill")
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(.primary.opacity(0.6))
                     .accessibilityHidden(true)
                 // A volume view in the window keeps iPhone's own volume display away, even
                 // under Stage's cover, where the buttons then seemed to do nothing.
@@ -254,7 +299,7 @@ struct NowPlayingView: View {
                 .frame(height: 34)
                 Image(systemName: "speaker.wave.3.fill")
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(.primary.opacity(0.6))
                     .accessibilityHidden(true)
             }
 
@@ -262,7 +307,7 @@ struct NowPlayingView: View {
                 FavoriteStarButton(track: track) { systemImage, isOn in
                     Image(systemName: systemImage)
                         .font(.title3)
-                        .foregroundStyle(.white.opacity(isOn ? 1 : 0.7))
+                        .foregroundStyle(.primary.opacity(isOn ? 1 : 0.7))
                         .frame(width: 44, height: 44)
                         .contentShape(.rect)
                 }
@@ -296,9 +341,9 @@ struct NowPlayingView: View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.title3)
-                .foregroundStyle(isOn ? .black : .white.opacity(0.7))
+                .foregroundStyle(isOn ? AnyShapeStyle(Color(uiColor: .systemBackground)) : AnyShapeStyle(.primary.opacity(0.7)))
                 .frame(width: 40, height: 40)
-                .background(isOn ? AnyShapeStyle(.white) : AnyShapeStyle(.clear), in: .circle)
+                .background(isOn ? AnyShapeStyle(.primary) : AnyShapeStyle(.clear), in: .circle)
                 .frame(width: 44, height: 44)
                 .contentShape(.circle)
                 .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: isOn)

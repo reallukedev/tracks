@@ -1,5 +1,6 @@
 #if DEBUG
 import SwiftUI
+import TracksCore
 
 /// `-TracksBackdropLab living` (or any background's stored name), in a Debug build: that
 /// background for many covers at once, each under a cover and a song's name in white, to judge
@@ -18,6 +19,14 @@ struct BackdropLab: View {
     }
 
     var body: some View {
+        if style == .fullCover {
+            FullCoverLab(covers: covers)
+        } else {
+            grid
+        }
+    }
+
+    private var grid: some View {
         GeometryReader { proxy in
             let columns = proxy.size.width > proxy.size.height ? 3 : 2
             let rows = (covers.count + columns - 1) / columns
@@ -46,6 +55,76 @@ struct BackdropLab: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .nowPlayingBackdrop(cover: cover, tint: nil, isPlaying: true, style: style)
         .clipped()
+    }
+}
+
+/// Full Cover for many covers at once, each a small player laid out as the iPhone's is, with
+/// its type in the ink Full Cover gives it.
+private struct FullCoverLab: View {
+    let covers: [CoverArt]
+
+    var body: some View {
+        GeometryReader { proxy in
+            let columns = proxy.size.width > proxy.size.height ? 6 : 3
+            let rows = max(1, (covers.count + columns - 1) / columns)
+            let height = proxy.size.height / CGFloat(rows)
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: columns), spacing: 3) {
+                ForEach(covers, id: \.self) { cover in
+                    FullCoverLabTile(cover: cover)
+                        .frame(height: height - 3)
+                }
+            }
+        }
+        .background(.black)
+    }
+}
+
+private struct FullCoverLabTile: View {
+    let cover: CoverArt
+    @State private var bleed: CoverBleed?
+
+    var body: some View {
+        GeometryReader { proxy in
+            let width = proxy.size.width
+            let side = width * 0.86
+            VStack(spacing: 0) {
+                VStack(spacing: 1) {
+                    Text("PLAYING FROM").font(.system(size: 6, weight: .semibold)).opacity(0.6)
+                    Text("Album Name").font(.system(size: 8, weight: .semibold))
+                }
+                .environment(\.colorScheme, (bleed?.ink(.top) ?? .light).colorScheme)
+                .foregroundStyle(.primary)
+                .padding(.top, proxy.size.height * 0.08)
+                Spacer(minLength: 4)
+                Color.clear.frame(width: width, height: width).backdropFocus().padding(.top, -width * 0.07)
+                Spacer(minLength: 6)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Song Title Here").font(.system(size: 12, weight: .bold))
+                    Text("Artist Name").font(.system(size: 10)).foregroundStyle(.primary.opacity(0.82))
+                    Capsule().fill(.primary.opacity(0.2)).frame(height: 3)
+                        .overlay(alignment: .leading) { Capsule().fill(.primary.opacity(0.7)).frame(width: side * 0.35, height: 3) }
+                        .padding(.top, 6)
+                    HStack {
+                        Spacer()
+                        Image(systemName: "backward.fill")
+                        Spacer()
+                        Image(systemName: "pause.fill").font(.system(size: 20))
+                        Spacer()
+                        Image(systemName: "forward.fill")
+                        Spacer()
+                    }
+                    .padding(.vertical, 6)
+                }
+                .frame(width: side, alignment: .leading)
+                .environment(\.colorScheme, (bleed?.ink(.bottom) ?? .light).colorScheme)
+                .foregroundStyle(.primary)
+                Spacer(minLength: proxy.size.height * 0.05)
+            }
+            .frame(width: width, height: proxy.size.height)
+        }
+        .nowPlayingBackdrop(cover: cover, tint: nil, isPlaying: false, style: .fullCover)
+        .clipped()
+        .task { bleed = await BackdropArtStore.shared.art(for: cover)?.bleed }
     }
 }
 #endif

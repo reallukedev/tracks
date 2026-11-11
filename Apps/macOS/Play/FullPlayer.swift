@@ -15,6 +15,11 @@ struct FullPlayer: View {
     @Environment(\.openPlayRoute) private var openPlayRoute
     @Environment(\.openRadioTuner) private var openRadioTuner
     @State private var tint: Color?
+    @AppStorage(NowPlayingBackground.storageKey) private var background = NowPlayingBackground.defaultValue
+    /// How the song's cover carries on past its edges, for Full Cover's type.
+    @State private var bleed: CoverBleed?
+    /// Whether Full Cover's cover wants the window's whole height (see ``BackdropArt/fillsHeight``).
+    @State private var fillsHeight = false
 
     private var showsBack: Bool {
         get { window.fullPlayerShowsHistory }
@@ -31,26 +36,47 @@ struct FullPlayer: View {
             Color.clear
             if let track = player.current {
                 content(track)
-                    .environment(\.colorScheme, .dark)
-                    .foregroundStyle(.white)
-                    // What's on lights white on the cover's colour, as on the iPhone's.
-                    .tint(.white)
+                    .environment(\.colorScheme, ink(.trailing).colorScheme)
+                    .foregroundStyle(.primary)
+                    // What's on lights in the type's colour, as on the iPhone's.
+                    .tint(.primary)
             }
         }
         // Lit from the cover, wherever the window's size puts it.
         .nowPlayingBackdrop(cover: player.current?.cover, tint: tint, isPlaying: player.isPlaying)
         .coverTint(of: player.current?.cover, into: $tint)
+        .task(id: player.current?.cover) {
+            guard let cover = player.current?.cover else { return }
+            let art = await BackdropArtStore.shared.art(for: cover)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.6)) {
+                bleed = art?.bleed
+                fillsHeight = art?.fillsHeight ?? false
+            }
+        }
         .onChange(of: player.current?.songIdentity) { showsBack = false }
         .onExitCommand(perform: close)
+    }
+
+    private var isFullCover: Bool { background == .fullCover }
+
+    /// The type past one of Full Cover's edges: dark on a light one. White on every other
+    /// background, and on Full Cover's colour while Up Next is out.
+    private func ink(_ edge: CoverBleed.Edge) -> CoverBleed.Ink {
+        guard isFullCover, !showsUpNext, let bleed else { return .light }
+        return bleed.ink(edge)
     }
 
     private func content(_ track: PlayerTrack) -> some View {
         VStack(spacing: 0) {
             topBar(track)
+                .environment(\.colorScheme, ink(.top).colorScheme)
             GeometryReader { proxy in
                 // The cover as big as the window allows, leaving the column beside it its
                 // width and the top bar its height.
-                let side = max(220, min(480, proxy.size.height - 40, proxy.size.width - Self.column - Self.gap - 96))
+                // Full Cover's cover, where it wants the window's height, has no cap of its own.
+                let cap: CGFloat = isFullCover && fillsHeight ? .infinity : 480
+                let side = max(220, min(cap, proxy.size.height - 40, proxy.size.width - Self.column - Self.gap - 96))
                 HStack(alignment: .center, spacing: Self.gap) {
                     sleeve(track, side: side)
                     Group {
@@ -64,7 +90,8 @@ struct FullPlayer: View {
                     // The column stands as tall as the cover: the song's name level with its
                     // top edge, the controls with its bottom. Never shorter than the details need,
                     // which a small window's cover can be.
-                    .frame(height: max(side, Self.columnHeight))
+                    // Never stretched thinner than a card cover's height would make it.
+                    .frame(height: max(min(side, 480), Self.columnHeight))
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -96,6 +123,11 @@ struct FullPlayer: View {
                         .font(.headline)
                         .lineLimit(1)
                 }
+                // On Full Cover the bar may sit over the cover itself: on glass, as the
+                // iPhone's is.
+                .padding(.horizontal, isFullCover ? 16 : 0)
+                .padding(.vertical, isFullCover ? 6 : 0)
+                .glassEffect(isFullCover ? .regular : .identity, in: .capsule)
                 .accessibilityElement(children: .combine)
             }
             HStack {
@@ -135,12 +167,20 @@ struct FullPlayer: View {
 
     private func sleeve(_ track: PlayerTrack, side: CGFloat) -> some View {
         // Music's gesture: the cover sinks back while paused.
-        let sinks = !player.isPlaying && !reduceMotion && !showsBack
+        // Full Cover's cover is the background itself, which stays put.
+        let sinks = !player.isPlaying && !reduceMotion && !showsBack && !isFullCover
         return SleeveFlip(showsBack: showsBack) {
             Button {
                 showsBack = true
             } label: {
-                CoverImage(cover: track.cover, size: side)
+                if isFullCover {
+                    // The background draws the cover; this marks where, and takes the click.
+                    Color.clear
+                        .frame(width: side, height: side)
+                        .contentShape(.rect)
+                } else {
+                    CoverImage(cover: track.cover, size: side)
+                }
             }
             .buttonStyle(.plain)
             .help("Your History with This Song")
@@ -152,10 +192,11 @@ struct FullPlayer: View {
             }
             .padding(32)
             .frame(width: side, height: side, alignment: .topLeading)
-            .background(.white.opacity(0.1), in: .rect(cornerRadius: CoverImage.radius(for: side), style: .continuous))
+            // Over Full Cover's sharp picture, frosted, so the history reads on any cover.
+            .background(isFullCover ? AnyShapeStyle(.regularMaterial) : AnyShapeStyle(.white.opacity(0.1)), in: .rect(cornerRadius: CoverImage.radius(for: side), style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: CoverImage.radius(for: side), style: .continuous)
-                    .strokeBorder(.white.opacity(0.12), lineWidth: 1)
+                    .strokeBorder(.primary.opacity(0.12), lineWidth: 1)
             }
             // A click anywhere on the back but its button turns it face up again.
             .contentShape(.rect(cornerRadius: CoverImage.radius(for: side), style: .continuous))
@@ -165,7 +206,7 @@ struct FullPlayer: View {
             .accessibilityAction(named: "Show the Cover") { showsBack = false }
         }
         .backdropFocus()
-        .shadow(color: .black.opacity(sinks ? 0.2 : 0.4), radius: sinks ? 14 : 30, y: sinks ? 6 : 16)
+        .shadow(color: .black.opacity(isFullCover && !showsBack ? 0 : sinks ? 0.2 : 0.4), radius: sinks ? 14 : 30, y: sinks ? 6 : 16)
         .scaleEffect(sinks ? 0.88 : 1)
         .animation(reduceMotion ? nil : .spring(duration: 0.34, bounce: 0.2), value: sinks)
     }
@@ -195,7 +236,7 @@ struct FullPlayer: View {
                         Text(track.artistName)
                             .font(.title2)
                             // Strong enough to read on the brightest moving backgrounds.
-                            .foregroundStyle(.white.opacity(0.82))
+                            .foregroundStyle(.primary.opacity(0.82))
                             .lineLimit(1)
                     }
                     .multilineTextAlignment(.leading)

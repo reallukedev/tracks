@@ -3,8 +3,9 @@ import TracksCore
 
 /// What fills the player behind the song, chosen in Settings.
 enum NowPlayingBackground: String, CaseIterable, Identifiable {
-    /// The cover's colour, deepening toward the controls.
-    case colour
+    /// The cover itself, as wide as the player, giving way to its own colours below. Stored
+    /// as "colour", Cover Colour, which it took the place of.
+    case fullCover = "colour"
     /// The cover itself, blurred to fill the screen, drifting slowly while it plays.
     case artwork
     /// The cover itself, flowing, its colours swirling into one another while it plays. The default.
@@ -24,7 +25,7 @@ enum NowPlayingBackground: String, CaseIterable, Identifiable {
 
     var title: LocalizedStringKey {
         switch self {
-        case .colour: "Cover Colour"
+        case .fullCover: "Full Cover"
         case .artwork: "Artwork"
         case .living: "Living Cover"
         case .glass: "Reeded Glass"
@@ -35,7 +36,7 @@ enum NowPlayingBackground: String, CaseIterable, Identifiable {
 
     var footer: LocalizedStringKey {
         switch self {
-        case .colour: "The player takes the colour of the cover, as Music's does."
+        case .fullCover: "The cover fills the top of the player and flows on into its own colours."
         case .artwork: "The cover fills the player, softly blurred, and drifts while the music plays."
         case .living: "The cover comes alive: its colours flow and swirl into one another while the music plays, and settle when it's paused."
         case .glass: "The cover, seen through a pane of ribbed glass, drifts slowly past while the music plays."
@@ -131,7 +132,8 @@ struct NowPlayingBackdrop: View {
                 .transition(transition)
         }
         .overlay {
-            if contrast == .increased {
+            // Full Cover makes its own colours deep or light enough for the type on them.
+            if contrast == .increased, layer.style != .fullCover {
                 Color.black.opacity(0.2)
             }
         }
@@ -148,8 +150,12 @@ struct NowPlayingBackdrop: View {
         let isMoving = isPlaying && !reduceMotion
         let field = layer.art?.field ?? tint
         switch (layer.style, layer.art) {
-        case (.colour, _):
-            CoverStage(tint: field)
+        case (.fullCover, let art?):
+            if let cover = layer.cover {
+                FullCoverBackdrop(art: art, cover: cover, focus: focus, isPlaying: isPlaying, allowsMotion: style == nil)
+            } else {
+                CoverStage(tint: field)
+            }
         case (.artwork, let art?):
             ArtworkBackdrop(art: art, isMoving: isMoving)
         case (.living, let art?):
@@ -384,6 +390,8 @@ private struct BackdropMiniature: View {
     let cover: CoverArt
     let isPlaying: Bool
 
+    @State private var bleed: CoverBleed?
+
     var body: some View {
         GeometryReader { proxy in
             layout(in: proxy.size)
@@ -391,7 +399,30 @@ private struct BackdropMiniature: View {
         }
         .aspectRatio(Self.aspect, contentMode: .fit)
         .nowPlayingBackdrop(cover: cover, tint: nil, isPlaying: isPlaying, style: style)
-        .environment(\.colorScheme, .dark)
+        .environment(\.colorScheme, ink.colorScheme)
+        .task(id: cover) {
+            guard style == .fullCover else { return }
+            bleed = await BackdropArtStore.shared.art(for: cover)?.bleed
+        }
+    }
+
+    /// The lines' colour: dark on a light Full Cover, as the player's type is.
+    private var ink: CoverBleed.Ink {
+        guard style == .fullCover, let bleed else { return .light }
+        return bleed.ink(CoverBleedLayout.edge(for: FullCoverBackdrop.direction))
+    }
+
+    /// The cover, or with Full Cover, where it goes: the background draws it.
+    @ViewBuilder
+    private func coverSlot(side: CGFloat, radius: CGFloat) -> some View {
+        if style == .fullCover {
+            Color.clear.frame(width: side, height: side).backdropFocus()
+        } else {
+            CoverImage(cover: cover, size: side, isBare: true)
+                .clipShape(.rect(cornerRadius: radius, style: .continuous))
+                .shadow(color: .black.opacity(0.3), radius: 4, y: 2)
+                .backdropFocus()
+        }
     }
 
     #if os(macOS)
@@ -401,10 +432,7 @@ private struct BackdropMiniature: View {
     private func layout(in size: CGSize) -> some View {
         let side = size.height * 0.52
         return HStack(spacing: size.width * 0.07) {
-            CoverImage(cover: cover, size: side, isBare: true)
-                .clipShape(.rect(cornerRadius: 3, style: .continuous))
-                .shadow(color: .black.opacity(0.3), radius: 4, y: 2)
-                .backdropFocus()
+            coverSlot(side: side, radius: 3)
             lines(width: size.width * 0.3, alignment: .leading)
         }
     }
@@ -414,16 +442,15 @@ private struct BackdropMiniature: View {
 
     private func layout(in size: CGSize) -> some View {
         let side = size.width * 0.66
+        // Full Cover's cover is as wide as the player, as it is on the iPhone.
+        let full = style == .fullCover
         return VStack(spacing: 0) {
-            CoverImage(cover: cover, size: side, isBare: true)
-                .clipShape(.rect(cornerRadius: 4, style: .continuous))
-                .shadow(color: .black.opacity(0.3), radius: 4, y: 2)
-                .backdropFocus()
-                .padding(.top, size.height * 0.14)
+            coverSlot(side: full ? size.width : side, radius: 4)
+                .padding(.top, full ? size.height * 0.06 : size.height * 0.14)
             lines(width: side, alignment: .leading)
                 .padding(.top, size.height * 0.07)
             Spacer(minLength: 0)
-            Capsule().fill(.white.opacity(0.3)).frame(width: side, height: 2)
+            Capsule().fill(.primary.opacity(0.3)).frame(width: side, height: 2)
                 .padding(.bottom, size.height * 0.1)
         }
     }
@@ -431,30 +458,33 @@ private struct BackdropMiniature: View {
 
     private func lines(width: CGFloat, alignment: HorizontalAlignment) -> some View {
         VStack(alignment: alignment, spacing: 4) {
-            Capsule().fill(.white.opacity(0.85)).frame(width: width * 0.7, height: 3)
-            Capsule().fill(.white.opacity(0.45)).frame(width: width * 0.45, height: 3)
+            Capsule().fill(.primary.opacity(0.85)).frame(width: width * 0.7, height: 3)
+            Capsule().fill(.primary.opacity(0.45)).frame(width: width * 0.45, height: 3)
         }
         .frame(width: width, alignment: Alignment(horizontal: alignment, vertical: .center))
     }
 }
 
-/// Settings ▸ Play ▸ Now Playing: the background, whether Living Cover moves with the music,
-/// how the background changes between songs, and whether the player shows the quality you're
+/// Settings ▸ Play ▸ Now Playing: the background, how the background changes between songs, and whether the player shows the quality you're
 /// hearing.
 struct NowPlayingBackdropSection: View {
     @AppStorage(NowPlayingBackground.storageKey) private var chosen = NowPlayingBackground.defaultValue
-    @AppStorage(LivingCoverOption.movesWithMusic) private var movesWithMusic = true
     @AppStorage(BackdropChange.storageKey) private var change = BackdropChange.crossfade
     @AppStorage(AudioQualityBadge.showsKey) private var showsQuality = true
+    @AppStorage(MotionCovers.storageKey) private var playsMotion = true
+    @Environment(YourMusic.self) private var music: YourMusic?
+
+    /// Animated covers come from a music server, so the choice shows only with one connected.
+    private var offersMotion: Bool { chosen == .fullCover && !(music?.servers.servers.isEmpty ?? true) }
 
     var body: some View {
         Section {
             NowPlayingBackdropPicker()
-            if chosen == .living {
+            if offersMotion {
                 SettingsSwitch(
-                    "Move with the Music",
-                    detail: Text(PlaySettingsWords.livingCoverDetail(movesWithMusic: movesWithMusic)),
-                    isOn: $movesWithMusic
+                    "Animated Covers",
+                    detail: Text(PlaySettingsWords.animatedCoversDetail(isOn: playsMotion)),
+                    isOn: $playsMotion
                 )
             }
             Picker("Between Songs", selection: $change) {
@@ -476,14 +506,9 @@ struct NowPlayingBackdropSection: View {
             #else
             // The iPhone's switches have no detail line: their sentences follow the background's.
             let quality = PlaySettingsWords.audioQualityDetail(isShown: showsQuality)
-            Group {
-                if chosen == .living {
-                    Text("\(PlaySettingsWords.livingCoverFooter(movesWithMusic: movesWithMusic)) \(quality)")
-                } else {
-                    Text("\(Text(chosen.footer)) \(quality)")
-                }
-            }
-            .contentTransition(.opacity)
+            let animated = offersMotion ? " " + PlaySettingsWords.animatedCoversDetail(isOn: playsMotion) : ""
+            Text("\(Text(chosen.footer))\(animated) \(quality)")
+                .contentTransition(.opacity)
             #endif
         }
     }

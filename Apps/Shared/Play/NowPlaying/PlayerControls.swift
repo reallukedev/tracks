@@ -76,7 +76,7 @@ struct PlayerTransport: View {
 /// and let go with a little life.
 struct PlayerButtonStyle: ButtonStyle {
     var diameter: CGFloat = 76
-    var highlight: Color = .white
+    var highlight: Color = .primary
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -231,7 +231,7 @@ struct NowPlayingMenu: View {
             Image(systemName: "ellipsis")
                 .font(.body.weight(.bold))
                 .frame(width: 32, height: 32)
-                .background(.white.opacity(0.15), in: .circle)
+                .background(.primary.opacity(0.15), in: .circle)
                 .frame(width: 44, height: 44)
                 .contentShape(.circle)
         }

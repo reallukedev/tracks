@@ -160,7 +160,7 @@ struct ArtworkBackdrop: View {
 /// ink does in water, turning slowly the way Music's animated backgrounds do, for as long
 /// as the music plays, and settle when it's paused. See `livingCover` in Backdrops.metal.
 ///
-/// Set to move with the music, as it is unless turned off in Settings, it feels the song as
+/// Under Stage, set to move with the music, as it is unless turned off there, it feels the song as
 /// well as flowing with it (see ``LivingCoverFeel``): it leans in as the bass fills out, is
 /// pushed softly from the middle on each beat and sways once a bar in time with it, stirs on
 /// the snare and glints with the cymbals; it deepens as the song gets loud, folds more as it
@@ -169,8 +169,8 @@ struct ArtworkBackdrop: View {
 /// it glides and breathes. Its flow keeps the music's tempo, speeding up through a chorus,
 /// surging on each beat and gliding down through a breakdown, and each of its layers turns
 /// with its own part of the sound; when the music jumps to loud it opens out for a moment.
-/// Nothing in it flashes: every part eases in and out at a pace of its own. Turned off, it
-/// flows on its own, at a calm pace, and doesn't listen.
+/// Nothing in it flashes: every part eases in and out at a pace of its own. Behind Now
+/// Playing, or turned off, it flows on its own, at a calm pace, and doesn't listen.
 struct LivingCoverBackdrop: View {
     let art: BackdropArt
     let isMoving: Bool
@@ -178,8 +178,10 @@ struct LivingCoverBackdrop: View {
     @Environment(\.backdropLevels) private var sharedLevels
     @Environment(\.colorSchemeContrast) private var contrast
     @AppStorage(LivingCoverOption.movesWithMusic) private var movesWithMusic = true
-    @State private var ownLevels = SmoothedLevels()
     @State private var feel = LivingCoverMotion()
+
+    /// Only Stage, which shares the music it hears, has it dance.
+    private var dances: Bool { movesWithMusic && sharedLevels != nil }
 
     var body: some View {
         ZStack {
@@ -187,22 +189,22 @@ struct LivingCoverBackdrop: View {
             // Its flow keeps a different time with the music and without it, so turning it on
             // or off crosses over rather than jumping, the one leaving staying whole until it's
             // covered so nothing dips to black.
-            .id(movesWithMusic)
+            .id(dances)
             .transition(.asymmetric(insertion: .opacity, removal: .opacity.animation(.linear(duration: 0.05).delay(0.6))))
         }
-        .animation(.easeInOut(duration: 0.6), value: movesWithMusic)
+        .animation(.easeInOut(duration: 0.6), value: dances)
         .overlay {
             LinearGradient(stops: [
                 .init(color: .black.opacity(0), location: 0.4),
                 .init(color: .black.opacity(0.3), location: 1),
             ], startPoint: .top, endPoint: .bottom)
         }
-        .listensToAudio(movesWithMusic)
+        .listensToAudio(dances)
     }
 
     /// Every frame the display shows: a beat's push lands with the beat.
     @ViewBuilder private var moving: some View {
-        let listening = movesWithMusic ? Listening(player: player, energy: songEnergy(player?.current), levels: sharedLevels ?? ownLevels, feel: feel, contrast: contrast) : nil
+        let listening = dances ? sharedLevels.map { Listening(player: player, energy: songEnergy(player?.current), levels: $0, feel: feel, contrast: contrast) } : nil
         #if os(macOS)
         BackdropCanvasTimeline(isMoving: isMoving, rate: FlowRate.of(player), start: art.start, frameRate: nil, factor: 4) { [art, isMoving] time, moment in
             // At the frame's own moment, as Stage's visualizer hears it, so both share one.
@@ -301,7 +303,7 @@ private final class LivingCoverMotion {
 
 /// Living Cover's choices, as their stored keys.
 enum LivingCoverOption {
-    /// Living Cover moves with the music, wherever it's shown. On by default.
+    /// Living Cover moves with the music under Stage. On by default.
     static let movesWithMusic = "livingCoverMovesWithMusic"
 }
 

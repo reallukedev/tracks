@@ -3,7 +3,7 @@ import MediaPlayer
 import AVKit
 
 /// The system volume slider, which follows the hardware buttons and the output device, drawn
-/// as the scrubber above it is: a thin white track, no knob.
+/// as the scrubber above it is: a thin track in the player's ink, no knob.
 struct VolumeSlider: UIViewRepresentable {
     func makeUIView(context: Context) -> CenteredVolumeView {
         CenteredVolumeView(frame: .zero)
@@ -20,11 +20,20 @@ struct VolumeSlider: UIViewRepresentable {
 final class CenteredVolumeView: MPVolumeView {
     override init(frame: CGRect) {
         super.init(frame: frame)
-        tintColor = .white
-        setMinimumVolumeSliderImage(Self.track(alpha: 0.7), for: .normal)
-        setMaximumVolumeSliderImage(Self.track(alpha: 0.2), for: .normal)
         // Clear, but still the size of a fingertip to take hold of.
         setVolumeThumbImage(UIGraphicsImageRenderer(size: CGSize(width: 24, height: 24)).image { _ in }, for: .normal)
+        drawTrack()
+        // White on a dark background, near black on a light one, as the player's type is.
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (view: CenteredVolumeView, _) in
+            view.drawTrack()
+        }
+    }
+
+    private func drawTrack() {
+        let ink = UIColor.playerInk.resolvedColor(with: traitCollection)
+        tintColor = ink
+        setMinimumVolumeSliderImage(Self.track(ink.withAlphaComponent(0.7)), for: .normal)
+        setMaximumVolumeSliderImage(Self.track(ink.withAlphaComponent(0.2)), for: .normal)
     }
 
     @available(*, unavailable)
@@ -38,10 +47,10 @@ final class CenteredVolumeView: MPVolumeView {
     }
 
     /// A capsule the scrubber's height, stretched along its middle.
-    private static func track(alpha: CGFloat) -> UIImage {
+    private static func track(_ colour: UIColor) -> UIImage {
         let side: CGFloat = 6
         let image = UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { _ in
-            UIColor.white.withAlphaComponent(alpha).setFill()
+            colour.setFill()
             UIBezierPath(roundedRect: CGRect(x: 0, y: 0, width: side, height: side), cornerRadius: side / 2).fill()
         }
         return image.resizableImage(withCapInsets: UIEdgeInsets(top: 0, left: side / 2, bottom: 0, right: side / 2))
@@ -52,11 +61,16 @@ final class CenteredVolumeView: MPVolumeView {
 struct RoutePicker: UIViewRepresentable {
     func makeUIView(context: Context) -> AVRoutePickerView {
         let view = AVRoutePickerView()
-        view.tintColor = UIColor.white.withAlphaComponent(0.7)
-        view.activeTintColor = .white
+        view.tintColor = UIColor.playerInk.withAlphaComponent(0.7)
+        view.activeTintColor = .playerInk
         view.prioritizesVideoDevices = false
         return view
     }
 
     func updateUIView(_ view: AVRoutePickerView, context: Context) {}
+}
+
+extension UIColor {
+    /// The player's type: white in its dark look, black in its light one.
+    static let playerInk = UIColor { $0.userInterfaceStyle == .light ? .black : .white }
 }

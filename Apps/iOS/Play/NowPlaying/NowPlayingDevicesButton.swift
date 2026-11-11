@@ -13,7 +13,7 @@ struct NowPlayingDevicesButton: View {
             Button(action: action) {
                 Image(systemName: "laptopcomputer.and.iphone")
                     .font(.title3)
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(.primary.opacity(0.7))
                     .frame(width: 44, height: 44)
                     .contentShape(.rect)
             }

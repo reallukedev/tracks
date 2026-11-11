@@ -104,8 +104,8 @@ struct QualityCapsule: View {
         }
         .padding(.horizontal, 7)
         .padding(.vertical, 3)
-        .foregroundStyle(onDark ? AnyShapeStyle(.white.opacity(0.85)) : AnyShapeStyle(.secondary))
-        .background(onDark ? AnyShapeStyle(.white.opacity(0.14)) : AnyShapeStyle(Color(.tertiarySystemFill)), in: .capsule)
+        .foregroundStyle(onDark ? AnyShapeStyle(.primary.opacity(0.85)) : AnyShapeStyle(.secondary))
+        .background(onDark ? AnyShapeStyle(.primary.opacity(0.14)) : AnyShapeStyle(Color(.tertiarySystemFill)), in: .capsule)
     }
 }
 

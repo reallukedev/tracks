@@ -24,10 +24,10 @@ struct Scrubber: View {
             VStack(spacing: 8) {
                 GeometryReader { proxy in
                     ZStack(alignment: .leading) {
-                        Capsule().fill(.white.opacity(0.2))
+                        Capsule().fill(.primary.opacity(0.2))
                         // Slid along rather than resized, so each tick only redraws.
                         Capsule()
-                            .fill(.white.opacity(dragFraction == nil ? 0.7 : 1))
+                            .fill(.primary.opacity(dragFraction == nil ? 0.7 : 1))
                             .offset(x: -proxy.size.width * (1 - fraction))
                     }
                     .frame(height: dragFraction == nil ? 6 : 12)
@@ -59,7 +59,7 @@ struct Scrubber: View {
                 }
                 .font(.caption.weight(.medium))
                 .monospacedDigit()
-                .foregroundStyle(.white.opacity(dragFraction == nil ? 0.6 : 0.9))
+                .foregroundStyle(.primary.opacity(dragFraction == nil ? 0.6 : 0.9))
             }
             .accessibilityElement()
             .accessibilityLabel("Position")
@@ -114,7 +114,7 @@ struct Scrubber: View {
 struct LiveScrubber: View {
     var body: some View {
         VStack(spacing: 8) {
-            Capsule().fill(.white.opacity(0.2)).frame(height: 6).frame(height: 24)
+            Capsule().fill(.primary.opacity(0.2)).frame(height: 6).frame(height: 24)
             HStack {
                 LiveBadge()
                 Spacer()
