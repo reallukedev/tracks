@@ -40,7 +40,13 @@ public enum MusicScripting {
     ///
     /// One event per property could block for the default 60 second Apple event timeout;
     /// a 45 second probe run once produced a single sample that way.
-    public static func readAll(timeoutSeconds: Int = 2) -> [Reading] {
+    ///
+    /// Doesn't launch Music: an Apple event to an app that isn't running opens it, so while
+    /// Music is closed every property fails without asking. `isRunning` is for tests.
+    public static func readAll(timeoutSeconds: Int = 2, isRunning: Bool = isMusicRunning) -> [Reading] {
+        guard isRunning else {
+            return probedProperties.map { Reading(property: $0, value: nil, errorDescription: notRunning) }
+        }
         let source = """
         with timeout of \(timeoutSeconds) seconds
             tell application id "com.apple.Music"
@@ -103,8 +109,10 @@ public enum MusicScripting {
         }
     }
 
-    /// Reads a single property. The sampler uses ``readAll(timeoutSeconds:)`` instead.
-    public static func read(_ property: String, timeoutSeconds: Int = 2) -> Reading {
+    /// Reads a single property. The sampler uses ``readAll(timeoutSeconds:isRunning:)``
+    /// instead. Doesn't launch Music, as ``readAll(timeoutSeconds:isRunning:)`` doesn't.
+    public static func read(_ property: String, timeoutSeconds: Int = 2, isRunning: Bool = isMusicRunning) -> Reading {
+        guard isRunning else { return Reading(property: property, value: nil, errorDescription: notRunning) }
         let source = """
         with timeout of \(timeoutSeconds) seconds
             tell application id "com.apple.Music"
@@ -130,6 +138,8 @@ public enum MusicScripting {
     public static var isMusicRunning: Bool {
         !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Music").isEmpty
     }
+
+    static let notRunning = "Music isn't running"
 
     /// What Music is doing, for routing the menu bar's transport controls.
     ///

@@ -53,5 +53,15 @@ struct PlayerInfoSourceTests {
         #expect(!oldTitles.contains("Lost Boys"))
         #expect(newTitles.contains("Lost Boys"))
     }
+
+    @Test("with Music closed, nothing asks it anything, so polling never opens it")
+    func closedMusicIsLeftClosed() {
+        #expect(PlayerInfoSource.currentObservation(isMusicRunning: false) == nil)
+        let readings = MusicScripting.readAll(isRunning: false)
+        #expect(readings.map(\.property) == MusicScripting.probedProperties)
+        #expect(readings.allSatisfy { $0.value == nil && !$0.succeeded })
+        let single = MusicScripting.read("player state", isRunning: false)
+        #expect(single.value == nil && !single.succeeded)
+    }
 }
 #endif

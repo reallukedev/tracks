@@ -79,7 +79,12 @@ public final class PlayerInfoSource: NSObject, NowPlayingSource, Sendable {
 
     /// A one-shot read of what Music.app is playing, for the App Intent, which can't wait for
     /// the next notification. Any property can fail to read; see ``MusicScripting``.
-    public static func currentObservation() -> NowPlayingObservation? {
+    ///
+    /// Doesn't launch Music. Capture polls this from launch and on a timer, and asking a
+    /// closed Music anything opens it, so Music opened with Tracks and again each time it was
+    /// quit. Closed, nothing is playing there. `isMusicRunning` is for tests.
+    public static func currentObservation(isMusicRunning: Bool = MusicScripting.isMusicRunning) -> NowPlayingObservation? {
+        guard isMusicRunning else { return nil }
         let readings = MusicScripting.readAll()
         func value(_ property: String) -> String? {
             guard let reading = readings.first(where: { $0.property == property }),
