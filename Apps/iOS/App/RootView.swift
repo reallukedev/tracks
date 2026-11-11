@@ -131,6 +131,7 @@ struct RootView: View {
             .task {
                 guard !model.isDemoLaunch else { return }
                 model.nearby.start()
+                model.followSpeakers()
             }
             .onPlayingChange(of: player) { model.tellNearby() }
             // A song picked up from another of your devices through Handoff.

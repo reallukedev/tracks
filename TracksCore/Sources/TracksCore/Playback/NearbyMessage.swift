@@ -20,6 +20,9 @@ public struct NearbyState: Codable, Sendable, Equatable {
     public var context: NearbyContext?
     /// The songs coming up after this one, the first few of them.
     public var upNext: [NearbySong]?
+    /// Where its sound is going: a HomePod, a group of rooms, headphones. Nil while it plays
+    /// through its own speakers, and from devices that came before it.
+    public var speakers: NearbySpeakers?
 
     public init(
         title: String? = nil,
@@ -33,7 +36,8 @@ public struct NearbyState: Codable, Sendable, Equatable {
         canSkipBack: Bool = true,
         canSkipForward: Bool = true,
         context: NearbyContext? = nil,
-        upNext: [NearbySong]? = nil
+        upNext: [NearbySong]? = nil,
+        speakers: NearbySpeakers? = nil
     ) {
         self.title = title
         self.artist = artist
@@ -47,6 +51,7 @@ public struct NearbyState: Codable, Sendable, Equatable {
         self.canSkipForward = canSkipForward
         self.context = context
         self.upNext = upNext
+        self.speakers = speakers
     }
 
     /// Whether there's a song to show at all.

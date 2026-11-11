@@ -34,7 +34,8 @@ with the app in the background, so your history no longer depends on having Trac
 - Search leads with its best match, and opens on your recent searches and every mood
 - Your Devices: your iPhone and Mac see each other, as Spotify Connect does. See what's
   playing on each, control it from the other, send the music there, or bring it here from
-  where it's got to
+  where it's got to. Each says which speakers it's playing to, a HomePod or a group of rooms,
+  and Play On lists your HomePods and AirPlay speakers beside your devices
 
 ### SharePlay
 

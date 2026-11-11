@@ -5,6 +5,9 @@ import Observation
 import TracksCore
 import TracksMusic
 import MusicKit
+#if os(iOS)
+import AVFoundation
+#endif
 
 /// Everything the app needs at launch, built once and shared by every scene.
 @MainActor
@@ -247,9 +250,37 @@ final class AppModel {
             canSkipBack: player.context?.isStation != true,
             context: player.context.map { NearbyContext($0) },
             // A live mix's picks are its own: the device it moves to picks again.
-            upNext: player.isLive ? nil : player.upNext.prefix(NearbyState.carriedSongs).map { NearbySong($0) }
+            upNext: player.isLive ? nil : player.upNext.prefix(NearbyState.carriedSongs).map { NearbySong($0) },
+            speakers: speakersHere
         )
     }
+
+    /// Where Tracks' own player is being heard: the iPhone's route, or the Mac's sound output,
+    /// which is where the player plays.
+    private var speakersHere: NearbySpeakers? {
+        #if os(iOS)
+        NearbySpeakers(route: SpeakerRouteObserver.currentRoute)
+        #else
+        SystemOutput.current
+        #endif
+    }
+
+    #if os(iOS)
+    @ObservationIgnored private var routeObserver: NSObjectProtocol?
+
+    /// Tells your other devices again as the sound moves to a HomePod, headphones or back,
+    /// so they can say where it's playing. A route change is a notification, so this costs
+    /// nothing while nothing changes.
+    func followSpeakers() {
+        guard routeObserver == nil else { return }
+        routeObserver = NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.nearby.publish(self.nearbyState ?? NearbyState())
+            }
+        }
+    }
+    #endif
 
     // MARK: - Your devices, as one player
 

@@ -1,7 +1,48 @@
 import SwiftUI
 import TracksCore
 
+extension NearbySpeakers {
+    /// "A Home's Pod", or "Kitchen and Living Room" for a group.
+    var label: String { names.formatted(.list(type: .and)) }
+}
+
+extension NearbyDevices.Device {
+    /// Its name, and where its sound is going when that isn't its own speakers: "Luke's
+    /// iPhone · A Home's Pod".
+    var nameWithSpeakers: String {
+        guard let speakers = state?.speakers, state?.hasSong == true else { return name }
+        return String(localized: "\(name) · \(speakers.label)")
+    }
+}
+
 #if os(macOS)
+/// Where the Mac's sound is going, as Control Center's Sound module names it, with the
+/// system's AirPlay picker beside it. Tracks' own player plays wherever the Mac's sound goes.
+struct SystemOutputRow: View {
+    let name: String
+    let speakers: NearbySpeakers?
+
+    var body: some View {
+        HStack(spacing: 10) {
+            DeviceGlyph(symbol: speakers?.symbol ?? "speaker.wave.2.fill", isCurrent: speakers != nil)
+                .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+            Text(name)
+                .font(.callout)
+                .lineLimit(1)
+                .accessibilityLabel(Text("Sound Output"))
+                .accessibilityValue(Text(name))
+            Spacer(minLength: 8)
+            RoutePickerButton()
+                .frame(width: 24, height: 24)
+                .help("AirPlay")
+                .accessibilityLabel(Text("AirPlay"))
+        }
+        .padding(.vertical, 5)
+        .padding(.horizontal, 6)
+        .accessibilityElement(children: .contain)
+    }
+}
+
 /// One of Music's speakers, as Control Center's Sound module lists them: choosing the row plays
 /// there alone, the circle adds it to the rooms already playing, and each room playing has its
 /// own volume under its name.

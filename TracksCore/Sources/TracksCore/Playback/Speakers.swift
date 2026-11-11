@@ -192,3 +192,80 @@ public nonisolated struct SpeakerRoute: Sendable, Equatable {
         }
     }
 }
+
+/// Where a device's sound is going when it isn't its own speaker, as it tells your other
+/// devices: "A Home's Pod", or each room in a group.
+public nonisolated struct NearbySpeakers: Codable, Sendable, Equatable {
+    public enum Kind: String, Sendable {
+        case airPlay, homePod, speaker, tv, bluetooth, car, wired
+    }
+
+    /// A ``Kind``'s wire name, kept as text so a kind added later doesn't stop the rest reading.
+    public var kindName: String
+    public var names: [String]
+
+    public var kind: Kind? { Kind(rawValue: kindName) }
+
+    public init(kind: Kind, names: [String]) {
+        self.kindName = kind.rawValue
+        self.names = names
+    }
+
+    /// An iPhone's route, nil while it plays through its own speaker.
+    public init?(route: SpeakerRoute?) {
+        guard let route, !route.names.isEmpty else { return nil }
+        let kind: Kind = switch route.kind {
+        case .airPlay: .airPlay
+        case .bluetooth: .bluetooth
+        case .car: .car
+        case .wired: .wired
+        case .screen: .tv
+        }
+        self.init(kind: kind, names: route.names)
+    }
+
+    /// The speakers Music plays to, nil while it plays on the Mac alone. A group is named for
+    /// the kind its rooms share, or as AirPlay when they're a mix.
+    public init?(music: MusicSpeakers?) {
+        guard let music, let names = music.destinationNames else { return nil }
+        let kinds = Set(music.speakers.filter { $0.isSelected && $0.kind != .computer }.map(\.kind))
+        let kind: Kind = switch kinds.count == 1 ? kinds.first : nil {
+        case .homePod: .homePod
+        case .speaker: .speaker
+        case .appleTV, .tv: .tv
+        case .bluetooth: .bluetooth
+        default: .airPlay
+        }
+        self.init(kind: kind, names: names)
+    }
+
+    /// The Mac's sound output, by its Core Audio name and transport type
+    /// (`kAudioDevicePropertyTransportType`). Nil for its own speakers.
+    public init?(outputName: String, transport: UInt32) {
+        let name = outputName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, transport != Self.fourCC("bltn") else { return nil }
+        let kind: Kind = switch transport {
+        case Self.fourCC("airp"): .airPlay
+        case Self.fourCC("blue"), Self.fourCC("blea"): .bluetooth
+        case Self.fourCC("hdmi"), Self.fourCC("dprt"): .tv
+        default: .speaker
+        }
+        self.init(kind: kind, names: [name])
+    }
+
+    static func fourCC(_ code: String) -> UInt32 {
+        code.utf8.reduce(0) { ($0 << 8) | UInt32($1) }
+    }
+
+    public var symbol: String {
+        if names.count > 1 { return "hifispeaker.2.fill" }
+        return switch kind {
+        case .airPlay: "airplay.audio"
+        case .homePod: "homepod.fill"
+        case .speaker, nil: "hifispeaker.fill"
+        case .tv: "tv"
+        case .bluetooth, .wired: "headphones"
+        case .car: "car.fill"
+        }
+    }
+}

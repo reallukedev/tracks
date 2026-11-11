@@ -40,14 +40,18 @@ enum NearbyMac {
         }
         nearby.onJoin = { Task { await tell(model) } }
         nearby.start()
-        // The read loop runs only while a device is connected, so a Mac alone never wakes.
+        // The read loop runs only while a device is connected, so a Mac alone never wakes. So
+        // does following the Mac's sound output, which is told as it changes.
         Task {
             var polling: Task<Void, Never>?
+            var output: SystemOutputFollower?
             var isPolling = false
             for await isConnected in Observations({ !nearby.devices.isEmpty }) where isConnected != isPolling {
                 isPolling = isConnected
                 polling?.cancel()
                 polling = isConnected ? Task { await keepTelling(model) } : nil
+                output?.stop()
+                output = isConnected ? SystemOutputFollower { Task { await tell(model) } } : nil
             }
         }
     }
@@ -82,6 +86,11 @@ enum NearbyMac {
             return
         }
         let artwork = song.artworkURL.flatMap { $0.hasPrefix("https://") ? $0 : nil }
+        // Music's own AirPlay choice, which the Mac's sound output doesn't show. Playing on
+        // the Mac alone, it's heard wherever the Mac's sound goes.
+        let airPlay = await ScriptingQueue.run { MusicAirPlay.read() }
+        var speakers: NearbySpeakers?
+        if case .speakers(let read) = airPlay { speakers = NearbySpeakers(music: read) ?? SystemOutput.current }
         model.nearby.publish(NearbyState(
             title: song.title,
             artist: song.artistName,
@@ -89,7 +98,8 @@ enum NearbyMac {
             artworkURL: model.nearbyArtwork(artwork, for: song.title, by: song.artistName),
             isPlaying: presence.isPlaying,
             canSkipBack: capabilities.canSkipBack,
-            canSkipForward: capabilities.canSkipForward
+            canSkipForward: capabilities.canSkipForward,
+            speakers: speakers
         ))
     }
 }
@@ -121,7 +131,7 @@ private struct NearbyMenuRow: View {
         HStack(spacing: 10) {
             ArtworkView(url: state.artworkURL, seed: state.album ?? state.title ?? device.name, size: 36)
             VStack(alignment: .leading, spacing: 1) {
-                Label(state.isPlaying ? "Playing on \(device.name)" : "Paused on \(device.name)", systemImage: device.kind.symbol)
+                Label(state.isPlaying ? "Playing on \(device.nameWithSpeakers)" : "Paused on \(device.nameWithSpeakers)", systemImage: device.kind.symbol)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(state.isPlaying ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
                     .lineLimit(1)

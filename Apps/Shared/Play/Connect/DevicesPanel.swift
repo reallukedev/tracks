@@ -2,8 +2,9 @@ import SwiftUI
 import TracksCore
 
 /// Where the music is and where it can go: a remote for another device's song, then every
-/// device with a checkmark on the one playing, as AirPlay lists speakers, then the ones seen
-/// lately, as Find My does. Choosing one moves the music there.
+/// device with a checkmark on the one playing, and the speakers this one can play to, as
+/// AirPlay lists them, then the ones seen lately, as Find My does. Choosing one moves the
+/// music there.
 ///
 /// iPhone draws it as a grouped list in a sheet; the Mac as Control Center's modules in a
 /// popover, with its settings at the foot.
@@ -26,6 +27,7 @@ struct DevicesPanel: View {
     @State private var moves = 0
     #if os(macOS)
     @State private var musicSpeakers = MusicSpeakersModel()
+    @State private var output = SystemOutputObserver()
     #else
     @State private var routes = SpeakerRouteObserver()
     #endif
@@ -59,15 +61,14 @@ struct DevicesPanel: View {
             }
             Section {
                 rows
+                // iOS has apps choose a route only through its own picker.
+                if showsRoute {
+                    SpeakerRouteRow(route: routes.route)
+                }
             } header: {
                 Text("Play On")
             } footer: {
                 Text(footer)
-            }
-            if showsRoute {
-                Section("Speakers") {
-                    SpeakerRouteRow(route: routes.route)
-                }
             }
             if !model.nearby.away.isEmpty {
                 Section("Recently Seen") {
@@ -112,19 +113,18 @@ struct DevicesPanel: View {
                     .padding(12)
                     .background(.quaternary.opacity(0.5), in: .rect(cornerRadius: 12, style: .continuous))
             }
+            if showsAutomationNotice {
+                automationNotice
+                    .padding(12)
+                    .background(.quaternary.opacity(0.5), in: .rect(cornerRadius: 12, style: .continuous))
+                    .transition(.opacity)
+            }
             if let device = featured {
                 RemoteDeviceCard(device: device, close: close)
             }
             module("Play On") {
                 rows
-            }
-            if let speakers = shownSpeakers {
-                module(speakers.hasScreens ? "Speakers & TVs" : "Speakers") {
-                    ForEach(speakers.speakers) { speaker in
-                        AirPlaySpeakerRow(speaker: speaker, model: musicSpeakers)
-                    }
-                }
-                .transition(.opacity)
+                speakerRows
             }
             if !model.nearby.away.isEmpty {
                 module("Recently Seen") {
@@ -155,7 +155,28 @@ struct DevicesPanel: View {
         .animation(reduceMotion ? nil : .snappy, value: model.nearby.devices.map(\.id))
         .animation(reduceMotion ? nil : .snappy, value: model.musicLocation)
         .animation(reduceMotion ? nil : .snappy, value: shownSpeakers)
+        .animation(reduceMotion ? nil : .snappy, value: showsOutput)
+        .animation(reduceMotion ? nil : .snappy, value: showsAutomationNotice)
         .task { await musicSpeakers.follow() }
+        .onAppear { output.start() }
+        .onDisappear { output.stop() }
+    }
+
+    /// The speakers after your devices, in one list, as AirPlay's has them: Music's, chosen
+    /// through Music while it has the song, or else the Mac's sound output, which Tracks' own
+    /// player plays to, with the system's picker.
+    @ViewBuilder
+    private var speakerRows: some View {
+        if let speakers = shownSpeakers {
+            // The Mac itself is This Mac, above.
+            ForEach(speakers.speakers.filter { $0.kind != .computer }) { speaker in
+                AirPlaySpeakerRow(speaker: speaker, model: musicSpeakers)
+            }
+            .transition(.opacity)
+        } else if showsOutput, let name = output.name {
+            SystemOutputRow(name: name, speakers: output.speakers)
+                .transition(.opacity)
+        }
     }
 
     /// Music's speakers, while Music has the song rather than Tracks' own player, which plays
@@ -164,6 +185,29 @@ struct DevicesPanel: View {
         guard let speakers = musicSpeakers.speakers, speakers.hasSpeakers else { return nil }
         if player.isDemo { return speakers }
         return speakers.state != .stopped && !player.isPlaying ? speakers : nil
+    }
+
+    /// The Mac's output, unless another device has the music, while there's somewhere else
+    /// the sound could go.
+    private var showsOutput: Bool {
+        if case .device = model.musicLocation { return false }
+        return output.speakers != nil || output.hasOtherRoutes
+    }
+
+    /// Music sends the song to speakers that leave the Mac out, so This Mac isn't checked.
+    private var musicRoutesAway: Bool {
+        guard let speakers = shownSpeakers else { return false }
+        return !speakers.speakers.contains { $0.kind == .computer && $0.isSelected }
+    }
+
+    /// Music's speakers can't be read, unless Tracks' own player has the music, which doesn't
+    /// need them.
+    private var showsAutomationNotice: Bool {
+        musicSpeakers.needsAutomation && !player.isPlaying
+    }
+
+    private var automationNotice: some View {
+        notice("Automation Is Off", "Tracks needs it to show Music's speakers.", opening: DevicesSettingsLinks.automation)
     }
 
     /// A titled group, as Control Center's modules have.
@@ -190,7 +234,7 @@ struct DevicesPanel: View {
             name: NearbyDevices.thisDeviceName,
             detail: notFoundOn == Self.here ? String(localized: "This song isn't available here") : hereDetail,
             isPlaying: player.isPlaying,
-            trailing: movingTo == Self.here ? .working : location == .here ? .current : .none,
+            trailing: movingTo == Self.here ? .working : hereIsCurrent ? .current : .none,
             isProblem: notFoundOn == Self.here,
             hint: Text("Plays the music here")
         ) {
@@ -203,6 +247,7 @@ struct DevicesPanel: View {
                 name: device.name,
                 detail: detail(state),
                 isPlaying: state?.isPlaying == true,
+                speakers: state?.hasSong == true ? state?.speakers : nil,
                 trailing: movingTo == device.id ? .working : location == .device(device.id) ? .current : .none,
                 isEnabled: canChoose(device),
                 hint: location == .here ? Text("Plays the music on \(device.name)") : Text("Shows its controls")
@@ -247,12 +292,17 @@ struct DevicesPanel: View {
     }
 
     private var localNetworkNotice: some View {
+        notice("Local Network Is Off", "Tracks needs it to find your other devices.", opening: DevicesSettingsLinks.localNetwork)
+    }
+
+    /// Something Tracks needs that's turned off, and the way to its switch in Settings.
+    private func notice(_ title: LocalizedStringKey, _ message: LocalizedStringKey, opening url: URL?) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Label {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Local Network Is Off")
+                    Text(title)
                         .font(.headline)
-                    Text("Tracks needs it to find your other devices.")
+                    Text(message)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -261,7 +311,7 @@ struct DevicesPanel: View {
                     .foregroundStyle(.orange)
             }
             Button("Open Settings") {
-                if let url = DevicesSettingsLinks.localNetwork { openURL(url) }
+                if let url { openURL(url) }
             }
             #if os(macOS)
             .controlSize(.small)
@@ -293,6 +343,17 @@ struct DevicesPanel: View {
 
     // MARK: - Choosing
 
+    /// This device has the music and is heard here, rather than through speakers it chose
+    /// in Music, which are checked instead.
+    private var hereIsCurrent: Bool {
+        guard model.musicLocation == .here else { return false }
+        #if os(macOS)
+        return !musicRoutesAway
+        #else
+        return true
+        #endif
+    }
+
     /// The device whose remote leads: the one the player's showing, or else the first playing,
     /// or the first with a song.
     private var featured: NearbyDevices.Device? {
@@ -305,8 +366,17 @@ struct DevicesPanel: View {
         (model.musicLocation == .here && player.hasQueue) || device.state?.hasSong == true
     }
 
-    /// This device chosen: the song comes here from wherever it's playing.
+    /// This device chosen: the song comes here from wherever it's playing, or, from Music's
+    /// speakers, back to the Mac.
     private func chooseHere() {
+        #if os(macOS)
+        if model.musicLocation == .here, musicRoutesAway,
+           let mac = shownSpeakers?.speakers.first(where: { $0.kind == .computer }) {
+            musicSpeakers.chooseOnly(mac)
+            moves += 1
+            return
+        }
+        #endif
         guard movingTo == nil,
               case .device(let id) = model.musicLocation,
               let device = model.nearby.devices.first(where: { $0.id == id }),

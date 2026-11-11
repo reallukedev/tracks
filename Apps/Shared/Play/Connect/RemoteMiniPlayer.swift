@@ -23,7 +23,7 @@ struct RemoteMiniPlayer: View {
                             .font(.subheadline.weight(.semibold))
                             .lineLimit(1)
                         if placement != .inline {
-                            Label(device.name, systemImage: device.kind.symbol)
+                            Label(device.nameWithSpeakers, systemImage: device.kind.symbol)
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(.tint)
                                 .lineLimit(1)
@@ -34,7 +34,7 @@ struct RemoteMiniPlayer: View {
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(Text("\(state.title ?? ""), playing on \(device.name)"))
+            .accessibilityLabel(Text("\(state.title ?? ""), playing on \(device.nameWithSpeakers)"))
             .accessibilityHint("Shows Your Devices")
             RemoteTransport(device: device, state: state)
         }

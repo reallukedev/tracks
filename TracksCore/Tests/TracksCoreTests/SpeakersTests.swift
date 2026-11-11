@@ -94,4 +94,57 @@ struct SpeakersTests {
     func iPhoneRoute(outputs: [(String, String)], expected: SpeakerRoute?) {
         #expect(SpeakerRoute(outputs: outputs.map { (type: $0.0, name: $0.1) }) == expected)
     }
+
+    @Test("what a device tells the others: the iPhone's route by kind, nothing for its own speaker")
+    func nearbyFromRoute() {
+        #expect(NearbySpeakers(route: nil) == nil)
+        #expect(NearbySpeakers(route: SpeakerRoute(kind: .airPlay, names: ["A Home's Pod"])) == NearbySpeakers(kind: .airPlay, names: ["A Home's Pod"]))
+        #expect(NearbySpeakers(route: SpeakerRoute(kind: .screen, names: ["Living Room"]))?.kind == .tv)
+        #expect(NearbySpeakers(route: SpeakerRoute(kind: .bluetooth, names: ["AirPods Pro"]))?.symbol == "headphones")
+    }
+
+    @Test("Music's speakers are told as the rooms playing, a shared kind or AirPlay for a mix, and nothing for the Mac alone")
+    func nearbyFromMusic() {
+        func speakers(_ selected: [(String, AirPlaySpeaker.Kind)]) -> MusicSpeakers {
+            let all: [(String, AirPlaySpeaker.Kind)] = [("MacBook Pro", .computer), ("Kitchen", .homePod), ("Den", .homePod), ("Lounge", .appleTV)]
+            return MusicSpeakers(state: .playing, speakers: all.map { name, kind in
+                AirPlaySpeaker(name: name, kind: kind, isSelected: selected.contains { $0.0 == name }, volume: 50)
+            })
+        }
+        #expect(NearbySpeakers(music: nil) == nil)
+        #expect(NearbySpeakers(music: speakers([("MacBook Pro", .computer)])) == nil)
+
+        let kitchen = NearbySpeakers(music: speakers([("Kitchen", .homePod)]))
+        #expect(kitchen == NearbySpeakers(kind: .homePod, names: ["Kitchen"]))
+        #expect(kitchen?.symbol == "homepod.fill")
+
+        let withMac = NearbySpeakers(music: speakers([("MacBook Pro", .computer), ("Kitchen", .homePod), ("Den", .homePod)]))
+        #expect(withMac?.kind == .homePod)
+        #expect(withMac?.names == ["MacBook Pro", "Den", "Kitchen"])
+        #expect(withMac?.symbol == "hifispeaker.2.fill")
+
+        #expect(NearbySpeakers(music: speakers([("Kitchen", .homePod), ("Lounge", .appleTV)]))?.kind == .airPlay)
+        #expect(NearbySpeakers(music: speakers([("Lounge", .appleTV)]))?.kind == .tv)
+    }
+
+    @Test("the Mac's sound output by its transport, and nothing for its own speakers", arguments: [
+        ("MacBook Pro Speakers", "bltn", nil),
+        ("A Home's Pod", "airp", NearbySpeakers.Kind.airPlay),
+        ("AirPods Pro", "blue", .bluetooth),
+        ("Beats Flex", "blea", .bluetooth),
+        ("LG UltraFine", "hdmi", .tv),
+        ("Studio Display", "dprt", .tv),
+        ("Scarlett 2i2", "usb ", .speaker),
+        ("Loopback", "virt", .speaker),
+    ] as [(String, String, NearbySpeakers.Kind?)])
+    func nearbyFromMacOutput(name: String, transport: String, expected: NearbySpeakers.Kind?) {
+        let speakers = NearbySpeakers(outputName: name, transport: NearbySpeakers.fourCC(transport))
+        #expect(speakers?.kind == expected)
+        #expect(speakers.map(\.names) == (expected == nil ? nil : [name]))
+    }
+
+    @Test("an output with no name says nothing")
+    func unnamedOutput() {
+        #expect(NearbySpeakers(outputName: "  ", transport: NearbySpeakers.fourCC("airp")) == nil)
+    }
 }

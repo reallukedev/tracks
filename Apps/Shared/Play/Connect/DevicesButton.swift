@@ -24,8 +24,8 @@ struct DevicesButton: View {
                 .foregroundStyle(elsewhere == nil ? AnyShapeStyle(.primary) : AnyShapeStyle(.tint))
                 .contentTransition(.symbolEffect(.replace))
         }
-        .help(elsewhere.map { "Playing on \($0.name)" } ?? "Your Devices")
-        .accessibilityLabel(elsewhere.map { Text("Your Devices, playing on \($0.name)") } ?? Text("Your Devices"))
+        .help(elsewhere.map { "Playing on \($0.nameWithSpeakers)" } ?? "Your Devices")
+        .accessibilityLabel(elsewhere.map { Text("Your Devices, playing on \($0.nameWithSpeakers)") } ?? Text("Your Devices"))
         .onAppear {
             if opensAtLaunch, LaunchScene.opensDevices { isShowingPanel = true }
         }

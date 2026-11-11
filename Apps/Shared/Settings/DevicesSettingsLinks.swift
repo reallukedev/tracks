@@ -14,4 +14,10 @@ enum DevicesSettingsLinks {
         URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork")
         #endif
     }
+
+    #if os(macOS)
+    /// Privacy & Security's Automation list, where Tracks is let control Music, for its
+    /// speakers.
+    static let automation = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")
+    #endif
 }

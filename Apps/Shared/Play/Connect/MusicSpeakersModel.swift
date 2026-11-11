@@ -12,6 +12,8 @@ import TracksMusic
 final class MusicSpeakersModel {
     /// Nil until read, and while Music is closed or Tracks may not control it.
     private(set) var speakers: MusicSpeakers?
+    /// Automation for Music is off for Tracks, so its speakers can't be read or chosen.
+    private(set) var needsAutomation = false
 
     /// Volumes being dragged, sent no faster than Music takes them, latest first.
     @ObservationIgnored private var pendingVolumes: [String: Int] = [:]
@@ -45,9 +47,11 @@ final class MusicSpeakersModel {
         guard started > changedAt else { return }
         switch reading {
         case .speakers(let read): if read != speakers { speakers = read }
-        case .notRunning, .notAllowed: speakers = nil
+        case .notRunning, .notAllowed: if speakers != nil { speakers = nil }
         case .failed: break
         }
+        let notAllowed = reading == .notAllowed
+        if notAllowed != needsAutomation { needsAutomation = notAllowed }
     }
 
     // MARK: - Choosing

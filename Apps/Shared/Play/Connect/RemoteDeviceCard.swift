@@ -25,7 +25,7 @@ struct RemoteDeviceCard: View {
                     .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
                 VStack(alignment: .leading, spacing: 1) {
                     Label {
-                        Text(state.isPlaying ? "Playing on \(device.name)" : "Paused on \(device.name)")
+                        Text(state.isPlaying ? "Playing on \(device.nameWithSpeakers)" : "Paused on \(device.nameWithSpeakers)")
                     } icon: {
                         Image(systemName: device.kind.symbol)
                     }

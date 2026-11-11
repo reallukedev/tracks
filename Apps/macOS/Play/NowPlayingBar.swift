@@ -133,7 +133,7 @@ private struct RemoteNowPlayingBar: View {
                         .font(.callout.weight(.semibold))
                         .lineLimit(1)
                     Label {
-                        Text("Playing on \(device.name)")
+                        Text("Playing on \(device.nameWithSpeakers)")
                     } icon: {
                         Image(systemName: device.kind.symbol)
                     }

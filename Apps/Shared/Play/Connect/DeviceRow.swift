@@ -12,6 +12,8 @@ struct DeviceRow: View {
     let name: String
     let detail: String
     var isPlaying = false
+    /// Where its sound is going when it isn't the device's own speakers, said before the song.
+    var speakers: NearbySpeakers?
     var trailing = Trailing.none
     /// Seen lately, not here now: dimmed, and nothing to choose.
     var isAway = false
@@ -90,13 +92,19 @@ struct DeviceRow: View {
                         .imageScale(.small)
                         .accessibilityHidden(true)
                 }
-                Text(detail)
+                detailText
                     .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
                     .contentTransition(.opacity)
             }
             .font(Metrics.detailFont)
             .foregroundStyle(isProblem ? AnyShapeStyle(.red) : isPlaying && Metrics.tintsPlaying ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
         }
+    }
+
+    /// The speakers lead, so the song is what's cut short when the line runs out.
+    private var detailText: Text {
+        guard let speakers else { return Text(detail) }
+        return Text("\(Image(systemName: speakers.symbol)) \(speakers.label) · \(detail)")
     }
 
     private var mark: some View {

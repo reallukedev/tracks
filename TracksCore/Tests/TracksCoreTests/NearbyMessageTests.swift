@@ -19,6 +19,7 @@ struct NearbyMessageTests {
             context: NearbyContext(kind: .album, title: "Short n' Sweet"),
             upNext: [NearbySong(title: "Bed Chem", artist: "Sabrina Carpenter", album: "Short n' Sweet", duration: 171)]
         )),
+        .state(NearbyState(title: "Juno", isPlaying: true, speakers: NearbySpeakers(kind: .homePod, names: ["A Home's Pod"]))),
     ])
     func roundTrip(message: NearbyMessage) throws {
         let framed = try NearbyFraming.frame(message)
@@ -82,7 +83,33 @@ struct NearbyMessageTests {
         }
         #expect(state.context == nil)
         #expect(state.upNext == nil)
+        #expect(state.speakers == nil)
         #expect(state.carry(bringsQueue: true) == .song)
+    }
+
+    @Test("speakers of a kind this version doesn't know still read, and still name the rooms")
+    func unknownSpeakersKind() throws {
+        let body = Data(#"{"state":{"_0":{"title":"Juno","isPlaying":true,"sentAt":0,"canSkipBack":true,"canSkipForward":true,"speakers":{"kindName":"hologram","names":["Kitchen","Den"]}}}}"#.utf8)
+        guard case .state(let state) = try NearbyFraming.message(from: body) else {
+            Issue.record("Expected a state")
+            return
+        }
+        let speakers = try #require(state.speakers)
+        #expect(speakers.kind == nil)
+        #expect(speakers.names == ["Kitchen", "Den"])
+        #expect(speakers.symbol == "hifispeaker.2.fill")
+    }
+
+    @Test("the sound moving to a HomePod is worth sending again, though the song is the same")
+    func speakersChange() {
+        let mine = NearbyState(title: "Juno", isPlaying: true, position: 10, sentAt: now)
+        var moved = mine
+        moved.speakers = NearbySpeakers(kind: .airPlay, names: ["A Home's Pod"])
+        #expect(!mine.isSame(as: moved))
+        var later = moved
+        later.sentAt = now.addingTimeInterval(1)
+        later.position = 11
+        #expect(moved.isSame(as: later))
     }
 
     @Test("a context of a kind this version doesn't know still reads, and is named for the device")

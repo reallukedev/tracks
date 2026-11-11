@@ -218,9 +218,11 @@ final class NearbyDevices {
             if mode == "none" { known = [] }
             return
         }
+        // With `-TracksSpeakersDemo` too, the Mac plays to a HomePod.
+        let speakers = UserDefaults.standard.string(forKey: "TracksSpeakersDemo").map { _ in NearbySpeakers(kind: .homePod, names: ["Kitchen"]) }
         devices = [Device(id: "sample", name: "Luke's MacBook Pro", platform: "Mac", kindName: "MacBook", state: NearbyState(
             title: "Golden Moon", artist: "Nova Harbor", album: "Golden Moon",
-            isPlaying: mode != "paused", position: 84, duration: 212
+            isPlaying: mode != "paused", position: 84, duration: 212, speakers: speakers
         ))]
         if mode == "many" {
             known.removeAll { $0.id == "sample-ipad" }
