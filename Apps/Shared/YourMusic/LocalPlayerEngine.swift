@@ -778,6 +778,21 @@ final class LocalPlayerEngine: NSObject, PlayerEngine {
             command.removeTarget(nil)
         }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        updateNowPlayingState()
+    }
+
+    /// The Mac's media keys and Now Playing follow this rather than the playback rate, so it's
+    /// set on every start and stop. iOS ignores it.
+    private func updateNowPlayingState() {
+        #if os(macOS)
+        let state: MPNowPlayingPlaybackState = switch status {
+        case .playing: .playing
+        case .loading: isMeantToPlay ? .playing : .paused
+        case .paused: .paused
+        case .stopped: .stopped
+        }
+        MPNowPlayingInfoCenter.default().playbackState = state
+        #endif
     }
 
     // MARK: - Telling others
@@ -838,6 +853,7 @@ final class LocalPlayerEngine: NSObject, PlayerEngine {
     }
 
     private func updateNowPlayingInfo() {
+        updateNowPlayingState()
         guard entries.indices.contains(index) else {
             MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
             return
