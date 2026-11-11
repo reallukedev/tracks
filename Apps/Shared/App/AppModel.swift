@@ -273,8 +273,9 @@ final class AppModel {
     /// nothing while nothing changes.
     func followSpeakers() {
         guard routeObserver == nil else { return }
-        routeObserver = NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated {
+        // Not `.main`: that would make the audio session's queue wait on the main thread.
+        routeObserver = NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: nil) { [weak self] _ in
+            Task { @MainActor in
                 guard let self else { return }
                 self.nearby.publish(self.nearbyState ?? NearbyState())
             }
@@ -726,7 +727,10 @@ final class AppModel {
     /// settings or at rows another device has already merged.
     func syncOnForeground() {
         guard !isDemoLaunch else { return }
-        refreshMusicAuthorization()
+        Task {
+            await PlayerQuiet.settled()
+            refreshMusicAuthorization()
+        }
         settingsSync?.reconcileAll()
         reconciler?.reconcile()
     }
