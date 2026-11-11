@@ -82,12 +82,13 @@ struct GeneralSettingsPane: View {
         if let error = behaviour.launchAtLoginError {
             return Text(error).foregroundStyle(.ink(.red))
         }
+        // The hero says what to do; the row only says where it stands.
         if behaviour.launchAtLoginNeedsApproval {
-            return Text("Waiting for you to allow it in System Settings ▸ General ▸ Login Items.")
+            return Text("Waiting for Login Items.")
         }
         return behaviour.launchesAtLogin
-            ? Text("Tracks starts in the background when you log in.")
-            : Text("Open Tracks yourself. It fills in what it missed from Recently Played.")
+            ? Text("Starts in the background.")
+            : Text("When you open it, Tracks fills in what it missed from Recently Played.")
     }
 
     private var reopenDetail: Text {

@@ -32,8 +32,8 @@ final class LowPowerMode {
     @ObservationIgnored private var observer: (any NSObjectProtocol)?
 
     private init() {
-        observer = NotificationCenter.default.addObserver(forName: .NSProcessInfoPowerStateDidChange, object: nil, queue: .main) { _ in
-            MainActor.assumeIsolated {
+        observer = NotificationCenter.default.addObserver(forName: .NSProcessInfoPowerStateDidChange, object: nil, queue: nil) { _ in
+            Task { @MainActor in
                 LowPowerMode.shared.isOn = ProcessInfo.processInfo.isLowPowerModeEnabled
             }
         }

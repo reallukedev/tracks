@@ -13,18 +13,27 @@ import CarPlay
 @MainActor
 enum CarPlayImages {
     /// Finished images by what they show, so rebuilding a tab doesn't draw every cover again.
-    /// A few hundred at most, then it starts over.
+    /// A few hundred, or about 32 MB of pixels, at most, then it starts over: it lives as long
+    /// as the app, which can be days with the music on.
     private static var cache: [String: UIImage] = [:]
+    private static var cacheBytes = 0
 
     private static func cached(_ key: String, _ make: () async -> UIImage) async -> UIImage {
         if let image = cache[key] { return image }
         let image = await make()
-        if cache.count > 400 {
+        keep(image, as: key)
+        return image
+    }
+
+    private static func keep(_ image: UIImage, as key: String) {
+        let bytes = Int(image.size.width * image.scale * image.size.height * image.scale) * 4
+        if cache.count >= 400 || cacheBytes + bytes > 32 << 20 {
             cache.removeAll()
+            cacheBytes = 0
             tints.removeAll()
         }
         cache[key] = image
-        return image
+        cacheBytes += bytes
     }
 
     // MARK: - Many at once
@@ -82,7 +91,13 @@ enum CarPlayImages {
         private var pending: [Int: UIImage] = [:]
 
         func attach(_ elements: [CPListImageRowItemElement]) {
-            attach(setters: elements.map { element in { element.image = $0 } })
+            attach(setters: elements.map { element in
+                { image in
+                    element.image = image
+                    // A card's colour comes from its picture: the stand-in's would stay behind.
+                    if let card = element as? CPListImageRowItemCardElement { card.tintColor = CarPlayImages.tint(of: image) }
+                }
+            })
         }
 
         func attach(_ rows: [CPListItem]) {
@@ -153,10 +168,10 @@ enum CarPlayImages {
                 // Library covers have an address only MusicKit's own views can load, and some
                 // catalog ones don't load at all: the phone's media library by name, then the
                 // same album in Apple Music's catalog.
-                if let album, let image = LibraryArtwork.album(title: album.title, artist: album.artist, side: side) {
+                if let album, let image = await LibraryArtwork.album(title: album.title, artist: album.artist, side: side) {
                     return image
                 }
-                if let playlist, let covers = LibraryArtwork.playlist(named: playlist, side: side / 2), !covers.isEmpty {
+                if let playlist, let covers = await LibraryArtwork.playlist(named: playlist, side: side / 2), !covers.isEmpty {
                     return drawMosaic(covers, symbol: nil, side: side, scale: scale)
                 }
                 if let album, let found = await catalogCover(title: album.title, artist: album.artist, pixels: pixels),
@@ -240,7 +255,9 @@ enum CarPlayImages {
         let id = ObjectIdentifier(image)
         if let known = tints[id] { return known.color }
         let color = averageTint(of: image)
-        // Kept with the image, so the identifier can't be taken by another picture.
+        // Kept with the image, so the identifier can't be taken by another picture. Stand-ins
+        // aren't in the cache, so this is bounded on its own.
+        if tints.count > 200 { tints.removeAll() }
         tints[id] = (image, color)
         return color
     }
@@ -314,6 +331,14 @@ enum CarPlayImages {
     /// A symbol in Tracks’ red, centred on a square the size of a row's cover, so rows that
     /// stand for a place (Playlists, Albums) line up with rows that have covers.
     static func symbol(_ name: String, side: CGFloat, scale: CGFloat) -> UIImage {
+        let key = "symbol|\(name)|\(side)|\(scale)"
+        if let image = cache[key] { return image }
+        let image = drawSymbol(name, side: side, scale: scale)
+        keep(image, as: key)
+        return image
+    }
+
+    private static func drawSymbol(_ name: String, side: CGFloat, scale: CGFloat) -> UIImage {
         let format = UIGraphicsImageRendererFormat()
         format.scale = scale
         let configuration = UIImage.SymbolConfiguration(pointSize: side * 0.5, weight: .medium)
@@ -326,9 +351,34 @@ enum CarPlayImages {
         }
     }
 
+    /// A song's number on an album, centred on a square the size of a row's cover, in the grey
+    /// Music uses for it: readable on the car's dark screen and on its light one.
+    static func trackNumber(_ number: Int, side: CGFloat, scale: CGFloat) -> UIImage {
+        let key = "number|\(number)|\(side)|\(scale)"
+        if let image = cache[key] { return image }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = scale
+        let image = UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format).image { _ in
+            let font = UIFont.monospacedDigitSystemFont(ofSize: side * 0.36, weight: .medium)
+            let text = NSAttributedString(string: "\(number)", attributes: [.font: font, .foregroundColor: UIColor(white: 0.56, alpha: 1)])
+            let size = text.size()
+            text.draw(at: CGPoint(x: (side - size.width) / 2, y: (side - size.height) / 2))
+        }
+        keep(image, as: key)
+        return image
+    }
+
     /// A quiet stand-in while a row's picture loads: a grey tile, or circle for an artist, with
     /// a faint symbol. Neutral on purpose, so it never passes for a real cover.
     static func placeholder(symbol: String, side: CGFloat, scale: CGFloat, round: Bool = false) -> UIImage {
+        let key = "placeholder|\(symbol)|\(side)|\(scale)|\(round)"
+        if let image = cache[key] { return image }
+        let image = drawPlaceholder(symbol: symbol, side: side, scale: scale, round: round)
+        keep(image, as: key)
+        return image
+    }
+
+    private static func drawPlaceholder(symbol: String, side: CGFloat, scale: CGFloat, round: Bool) -> UIImage {
         let format = UIGraphicsImageRendererFormat()
         format.scale = scale
         let rect = CGRect(x: 0, y: 0, width: side, height: side)
@@ -380,6 +430,9 @@ enum CarPlayImages {
     /// colours it as its other buttons.
     static func keepRing(_ status: KeepStatus, plays: Int) -> UIImage {
         let side: CGFloat = 28
+        // Drawn to the edge of its square, with no margin of its own: the car sizes every
+        // button's picture to the same box, and a margin left the ring smaller than the
+        // symbols beside it.
         if status == .kept {
             let configuration = UIImage.SymbolConfiguration(pointSize: side * 0.8, weight: .semibold)
             return UIImage(systemName: "checkmark.circle.fill", withConfiguration: configuration)?
@@ -390,7 +443,7 @@ enum CarPlayImages {
         format.scale = 3
         let image = UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format).image { _ in
             let width: CGFloat = 2.4
-            let rect = CGRect(x: 0, y: 0, width: side, height: side).insetBy(dx: width / 2 + 1, dy: width / 2 + 1)
+            let rect = CGRect(x: 0, y: 0, width: side, height: side).insetBy(dx: width / 2, dy: width / 2)
             let track = UIBezierPath(ovalIn: rect)
             track.lineWidth = width
             UIColor.black.withAlphaComponent(0.3).setStroke()
@@ -536,12 +589,13 @@ private struct CarGenreTile: View {
 }
 
 /// Covers for your Apple Music library, which MusicKit only hands its own views: the same
-/// albums and playlists, looked up in the phone's media library by name.
-@MainActor
-enum LibraryArtwork {
+/// albums and playlists, looked up in the phone's media library by name. Off the main thread,
+/// since a query walks the whole library and a long list asks for many.
+nonisolated enum LibraryArtwork {
     private static var isAllowed: Bool { MPMediaLibrary.authorizationStatus() == .authorized }
 
-    static func album(title: String, artist: String?, side: CGFloat) -> UIImage? {
+    @concurrent
+    static func album(title: String, artist: String?, side: CGFloat) async -> UIImage? {
         guard isAllowed else { return nil }
         let query = MPMediaQuery.albums()
         query.addFilterPredicate(MPMediaPropertyPredicate(value: title, forProperty: MPMediaItemPropertyAlbumTitle))
@@ -555,7 +609,8 @@ enum LibraryArtwork {
     }
 
     /// Up to four different covers from a playlist's songs, for a mosaic like Apple Music's.
-    static func playlist(named name: String, side: CGFloat) -> [UIImage]? {
+    @concurrent
+    static func playlist(named name: String, side: CGFloat) async -> [UIImage]? {
         guard isAllowed else { return nil }
         let query = MPMediaQuery.playlists()
         query.addFilterPredicate(MPMediaPropertyPredicate(value: name, forProperty: MPMediaPlaylistPropertyName))

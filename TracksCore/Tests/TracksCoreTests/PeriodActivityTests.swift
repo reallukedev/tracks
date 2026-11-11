@@ -135,4 +135,17 @@ struct PeriodActivityTests {
         #expect(later.previousPlays == 4)
         #expect(later.previousSeconds == 120 + 2 * song)
     }
+
+    /// The clocks went forward at 2 AM on 8 March 2026, so noon was 11 hours into the day.
+    @Test("today is compared with yesterday up to the same time on the clock")
+    func dayComparesByClock() {
+        let history = ListeningHistory([
+            play("A", at: date(2026, 3, 7, 11)),
+            play("B", at: date(2026, 3, 7, 13)),
+            play("C", at: date(2026, 3, 8, 9)),
+        ])
+        let now = date(2026, 3, 8, 12)
+        let period = ChartPeriod.containing(now, span: .day, calendar: calendar)
+        #expect(history.activity(in: period, now: now, calendar: calendar).previousPlays == 1)
+    }
 }

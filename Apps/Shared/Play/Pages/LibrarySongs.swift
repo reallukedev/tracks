@@ -3,7 +3,7 @@ import MusicKit
 import TracksCore
 
 /// A song in a library's table: the same columns for Apple Music and your own music.
-nonisolated struct LibrarySongRow: Identifiable, Sendable {
+nonisolated struct LibrarySongRow: Identifiable, Equatable, Sendable {
     let id: String
     let title: String
     let artist: String
@@ -150,7 +150,6 @@ struct LibrarySongsList: View {
     @AppStorage("librarySongOrder") private var order = LibraryOrder.title
     @State private var pager = LibraryPager<Song>()
     @Environment(PlayerModel.self) private var player
-    @Environment(PlayFeed.self) private var feed
 
     var body: some View {
         LibraryPagerContent(pager: pager, query: query, section: .songs, isList: true) {
@@ -160,13 +159,20 @@ struct LibrarySongsList: View {
             rows
         }
         .toolbar {
-            ToolbarItem(placement: .libraryAction) {
-                LibrarySortMenu(selection: $order, options: LibraryOrder.songOrders) { $0.menuTitle }
+            if pager.offersOrder {
+                ToolbarItem(placement: .libraryAction) {
+                    LibrarySortMenu(selection: $order, options: LibraryOrder.songOrders) { $0.menuTitle }
+                }
             }
         }
-        .loads(pager, query: query, order: order, server: LibraryServerSort.songs(order)) { [facts = feed.facts] song in
-            LibrarySortKeys(song: song, plays: facts[HistoryImport.key(title: song.title, artistName: song.artistName)]?.plays ?? 0)
+        // No plays in the keys: no order here sorts by them, and reading the history's facts
+        // would draw every row again each time a song is played.
+        .loads(pager, query: query, order: order, server: LibraryServerSort.songs(order)) { song in
+            LibrarySortKeys(song: song, plays: 0)
         }
+        #if DEBUG
+        .librarySweep(pager.items.map(\.id))
+        #endif
     }
 
     private var context: PlayContext { .songs(String(localized: "Songs")) }
@@ -236,4 +242,37 @@ struct LibrarySongsList: View {
         }
     }
 }
+
+#if DEBUG
+extension View {
+    /// `-TracksLibrarySweep YES`: runs down the whole list and back, a few rows a frame, to
+    /// measure what scrolling a big library costs without a finger. Debug builds only.
+    func librarySweep<ID: Hashable & Sendable>(_ ids: [ID]) -> some View {
+        modifier(LibrarySweep(ids: ids))
+    }
+}
+
+private struct LibrarySweep<ID: Hashable & Sendable>: ViewModifier {
+    let ids: [ID]
+
+    func body(content: Content) -> some View {
+        if UserDefaults.standard.bool(forKey: "TracksLibrarySweep") {
+            ScrollViewReader { proxy in
+                content.task(id: ids.count) {
+                    guard ids.count > 50 else { return }
+                    try? await Task.sleep(for: .seconds(3))
+                    let down = Array(stride(from: 0, to: ids.count, by: 4))
+                    for index in down + down.reversed() {
+                        guard !Task.isCancelled else { return }
+                        proxy.scrollTo(ids[index], anchor: .top)
+                        try? await Task.sleep(for: .milliseconds(16))
+                    }
+                }
+            }
+        } else {
+            content
+        }
+    }
+}
+#endif
 #endif

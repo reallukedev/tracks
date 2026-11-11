@@ -112,6 +112,24 @@ struct HistoryRecallParsingTests {
         #expect(Clock.parse("last summer", calendar: calendar).interval?.start == Clock.date(2025, 12, 1))
     }
 
+    // In the Japanese calendar it's the year 8, and `1990...8` trapped on any four digits.
+    @Test("a year typed on a device using another calendar is still that year", arguments: [
+        Calendar.Identifier.japanese, .islamicUmmAlQura, .persian, .buddhist,
+    ])
+    func otherCalendars(identifier: Calendar.Identifier) {
+        var calendar = Calendar(identifier: identifier)
+        calendar.timeZone = Clock.calendar.timeZone
+        #expect(Clock.parse("1999", calendar: calendar).interval
+            == Clock.interval(Clock.date(1999, 1, 1), Clock.date(2000, 1, 1)))
+        #expect(Clock.parse("march 2024", calendar: calendar).interval
+            == Clock.interval(Clock.date(2024, 3, 1), Clock.date(2024, 4, 1)))
+    }
+
+    @Test("a clock set before 1990 reads no years")
+    func clockReset() {
+        #expect(!Clock.parse("1999", now: Date(timeIntervalSince1970: 0)).hasFilters)
+    }
+
     @Test("years that can't be when you listened stay words", arguments: ["1989", "2027", "12345"])
     func impossibleYears(text: String) {
         #expect(!Clock.parse(text).hasFilters)
@@ -368,6 +386,17 @@ struct HistoryRecallSearchTests {
         #expect(index.search("YESTERDAY").hasName(matching: "YESTERDAY"))
         #expect(!index.search("yesterdays").hasName(matching: "yesterdays"))
         #expect(!index.search("gone").hasName(matching: "gone"))
+    }
+
+    // A Hebrew year has a thirteenth month, Elul, and naming it ran off the end of the twelve
+    // English names. A month before 20 September 2026 is 20 August, in Elul.
+    @Test("suggestions on a calendar with thirteen months name a Gregorian month")
+    func thirteenthMonth() {
+        let index = index([Play(title: "Open Ocean", at: Clock.date(2026, 8, 3))])
+        var hebrew = Calendar(identifier: .hebrew)
+        hebrew.timeZone = Clock.calendar.timeZone
+        #expect(hebrew.component(.month, from: Clock.date(2026, 8, 20)) == 13)
+        #expect(index.recallSuggestions(now: Clock.date(2026, 9, 20, 14), calendar: hebrew).contains("In August"))
     }
 
     @Test("suggestions are only the phrases with something to find")

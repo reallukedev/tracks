@@ -286,11 +286,13 @@ final class NearbyDevices {
         keyObserver = NotificationCenter.default.addObserver(
             forName: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
             object: NSUbiquitousKeyValueStore.default,
-            queue: .main
+            // Posted from iCloud's queue; a `.main` observer would make it wait for the main
+            // thread.
+            queue: nil
         ) { [weak self] notification in
             let keys = notification.userInfo?[NSUbiquitousKeyValueStoreChangedKeysKey] as? [String] ?? []
             guard keys.contains(NearbyDevices.keyName) else { return }
-            MainActor.assumeIsolated { _ = self?.restart() }
+            Task { @MainActor in _ = self?.restart() }
         }
         NSUbiquitousKeyValueStore.default.synchronize()
     }

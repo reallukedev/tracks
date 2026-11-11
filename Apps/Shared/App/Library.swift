@@ -86,15 +86,26 @@ final class Library {
                 // The first load goes straight away; later ones wait out the burst.
                 if isLoaded { try? await Task.sleep(for: Self.settle) }
                 do {
-                    if let (snapshot, version) = try await reader.snapshot(after: version) {
-                        self.version = version
+                    if let (change, version) = try await reader.changes(after: version) {
                         if looksUpCatalog, !hasLoadedSongMetadata {
                             songMetadata = await Self.loadSongMetadata(from: songMetadataCache)
                             hasLoadedSongMetadata = true
+                            lookupsGeneration += 1
                             CatalogCredits.shared.update(from: songMetadata)
                         }
-                        let (history, sessions) = await Self.build(snapshot)
-                        publish(history, sessions: sessions)
+                        let generation = lookupsGeneration
+                        let (artwork, metadata) = lookups
+                        // Each new song is a step on from what's shown, taken off the main
+                        // actor. Rebuilding from every play, after every song, cost a long
+                        // history a sort of all of it, and the main actor the lookups' pass
+                        // over every play as well.
+                        let base = publishedLookups == generation ? history : nil
+                        let (rebuilt, sessions, reached) = try await Self.build(
+                            change, version: version, onto: base, reader: reader,
+                            artwork: artwork, metadata: metadata
+                        )
+                        self.version = reached
+                        publish(rebuilt, sessions: sessions, lookups: generation)
                     }
                     if !isLoaded {
                         isLoaded = true
@@ -114,32 +125,87 @@ final class Library {
         }
     }
 
-    /// Sorting the plays and estimating how long each was heard is the costly part of a
-    /// rebuild, so it happens off the main actor.
+    /// What the lookups have found, as ``history`` shows it.
+    private var lookups: (artwork: [String: String], metadata: [String: SongMetadata]) {
+        (looksUpCatalog ? artistArtwork.urls : [:], looksUpCatalog ? songMetadata : Self.sampleMetadata)
+    }
+
+    /// Goes up whenever the lookups find something, so a rebuild knows whether what it
+    /// started from still carries all of them.
+    @ObservationIgnored private var lookupsGeneration = 0
+    /// The ``lookupsGeneration`` that ``history`` carries.
+    @ObservationIgnored private var publishedLookups = -1
+
+    /// The history after `change`, off the main actor: the reader's steps taken from `base`
+    /// where they can be, and otherwise everything sorted and estimated again, the costly
+    /// part of a rebuild.
+    ///
+    /// - Parameter base: what's shown, when it carries these lookups; nil to start again.
+    /// - Returns: the history, its sessions in order, and the reader's version they're at.
     @concurrent
     private nonisolated static func build(
-        _ snapshot: ListeningHistoryReader.Snapshot
-    ) async -> (ListeningHistory, [SessionStat]) {
-        (
-            ListeningHistory(snapshot.captures),
-            snapshot.sessions.sorted { $0.startedAt < $1.startedAt }
+        _ change: ListeningHistoryReader.Change,
+        version: Int,
+        onto base: ListeningHistory?,
+        reader: ListeningHistoryReader,
+        artwork: [String: String],
+        metadata: [String: SongMetadata]
+    ) async throws -> (ListeningHistory, [SessionStat], Int) {
+        if case .steps(let steps, let sessions) = change, let next = base?.applying(steps) {
+            return (next, sessions.sorted { $0.startedAt < $1.startedAt }, version)
+        }
+        let snapshot: ListeningHistoryReader.Snapshot
+        var reached = version
+        if case .everything(let everything) = change {
+            snapshot = everything
+        } else {
+            // Asked for from the start, which always has an answer.
+            guard let (everything, latest) = try await reader.snapshot(after: nil) else { throw CancellationError() }
+            (snapshot, reached) = (everything, latest)
+        }
+        return (
+            ListeningHistory(snapshot.captures, artistArtwork: artwork, songMetadata: metadata),
+            snapshot.sessions.sorted { $0.startedAt < $1.startedAt },
+            reached
         )
     }
 
-    private func publish(_ rebuilt: ListeningHistory, sessions: [SessionStat]) {
-        // The lookups are attached here rather than in `build`, so anything found while the
-        // rebuild ran is included.
-        history = rebuilt.with(
-            artistArtwork: looksUpCatalog ? artistArtwork.urls : [:],
-            songMetadata: looksUpCatalog ? songMetadata : Self.sampleMetadata
-        )
+    /// Lookups attached to `history` off the main actor: with years of plays, crediting them
+    /// all again took tens of milliseconds there.
+    @concurrent
+    private nonisolated static func attach(
+        _ history: ListeningHistory,
+        artwork: [String: String],
+        metadata: [String: SongMetadata]
+    ) async -> ListeningHistory {
+        history.with(artistArtwork: artwork, songMetadata: metadata)
+    }
+
+    /// Lets the history that's been replaced go in the background. A long one is hundreds of
+    /// thousands of values to release, which was a few milliseconds on the main actor after
+    /// every song.
+    private static func retire(_ old: ListeningHistory) {
+        Task.detached(priority: .background) {
+            // Long enough for the main actor to have let go of its own reference first.
+            try? await Task.sleep(for: .seconds(1))
+            withExtendedLifetime(old) {}
+        }
+    }
+
+    private func publish(_ rebuilt: ListeningHistory, sessions: [SessionStat], lookups generation: Int) {
+        let old = history
+        history = rebuilt
+        Self.retire(old)
+        publishedLookups = generation
         self.sessions = sessions
-        hasUnpublishedLookups = false
+        // Lookups found while the rebuild ran aren't in it yet.
+        hasUnpublishedLookups = generation != lookupsGeneration
         isLoaded = true
         revision += 1
         if looksUpCatalog {
             lookUpArtistArtwork()
             lookUpSongMetadata()
+            publishLookups(force: true)
         }
     }
 
@@ -163,6 +229,7 @@ final class Library {
                 artistArtwork.record(found: found, asked: requests.map(\.artistIdentity))
                 // `pending` reads what's recorded, not what's published, so the next round
                 // doesn't ask again for these.
+                lookupsGeneration += 1
                 hasUnpublishedLookups = true
                 publishLookups(force: false)
             }
@@ -194,6 +261,7 @@ final class Library {
                     cache: songMetadataCache
                 )
                 CatalogCredits.shared.update(from: songMetadata)
+                lookupsGeneration += 1
                 hasUnpublishedLookups = true
                 publishLookups(force: false)
             }
@@ -240,14 +308,30 @@ final class Library {
     /// A large library takes dozens of batches to fill in, and publishing each one made every
     /// screen recompute its statistics dozens of times over.
     private func publishLookups(force: Bool) {
-        guard hasUnpublishedLookups, looksUpCatalog else { return }
+        guard hasUnpublishedLookups, looksUpCatalog, attaching == nil else { return }
         let now = ContinuousClock.now
         guard force || now - lastLookupPublish >= Self.lookupPublishInterval else { return }
-        history = history.with(artistArtwork: artistArtwork.urls, songMetadata: songMetadata)
-        hasUnpublishedLookups = false
         lastLookupPublish = now
-        revision += 1
+        attaching = Task {
+            defer { attaching = nil }
+            while hasUnpublishedLookups, looksUpCatalog {
+                let (base, shown, generation) = (history, revision, lookupsGeneration)
+                let (artwork, metadata) = lookups
+                let attached = await Self.attach(base, artwork: artwork, metadata: metadata)
+                // A rebuild landed meanwhile, with the lookups of its own: look again.
+                guard revision == shown else { continue }
+                history = attached
+                Self.retire(base)
+                publishedLookups = generation
+                hasUnpublishedLookups = generation != lookupsGeneration
+                lastLookupPublish = .now
+                revision += 1
+            }
+        }
     }
+
+    /// Attaching what the lookups found, under way.
+    @ObservationIgnored private var attaching: Task<Void, Never>?
 
     /// Forces a recompute without new data, e.g. when the day changes and "this week" moves.
     func invalidate() {

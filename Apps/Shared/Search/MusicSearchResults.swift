@@ -57,7 +57,8 @@ struct MusicSearchResults: View {
             .animation(.snappy, value: results.isEmpty)
         }
         .overlay { overlay }
-        .task(id: SearchKey(query: query, scope: scope, authorization: model.musicAuthorization, allowsExplicit: allowsExplicit, attempt: attempt)) {
+        // By the words, so the space typed after one doesn't ask Apple Music again.
+        .task(id: SearchKey(query: query.trimmingCharacters(in: .whitespaces), scope: scope, authorization: model.musicAuthorization, allowsExplicit: allowsExplicit, attempt: attempt)) {
             await runSearch()
         }
     }
@@ -131,7 +132,8 @@ struct MusicSearchResults: View {
                 kind: String(localized: "Song · \(song.artistName)"),
                 cover: song.artwork.map(CoverArt.artwork) ?? .url(nil, seed: song.albumTitle ?? song.title),
                 open: { remember(); player.play(.songs([song]), from: .songs(String(localized: "Search"))) },
-                play: { remember(); player.play(.songs([song]), from: .songs(String(localized: "Search"))) }
+                play: { remember(); player.play(.songs([song]), from: .songs(String(localized: "Search"))) },
+                songIdentity: HistoryImport.key(title: song.title, artistName: song.artistName)
             )
         }
     }

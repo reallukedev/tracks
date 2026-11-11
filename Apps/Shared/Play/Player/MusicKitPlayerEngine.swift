@@ -98,10 +98,30 @@ final class MusicKitPlayerEngine: PlayerEngine {
 
     // MARK: - State
 
+    // Reads of the player are as dangerous as calls to it: either can reconnect to Apple's
+    // player service and hold the main thread for seconds, and inside a scene update iOS ends
+    // the app for it (0x8BADF00D). So each read is kept, and while ``PlayerQuiet`` holds work
+    // back the kept one answers instead, the time carried on by the clock if it was playing.
+
+    /// The player as last read.
+    private struct Reading {
+        var playbackStatus: MusicPlayer.PlaybackStatus = .stopped
+        var shuffle: MusicPlayer.ShuffleMode?
+        var repeatMode: MusicPlayer.RepeatMode?
+        var time: TimeInterval = 0
+        var timeReadAt = ContinuousClock.now
+    }
+
+    private var reading = Reading()
+
+    /// Whether the player can be read now: it's in use, and no scene is changing.
+    private var canRead: Bool { TracksPlayerContext.isInUse && !PlayerQuiet.isQuiet }
+
     var status: PlayerStatus {
         if starting > 0 { return .loading }
         guard TracksPlayerContext.isInUse else { return .stopped }
-        switch player.state.playbackStatus {
+        if canRead { reading.playbackStatus = player.state.playbackStatus }
+        switch reading.playbackStatus {
         case .playing, .seekingForward, .seekingBackward: return .playing
         case .paused, .interrupted: return current == nil ? .stopped : .paused
         case .stopped: return current == nil ? .stopped : .paused
@@ -111,15 +131,33 @@ final class MusicKitPlayerEngine: PlayerEngine {
 
     var playbackTime: TimeInterval {
         guard TracksPlayerContext.isInUse else { return 0 }
+        guard canRead else { return lastKnownPlaybackTime }
         let time = player.playbackTime
-        return time.isFinite ? max(0, time) : 0
+        reading.time = time.isFinite ? max(0, time) : 0
+        reading.timeReadAt = .now
+        return reading.time
     }
 
-    var isShuffled: Bool { TracksPlayerContext.isInUse && player.state.shuffleMode == .songs }
+    /// The time as last read, moved on by the clock while playing, without touching the
+    /// player: for saving where the music is as the app leaves.
+    var lastKnownPlaybackTime: TimeInterval {
+        guard reading.playbackStatus == .playing else { return reading.time }
+        let since = ContinuousClock.now - reading.timeReadAt
+        let time = reading.time + Double(since.components.seconds) + Double(since.components.attoseconds) / 1e18
+        guard let duration = current?.duration, duration > 0 else { return time }
+        return min(time, duration)
+    }
+
+    var isShuffled: Bool {
+        guard TracksPlayerContext.isInUse else { return false }
+        if canRead { reading.shuffle = player.state.shuffleMode }
+        return reading.shuffle == .songs
+    }
 
     var repeatMode: PlayerRepeat {
         guard TracksPlayerContext.isInUse else { return .off }
-        return switch player.state.repeatMode {
+        if canRead { reading.repeatMode = player.state.repeatMode }
+        return switch reading.repeatMode {
         case .one: .one
         case .all: .all
         default: .off
@@ -142,6 +180,13 @@ final class MusicKitPlayerEngine: PlayerEngine {
         current = currentEntry.map(track)
         if TracksPlayerContext.isStation {
             upNext = []
+            // A station can play for days, a song every few minutes, and nothing replaces its
+            // queue: only the song playing needs its looked-up cover kept.
+            let playing = Set(kept.values.compactMap(\.songID))
+            if queuedCovers.keys.contains(where: { !playing.contains($0) }) {
+                queuedCovers = queuedCovers.filter { playing.contains($0.key) }
+            }
+            coversLookedUp.formIntersection(playing)
         } else if let currentEntry, let index = entries.firstIndex(where: { $0.id == currentEntry.id }) {
             upNext = entries[(index + 1)...].map(track)
         } else {
@@ -415,6 +460,8 @@ final class MusicKitPlayerEngine: PlayerEngine {
     }
 
     func seek(to time: TimeInterval) {
+        reading.time = max(0, time)
+        reading.timeReadAt = .now
         PlayerQuiet.run { [player] in player.playbackTime = max(0, time) }
     }
 
@@ -598,9 +645,14 @@ extension MusicKitPlayerEngine {
     /// player doesn't say, and on the Mac until Tracks has played something, since reaching the
     /// player at all can take the media keys from Music.
     static var playingVariant: AppleMusicVariant? {
-        guard TracksPlayerContext.isInUse, let variant = ApplicationMusicPlayer.shared.state.audioVariant else { return nil }
-        return AppleMusicVariant(variant)
+        guard TracksPlayerContext.isInUse else { return nil }
+        // Kept for while a scene changes, when the player can't be read (see ``playbackTime``).
+        guard !PlayerQuiet.isQuiet else { return lastVariant }
+        lastVariant = ApplicationMusicPlayer.shared.state.audioVariant.flatMap(AppleMusicVariant.init)
+        return lastVariant
     }
+
+    private static var lastVariant: AppleMusicVariant?
 }
 
 extension AppleMusicVariant {

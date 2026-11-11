@@ -148,8 +148,8 @@ final class SpeedVolume {
         self.model = model
         let player = model.player
         let center = NotificationCenter.default
-        observers.append(center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.routeChanged() }
+        observers.append(center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: nil) { [weak self] _ in
+            Task { @MainActor in self?.routeChanged() }
         })
         // Access changed in Settings while away; and a drive that started with Tracks in the
         // background can keep its speed coming once Tracks is in use again.

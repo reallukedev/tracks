@@ -29,11 +29,7 @@ extension CarPlaySceneDelegate {
             self?.play({ await GenrePlayback.start(genre, model: model) }, completion: completion)
         }
         row.handler = { [weak self] _, completion in
-            guard let self else { return completion() }
-            Task {
-                let page = await genresPage(all)
-                push(page, completion: completion)
-            }
+            self?.open({ await self?.genresPage(all) }, then: completion)
         }
         return CPListSection(items: [row])
     }
@@ -48,7 +44,7 @@ extension CarPlaySceneDelegate {
             let genre = item.genre
             let image = await CarPlayImages.genre(genre, side: side, scale: scale)
             let row = CPListItem(text: genre.title, detailText: nil, image: image)
-            row.isPlaying = isPlaying(genre.title)
+            mark(row) { [weak self] in self?.isPlaying(genre.title) ?? false }
             row.handler = { [weak self] _, completion in
                 self?.play({ await GenrePlayback.start(genre, model: model) }, completion: completion)
             }
@@ -69,13 +65,15 @@ extension CarPlaySceneDelegate {
 
     static let genreTileCount = 7
 
-    /// Your genres, worked out once for each change to the history or your music: it walks the
-    /// whole history, and Radio is redrawn every time Tracks Radio starts or pauses.
+    /// Your genres, worked out again when the source or your music changes, and otherwise at
+    /// most every quarter of an hour: it walks the whole history, the order of the genres you
+    /// play most barely moves with one more song, and Radio is redrawn every time Tracks Radio
+    /// starts or pauses.
     private func genreItems() async -> [GenreTileItem] {
-        let key = "\(model.musicSource).\(model.library.revision).\(model.yourMusic.index.tracks.count)"
-        if let genres, genres.key == key { return genres.items }
+        let key = "\(model.musicSource).\(model.yourMusic.index.tracks.count).\(model.library.history.isEmpty)"
+        if let genres, genres.key == key, genres.at.duration(to: .now) < .seconds(15 * 60) { return genres.items }
         let items = await GenreShelfItems.load(model: model, facts: model.playFeed.facts)
-        genres = (key, items)
+        genres = (key, items, .now)
         return items
     }
 }

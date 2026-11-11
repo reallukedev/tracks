@@ -147,8 +147,9 @@ struct DiscoveryCard: View {
         }
     }
 
+    /// Rounded, so it doesn't move with every song: see ``ChartCeiling``.
     private var ceiling: Double {
-        Double(summary.timeline.map(\.count).max() ?? 0) * 1.08
+        ChartCeiling.rounded(Double(summary.timeline.map(\.count).max() ?? 0) * 1.08)
     }
 
     private var domain: ClosedRange<Date> {

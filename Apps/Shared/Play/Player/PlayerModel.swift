@@ -27,6 +27,16 @@ final class PlayerModel {
             // And the next song's, so the change to it is ready too.
             guard upNext.first?.cover != oldValue.first?.cover else { return }
             BackdropArtStore.shared.prepare([upNext.first?.cover])
+            // Its cover too, decoded at the sizes the player and the mini player draw it, so
+            // the next song's picture is there the moment it starts rather than fading in.
+            if case .artwork(let artwork)? = upNext.first?.cover {
+                let keys = [1_200, 600].compactMap { pixels in
+                    CoverImage.loadableURL(of: artwork, pixels: pixels).map { ArtworkImages.Key(url: $0, pixels: pixels) }
+                }
+                Task(priority: .utility) {
+                    for key in keys { _ = await ArtworkImages.shared.image(for: key) }
+                }
+            }
         }
     }
     private(set) var isShuffled = false
@@ -407,8 +417,10 @@ final class PlayerModel {
 
     func removeUpNext(at offsets: IndexSet) {
         if var waiting = waitingSession {
-            // Up Next is everything after the first song.
-            waiting.tracks.remove(atOffsets: IndexSet(offsets.map { $0 + 1 }))
+            // Up Next is everything after the first song. Offsets from a list drawn a moment
+            // ago can be past the end, and `remove(atOffsets:)` traps on them.
+            let ahead = waiting.tracks.indices.dropFirst()
+            waiting.tracks.remove(atOffsets: IndexSet(offsets.map { $0 + 1 }.filter(ahead.contains)))
             waitingSession = waiting
             upNext = Array(waiting.tracks.dropFirst())
             return
@@ -433,7 +445,10 @@ final class PlayerModel {
     func moveUpNext(from offsets: IndexSet, to destination: Int) {
         if var waiting = waitingSession {
             var ahead = Array(waiting.tracks.dropFirst())
-            ahead.move(fromOffsets: offsets, toOffset: destination)
+            // As the engines do: a stale offset or destination would trap in `move`.
+            let moving = IndexSet(offsets.filter(ahead.indices.contains))
+            guard !moving.isEmpty else { return }
+            ahead.move(fromOffsets: moving, toOffset: min(max(0, destination), ahead.count))
             waiting.tracks = Array(waiting.tracks.prefix(1)) + ahead
             waitingSession = waiting
             upNext = ahead
@@ -923,7 +938,7 @@ final class PlayerModel {
         guard let current, context?.isStation != true else { return nil }
         return LastSession(
             tracks: [current] + upNext.prefix(LastSession.keptAhead),
-            time: engine.playbackTime,
+            time: engine.lastKnownPlaybackTime,
             contextKind: context?.kind.storedName,
             contextTitle: context?.title,
             savedAt: .now

@@ -14,6 +14,9 @@ protocol PlayerEngine: AnyObject {
     /// After the current song, in play order. Empty on a station, which has no queue.
     var upNext: [PlayerTrack] { get }
     var playbackTime: TimeInterval { get }
+    /// The playback time without asking the player, for saving where the music is as the app
+    /// leaves: Apple Music's player can hold the main thread when asked then.
+    var lastKnownPlaybackTime: TimeInterval { get }
     var isShuffled: Bool { get }
     var repeatMode: PlayerRepeat { get }
 
@@ -52,6 +55,7 @@ protocol PlayerEngine: AnyObject {
 
 extension PlayerEngine {
     var playsByName: Bool { false }
+    var lastKnownPlaybackTime: TimeInterval { playbackTime }
     func activate() {}
     func deactivate() {}
     func setLevel(_ level: Float) {}

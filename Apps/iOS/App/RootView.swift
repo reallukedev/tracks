@@ -16,6 +16,10 @@ struct RootView: View {
     @Namespace private var nowPlayingTransition
     @Environment(\.scenePhase) private var scenePhase
     @State private var wasInBackground = false
+    /// The tab open when iOS last saved the scene. iOS keeps it when it ends Tracks in the
+    /// background and drops it when someone swipes Tracks away, so a quiet relaunch comes
+    /// back where you were and a fresh start opens where Settings says.
+    @SceneStorage("selectedTab") private var savedTab = ""
 
     var body: some View {
         if let store = model.store, let capture = model.capture, let playback = model.playback {
@@ -71,6 +75,8 @@ struct RootView: View {
             // Someone else's SharePlay, joined from Messages.
             .sharePlayGuestPage(closing: $showsNowPlaying)
             .opensDeepLinks(in: model)
+            .onAppear(perform: restoreTab)
+            .onChange(of: model.selectedTab) { _, tab in savedTab = tab.rawValue }
             // A song from a widget. Summary is the tab whose stack can be pushed from here.
             // Initial too, for a link that launched the app.
             .onChange(of: model.pendingRoute, initial: true) { _, route in
@@ -164,6 +170,15 @@ struct RootView: View {
                 Text("Close Tracks and open it again. If that doesn’t help, restart your iPhone.")
             }
         }
+    }
+
+    /// Back on the saved tab, unless the launch itself asked for a place.
+    private func restoreTab() {
+        guard let tab = AppTab(rawValue: savedTab), model.pendingRoute == nil,
+              LaunchScene.tab == nil, LaunchScene.route == nil,
+              !LaunchScene.opensSearch, LaunchScene.searchText == nil
+        else { return }
+        model.selectedTab = tab
     }
 
     /// The tab Tracks opens to is far left: Play first when it opens to Play, last otherwise.

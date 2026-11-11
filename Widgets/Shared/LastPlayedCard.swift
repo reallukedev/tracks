@@ -21,6 +21,7 @@ struct LastPlayedCard: View {
         VStack(alignment: .leading, spacing: 8) {
             if showsArtwork {
                 WidgetArtwork(data: capture.artwork, size: 56)
+                    .shadow(color: .black.opacity(0.18), radius: 6, y: 2)
             }
             Spacer(minLength: 0)
             VStack(alignment: .leading, spacing: 2) {

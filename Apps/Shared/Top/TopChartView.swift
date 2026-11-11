@@ -11,6 +11,7 @@ struct TopChartView: View {
     /// When set, a Songs / Artists / Albums switcher sits at the top of the list.
     var kindSelection: Binding<ChartKind>?
     @Environment(AppModel.self) private var model
+    @SeenRevision private var revision
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.openPlayRoute) private var openPlayRoute
     @AppStorage(ChartSpan.storageKey) private var span: ChartSpan = .week
@@ -37,7 +38,7 @@ struct TopChartView: View {
             .navigationTitle(kindSelection == nil ? kind.navigationTitle : "Charts")
             .sourceScopeSubtitle(sources.scope)
             .toolbar { toolbar }
-            .task(id: "\(kind.rawValue)|\(span.rawValue)|\(period.interval?.start.timeIntervalSinceReferenceDate ?? 0)|\(sources.scope.rawValue)|\(model.library.revision)") {
+            .task(id: "\(kind.rawValue)|\(span.rawValue)|\(period.interval?.start.timeIntervalSinceReferenceDate ?? 0)|\(sources.scope.rawValue)|\(revision)") {
                 // Until the first read there's nothing to chart, and an empty chart would say
                 // "No Charts Yet" to someone with years of listening.
                 guard model.library.isLoaded else { return }

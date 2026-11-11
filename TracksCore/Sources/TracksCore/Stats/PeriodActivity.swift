@@ -177,7 +177,7 @@ extension ListeningHistory {
     func comparison(for period: ChartPeriod, now: Date, calendar: Calendar) -> DateInterval? {
         guard let previous = period.previous(calendar: calendar)?.interval else { return nil }
         guard let current = period.interval, period.isCurrent(now: now) else { return previous }
-        let elapsed = now.timeIntervalSince(current.start)
-        return DateInterval(start: previous.start, end: min(previous.end, previous.start.addingTimeInterval(elapsed)))
+        let end = StatsCalculator.samePoint(as: now, in: current, within: previous, calendar: calendar)
+        return DateInterval(start: previous.start, end: end)
     }
 }

@@ -77,7 +77,11 @@ struct CaptureTimelineProvider: TimelineProvider {
 
         return CaptureEntry(
             date: now,
-            lastPlayed: reading.lastPlayed.map(widgetCapture),
+            // Only Last Played draws over its cover's colour.
+            lastPlayed: reading.lastPlayed.map { snapshot in
+                let capture = widgetCapture(snapshot)
+                return content == .lastPlayed ? capture.withCoverColor() : capture
+            },
             today: reading.today.map(widgetCapture),
             upNext: reading.upNext.map { queue in
                 UpNextQueue(songs: queue.songs.map(widgetCapture), totalCount: queue.totalCount)
@@ -99,7 +103,11 @@ struct CaptureTimelineProvider: TimelineProvider {
     /// Every cover the entry needs, fetched in parallel and once per URL. Seven covers at up
     /// to five seconds each, one after another, could outlast the widget's render budget.
     private static func artwork(for songs: [CaptureSnapshot]) async -> [String: Data] {
-        let urls = Set(songs.compactMap(\.artworkURL))
+        await covers(at: Set(songs.compactMap(\.artworkURL)))
+    }
+
+    /// Each cover once, all at once. Shared with Top Songs.
+    static func covers(at urls: Set<String>) async -> [String: Data] {
         return await withTaskGroup(of: (String, Data?).self) { group in
             for url in urls {
                 group.addTask { (url, await artwork(at: url)) }

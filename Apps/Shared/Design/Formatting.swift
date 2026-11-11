@@ -91,10 +91,12 @@ enum Format {
 
     /// A time for today, "Yesterday", a weekday within the week, otherwise a short date.
     static func relativeTime(_ date: Date, calendar: Calendar = .current, now: Date = .now) -> String {
-        if calendar.isDateInToday(date) { return date.formatted(date: .omitted, time: .shortened) }
-        if calendar.isDateInYesterday(date) { return String(localized: "Yesterday") }
-        if let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: date), to: calendar.startOfDay(for: now)).day,
-           days < 7 {
+        // Measured from `now`, not the clock, so a caller that passes its own day gets labels
+        // for that day.
+        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: date), to: calendar.startOfDay(for: now)).day
+        if days == 0 { return date.formatted(date: .omitted, time: .shortened) }
+        if days == 1 { return String(localized: "Yesterday") }
+        if let days, days < 7 {
             return date.formatted(.dateTime.weekday(.abbreviated))
         }
         return shortDate(date, calendar: calendar, now: now)

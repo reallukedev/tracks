@@ -118,7 +118,9 @@ struct ForYouCrate: View {
         )
         .task(id: WaitingKey(songs: music.index.tracks.count, history: feed.builtRevision)) {
             guard model.musicSource == .yourMusic else { return }
-            waiting = waitingToBeHeard()
+            let next = await waitingToBeHeard()
+            guard !Task.isCancelled else { return }
+            if next != waiting { waiting = next }
         }
     }
 
@@ -223,13 +225,19 @@ struct ForYouCrate: View {
         )
     }
 
-    private func waitingToBeHeard() -> [LocalTrack] {
+    /// The order is worked out off the main actor: it folds every song's artist, and it runs
+    /// again after every song played, which in a big library held the main actor up each time.
+    private func waitingToBeHeard() async -> [LocalTrack] {
         let playable = music.index.tracks.filter { music.isPlayable($0) }
-        return FreshShuffle.order(
-            playable,
-            artist: \.artistKey,
-            recentlyHeard: { feed.facts[$0.identity] != nil },
-            seed: FreshShuffle.dailySeed(for: .now, salt: "crate.waiting")
-        )
+        let facts = feed.facts
+        let seed = FreshShuffle.dailySeed(for: .now, salt: "crate.waiting")
+        return await OffMainActor.run {
+            FreshShuffle.order(
+                playable,
+                artist: { $0.artistKey },
+                recentlyHeard: { facts[$0.identity] != nil },
+                seed: seed
+            )
+        }
     }
 }

@@ -170,10 +170,11 @@ struct RunningTotalCard: View {
         }
     }
 
-    /// In minutes, with a little headroom over the higher line.
+    /// In minutes, with a little headroom over the higher line. Rounded, so it doesn't move
+    /// with every song: see ``ChartCeiling``.
     private var ceiling: Double {
         let peak = summary.pace.map { max($0.current ?? 0, $0.previous ?? 0) }.max() ?? 0
-        return peak / 60 * 1.08
+        return ChartCeiling.rounded(peak / 60 * 1.08)
     }
 
     /// The whole range, so the line stops at today with the rest of the range still ahead.

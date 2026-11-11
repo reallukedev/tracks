@@ -152,8 +152,8 @@ final class DriveDetector {
             UIScene.didDisconnectNotification,
         ]
         for name in changes {
-            observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.checkCarPlay() }
+            observers.append(center.addObserver(forName: name, object: nil, queue: nil) { [weak self] _ in
+                Task { @MainActor in self?.checkCarPlay() }
             })
         }
         // Motion & Fitness may have been answered, or changed in Settings, while away.

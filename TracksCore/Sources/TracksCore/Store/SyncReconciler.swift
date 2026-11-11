@@ -54,9 +54,11 @@ public final class SyncReconciler {
         observer = NotificationCenter.default.addObserver(
             forName: .NSPersistentStoreRemoteChange,
             object: nil,
-            queue: .main
+            // Posted from Core Data's queue, which a `.main` observer would make wait for
+            // the main thread.
+            queue: nil
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.remoteChangeArrived() }
+            Task { @MainActor in self?.remoteChangeArrived() }
         }
     }
 

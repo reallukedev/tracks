@@ -14,12 +14,17 @@ struct Scrubber: View {
     let onSeek: (TimeInterval) -> Void
 
     @State private var dragFraction: Double?
+    /// Where the drag started, as a fraction: the bar moves by as much as the finger does, as
+    /// Music's does, rather than jumping to wherever it landed.
+    @State private var dragStart: Double?
+    @State private var pendingSeek: PendingSeek?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.isOnScreen) private var isOnScreen
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: interval, paused: !isPlaying || dragFraction != nil || !isOnScreen)) { _ in
-            let fraction = dragFraction ?? Self.fraction(time(), of: duration)
+        TimelineView(.animation(minimumInterval: interval, paused: !isPlaying || dragFraction != nil || !isOnScreen)) { context in
+            let shown = PendingSeek.time(time(), pending: pendingSeek, isPlaying: isPlaying, at: context.date)
+            let fraction = dragFraction ?? Self.fraction(shown, of: duration)
             let elapsed = fraction * duration
             VStack(spacing: 8) {
                 GeometryReader { proxy in
@@ -32,18 +37,33 @@ struct Scrubber: View {
                     }
                     .frame(height: dragFraction == nil ? 6 : 12)
                     .clipShape(.capsule)
+                    // Only taking hold and letting go animate: while held, the bar is wherever
+                    // the finger is, with nothing easing after it.
+                    .animation(reduceMotion ? nil : .snappy(duration: 0.18), value: dragFraction == nil)
                     .frame(maxHeight: .infinity)
                     .contentShape(.rect)
                     .gesture(
                         DragGesture(minimumDistance: 0)
                             .onChanged { value in
-                                withAnimation(reduceMotion ? nil : .snappy(duration: 0.14)) {
-                                    dragFraction = min(1, max(0, value.location.x / max(1, proxy.size.width)))
-                                }
+                                let width = max(1, proxy.size.width)
+                                #if os(iOS)
+                                let start = dragStart ?? fraction
+                                dragStart = start
+                                dragFraction = min(1, max(0, start + value.translation.width / width))
+                                #else
+                                // A click goes straight to its place, as Music's bar does.
+                                dragFraction = min(1, max(0, value.location.x / width))
+                                #endif
                             }
-                            .onEnded { _ in
-                                if let dragFraction { onSeek(dragFraction * duration) }
-                                withAnimation(reduceMotion ? nil : .snappy(duration: 0.2)) { dragFraction = nil }
+                            .onEnded { value in
+                                // A touch that didn't move leaves the song where it is.
+                                if let dragFraction, Self.movesOnRelease || abs(value.translation.width) >= 2 {
+                                    let time = dragFraction * duration
+                                    pendingSeek = PendingSeek(time: time, at: .now)
+                                    onSeek(time)
+                                }
+                                dragStart = nil
+                                dragFraction = nil
                             }
                     )
                 }
@@ -66,9 +86,12 @@ struct Scrubber: View {
             .accessibilityValue(Text("\(Self.format(elapsed)) of \(Self.format(duration))"))
             .accessibilityAdjustableAction { direction in
                 let step: TimeInterval = direction == .increment ? 15 : -15
-                onSeek(min(duration, max(0, elapsed + step)))
+                let time = min(duration, max(0, elapsed + step))
+                pendingSeek = PendingSeek(time: time, at: .now)
+                onSeek(time)
             }
         }
+        .expiresPendingSeek($pendingSeek)
         // Its own element after the position, since it opens its details, and outside the
         // timeline, which redraws as the song plays. Centred on the times' line: a hidden
         // line of the times' type is its anchor at every text size.
@@ -80,6 +103,16 @@ struct Scrubber: View {
                     .overlay { AudioQualityBadge(track: track).fixedSize() }
             }
         }
+    }
+
+    /// Whether letting go seeks even if the pointer never moved: a click on the Mac, but not
+    /// a thumb resting on the bar on the iPhone.
+    private static var movesOnRelease: Bool {
+        #if os(iOS)
+        false
+        #else
+        true
+        #endif
     }
 
     /// Four times a second on the iPhone; once on the Mac, where each tick lays the whole
@@ -107,6 +140,39 @@ struct Scrubber: View {
         return Duration.seconds(whole).formatted(
             .time(pattern: whole >= 3600 ? .hourMinuteSecond : .minuteSecond)
         )
+    }
+}
+
+/// A position just asked for, shown until the player's own time reaches it, so the bar doesn't
+/// spring back to where the song was for a moment before jumping on: Apple Music's player can
+/// take a beat to report a seek, longer while a scene changes (see ``PlayerQuiet``).
+struct PendingSeek: Equatable {
+    let time: TimeInterval
+    let at: Date
+
+    /// How long it's shown at most, if the player never gets there.
+    static let lifetime: TimeInterval = 1.5
+
+    /// The time to draw: the player's, or the one asked for, carried on while playing, until
+    /// the player's is within a second of it.
+    static func time(_ live: TimeInterval, pending: PendingSeek?, isPlaying: Bool, at date: Date = .now) -> TimeInterval {
+        guard let pending else { return live }
+        let since = date.timeIntervalSince(pending.at)
+        guard since >= 0, since < lifetime else { return live }
+        let expected = pending.time + (isPlaying ? since : 0)
+        return abs(live - expected) > 1 ? expected : live
+    }
+}
+
+extension View {
+    /// Forgets a pending seek once it's had its time, redrawing then even while paused.
+    func expiresPendingSeek(_ pending: Binding<PendingSeek?>) -> some View {
+        task(id: pending.wrappedValue) {
+            guard pending.wrappedValue != nil else { return }
+            try? await Task.sleep(for: .seconds(PendingSeek.lifetime))
+            guard !Task.isCancelled else { return }
+            pending.wrappedValue = nil
+        }
     }
 }
 

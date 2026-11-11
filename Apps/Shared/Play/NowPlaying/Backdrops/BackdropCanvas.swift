@@ -97,8 +97,11 @@ final class BackdropCanvasView: NSView {
     private var link: CADisplayLink?
     private var isRedrawPending = false
     private let gpu = BackdropGPU.shared
-    /// Three pictures to draw into in turn: one on screen, one being drawn, one to spare.
-    private var surfaces: [BackdropSurface] = []
+    /// Up to three pictures to draw into in turn: one on screen, one being drawn, one to
+    /// spare. Made as they're needed, and all but the one on screen let go once the picture
+    /// is still: each is the whole window's size, and three on a big display were well over a
+    /// hundred megabytes kept while nothing moved.
+    private var surfaces: [BackdropSurface?] = []
     private var pixels = CGSize.zero
     private var shown: Int?
     /// Drawn, and waiting for the next frame to be shown.
@@ -145,9 +148,11 @@ final class BackdropCanvasView: NSView {
         guard !isMoving, !isRedrawPending else { return }
         isRedrawPending = true
         RunLoop.main.perform { [weak self] in
-            guard let self else { return }
-            isRedrawPending = false
-            if !isMoving { render(at: Date.now.timeIntervalSinceReferenceDate) }
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.isRedrawPending = false
+                if !self.isMoving { self.render(at: Date.now.timeIntervalSinceReferenceDate) }
+            }
         }
     }
 
@@ -244,16 +249,25 @@ final class BackdropCanvasView: NSView {
     /// A picture that isn't on screen or being drawn, or nil if none is free: then this frame
     /// is skipped rather than waited for.
     private func freeSurface() -> Int? {
-        if surfaces.isEmpty {
-            surfaces = (0..<3).compactMap { _ in BackdropSurface(pixels: pixels, device: gpu.device) }
+        if surfaces.isEmpty { surfaces = [nil, nil, nil] }
+        let free = surfaces.indices.filter { $0 != shown && $0 != ready && drawing[$0] == nil }
+        if let made = free.first(where: { surfaces[$0] != nil }) { return made }
+        guard let index = free.first, let surface = BackdropSurface(pixels: pixels, device: gpu.device) else { return nil }
+        surfaces[index] = surface
+        return index
+    }
+
+    /// Lets go of every picture but the one on screen and any still being drawn.
+    private func releaseSpareSurfaces() {
+        for index in surfaces.indices where index != shown && index != ready && drawing[index] == nil {
+            surfaces[index] = nil
         }
-        return surfaces.indices.first { $0 != shown && $0 != ready && drawing[$0] == nil }
     }
 
     private func render(at time: Double) {
         let size = bounds.size
         guard isShown, window != nil, size.width >= 1, size.height >= 1, let draw,
-              let index = freeSurface() else { return }
+              let index = freeSurface(), let surface = surfaces[index] else { return }
         guard let drawing = draw(BackdropFrame(time: time, size: size)) else {
             // Nothing to draw, as for the visualizer turned off: nothing shown.
             layer?.contents = nil
@@ -265,7 +279,6 @@ final class BackdropCanvasView: NSView {
         }
         guard let pipeline = gpu.pipeline(drawing),
               let commands = gpu.frameCommands() else { return }
-        let surface = surfaces[index]
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = surface.texture
         pass.colorAttachments[0].loadAction = .clear
@@ -313,7 +326,10 @@ final class BackdropCanvasView: NSView {
     private func finished(_ surface: BackdropSurface, at index: Int) {
         // Drawn for an old size: let it go.
         guard index < surfaces.count, surfaces[index] === surface, drawing[index] != nil else { return }
-        if !isMoving { showReady() }
+        if !isMoving {
+            showReady()
+            releaseSpareSurfaces()
+        }
     }
 
     private func showReady() {
@@ -325,10 +341,10 @@ final class BackdropCanvasView: NSView {
                 readyFrame = entry.frame
             }
         }
-        guard let ready else { return }
+        guard let ready, let surface = surfaces[ready] else { return }
         self.ready = nil
         shown = ready
-        layer?.contents = surfaces[ready].surface
+        layer?.contents = surface.surface
     }
 }
 

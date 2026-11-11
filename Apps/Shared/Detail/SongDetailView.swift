@@ -4,6 +4,7 @@ import TracksCore
 struct SongDetailView: View {
     let songID: String
     @Environment(AppModel.self) private var model
+    @SeenRevision private var revision
     @Environment(PlaybackController.self) private var playback
     @Environment(\.playSongs) private var playSongs
     @Environment(\.openURL) private var openURL
@@ -25,7 +26,7 @@ struct SongDetailView: View {
             } else if loadedID == songID {
                 ContentUnavailableView("No Plays", systemImage: "music.note")
             } else {
-                ProgressView()
+                LateProgressView()
                     .frame(maxWidth: .infinity)
                     .padding(.top, 120)
             }
@@ -35,7 +36,7 @@ struct SongDetailView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
-        .task(id: "\(songID)|\(model.library.revision)") {
+        .task(id: "\(songID)|\(revision)") {
             let (id, history, isLoaded) = (songID, model.library.history, model.library.isLoaded)
             let next = await OffMainActor.run { StatsCalculator.songProfile(id: id, history: history) }
             guard !Task.isCancelled else { return }

@@ -12,6 +12,8 @@ struct MenuBarLabel: View {
     let nowPlaying: NowPlaying?
     /// Fallback for the moment before the first poll answers, and while nothing is playing.
     let lastCapture: CaptureSnapshot?
+    /// The station playing, for a custom format's `{station}`.
+    let station: String?
     let isCapturing: Bool
     /// Nil until the first poll. See ``CaptureService/isSomethingPlaying``.
     let isPlaying: Bool?
@@ -52,8 +54,6 @@ struct MenuBarLabel: View {
 
     /// Menu bar content is 18pt tall. Larger artwork gets clipped.
     private static let artworkSize: CGFloat = 18
-
-
 
     /// Nil when motion is off, which is what `.animation(nil, value:)` wants.
     private var motion: Animation? {
@@ -99,7 +99,8 @@ struct MenuBarLabel: View {
             format,
             title: song.title,
             artist: song.artistName,
-            album: song.albumTitle
+            album: song.albumTitle,
+            station: station
         )
         }
     }

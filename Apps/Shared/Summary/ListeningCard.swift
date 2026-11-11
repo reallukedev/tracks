@@ -80,6 +80,15 @@ struct ListeningCard: View {
             }
             .font(.subheadline)
             .foregroundStyle(.secondary)
+        } else if summary.range == .allTime, let first = summary.timeline.first(where: { $0.seconds > 0 }) {
+            // The songs are counted just below, so this says how far back it goes instead.
+            // A yearly bar starts in January, whenever in the year the first song was.
+            let since = summary.timelineUnit == .year
+                ? first.start.formatted(.dateTime.year())
+                : first.start.formatted(.dateTime.month(.wide).year())
+            Text("Since \(since)")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
         } else {
             Text("^[\(summary.captureCount) song](inflect: true) from ^[\(summary.uniqueArtistCount) artist](inflect: true)")
                 .font(.subheadline)

@@ -23,14 +23,6 @@ struct SessionsCard: View {
                     )
                     .foregroundStyle(Color.accentColor.gradient)
                     .cornerRadius(4)
-                    .annotation(position: .top, spacing: 3) {
-                        if entry.count > 0 {
-                            Text(entry.count.formatted())
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .monospacedDigit()
-                        }
-                    }
                     .accessibilityLabel(entry.length.spokenLabel)
                     .accessibilityValue(Text("^[\(entry.count) session](inflect: true)"))
                 }
@@ -42,6 +34,32 @@ struct SessionsCard: View {
                             }
                         }
                     }
+                }
+                // The counts above the bars, laid over the chart rather than as its marks'
+                // annotations: Charts hosts each annotation in a view graph of its own, and with
+                // the counts changing after every song, All Time kept the old ones, a couple of
+                // megabytes a minute.
+                .chartOverlay { proxy in
+                    GeometryReader { geometry in
+                        if let plot = proxy.plotFrame {
+                            let frame = geometry[plot]
+                            ForEach(sessions.lengths) { entry in
+                                if entry.count > 0,
+                                   let x = proxy.position(forX: String(entry.length.rawValue)),
+                                   let y = proxy.position(forY: entry.count) {
+                                    Text(entry.count.formatted())
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                        .monospacedDigit()
+                                        .fixedSize()
+                                        // Its bottom 3 points above the bar's top.
+                                        .frame(width: 0, height: 0, alignment: .bottom)
+                                        .position(x: frame.minX + x, y: frame.minY + y - 3)
+                                }
+                            }
+                        }
+                    }
+                    .accessibilityHidden(true)
                 }
                 .chartYAxis(.hidden)
                 // Headroom for the counts above the tallest bar.

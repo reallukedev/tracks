@@ -85,7 +85,10 @@ struct Crate: View {
 
     var body: some View {
         let items = items
-        let current = items.first { $0.id == front } ?? (front.map(CrateEnd.isEnd) == true ? nil : cards.first)
+        // Before the first layout has chosen, the lead: the first card's details would show
+        // for a frame and then change under the crate as it appears.
+        let chosen = front ?? leadID ?? cards.first?.id
+        let current = items.first { $0.id == chosen } ?? (chosen.map(CrateEnd.isEnd) == true ? nil : cards.first)
         VStack(spacing: Self.detailsGap) {
             #if os(macOS)
             macFlow(items)
@@ -106,13 +109,19 @@ struct Crate: View {
                 insertion: .opacity.animation(.easeOut(duration: 0.16).delay(0.03)),
                 removal: .opacity.animation(.linear(duration: 0.05))
             ))
-            if cards.count > 1 || !items.isEmpty && items.count > cards.count {
+            if cards.count > 1 {
                 // The mixes, one dot each: from among the songs none is filled, and a dot
-                // brings you back.
+                // brings you back. Not for one record alone, Tracks Radio before any history.
                 PageDots(ids: cards.map(\.id), current: front) { id in move(to: id) }
             }
         }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: front)
+        // Until the records are in place, the placeholder the page showed while they were
+        // made stays over all of it, so the words never come before their records.
+        .opacity(isPlaced ? 1 : 0)
+        .overlay(alignment: .top) {
+            if !isPlaced { CratePlaceholder() }
+        }
         .background(alignment: .top) {
             CrateGlow(color: glow)
         }
@@ -342,7 +351,6 @@ struct Crate: View {
         .scrollTargetBehavior(CrateSnap(pitch: side + spacing, start: flickStart, inset: snapRange.inset, last: snapRange.last))
         .scrollIndicators(.hidden)
         .frame(height: side + Self.shadowRoom * 2)
-        .opacity(isPlaced ? 1 : 0)
         // The records farthest out fade into the page rather than stopping at its edge.
         .mask { Self.edgeFade }
         .padding(.vertical, -Self.shadowRoom)
@@ -394,7 +402,6 @@ struct Crate: View {
             .modifier(CrateFanModifier(distance: distance, side: side, depth: depth, reduceMotion: stillness))
         }
         .frame(height: side + Self.shadowRoom * 2)
-        .opacity(isPlaced ? 1 : 0)
         .mask { Self.edgeFade }
         .padding(.vertical, -Self.shadowRoom)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
@@ -936,28 +943,48 @@ private struct CrateDetails: View {
     let record: CrateRecord
     @Binding var showsTuner: Bool
     @Environment(PlayerModel.self) private var player
+    /// From a tap on Play or Shuffle until this record is what plays.
+    @State private var isStarting = false
 
     var body: some View {
+        let isPlayingThis = record.isPlayingThis
         VStack(spacing: 6) {
             CrateCaption(eyebrow: record.eyebrow, title: record.title, reason: record.reason)
             HStack(spacing: 10) {
                 Button {
-                    if record.isPlayingThis { player.togglePlayPause() } else { record.play() }
+                    if isPlayingThis {
+                        player.togglePlayPause()
+                    } else {
+                        isStarting = true
+                        record.play()
+                    }
                 } label: {
-                    Label(primaryTitle, systemImage: record.isPlayingThis && player.isPlaying ? "pause.fill" : "play.fill")
+                    Label {
+                        Text(primaryTitle)
+                    } icon: {
+                        PlayStartingIcon(
+                            systemImage: isPlayingThis && player.isPlaying ? "pause.fill" : "play.fill",
+                            isStarting: isStarting,
+                            spinnerTint: .white
+                        )
                         .contentTransition(.symbolEffect(.replace))
-                        .frame(minWidth: 96)
+                    }
+                    .frame(minWidth: 96)
                 }
                 .buttonStyle(.glassProminent)
                 .disabled(!record.canPlay)
 
                 if let shuffle = record.shuffle {
-                    Button("Shuffle", systemImage: "shuffle", action: shuffle)
-                        .labelStyle(.iconOnly)
-                        .buttonStyle(.glass)
-                        .buttonBorderShape(.circle)
-                        .disabled(!record.canPlay)
-                        .help("Shuffle")
+                    Button("Shuffle", systemImage: "shuffle") {
+                        // Shuffled again while it plays, it's already what plays.
+                        if !isPlayingThis { isStarting = true }
+                        shuffle()
+                    }
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.glass)
+                    .buttonBorderShape(.circle)
+                    .disabled(!record.canPlay)
+                    .help("Shuffle")
                 }
                 if let song = record.favoriteSong {
                     CrateFavoriteButton(song: song)
@@ -988,6 +1015,7 @@ private struct CrateDetails: View {
         }
         .padding(.horizontal, PlayMetrics.margin)
         .frame(maxWidth: .infinity)
+        .endsPlayStart($isStarting, hasStarted: isPlayingThis)
     }
 
     private var primaryTitle: LocalizedStringKey {

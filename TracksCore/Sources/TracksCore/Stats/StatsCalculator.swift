@@ -210,8 +210,32 @@ public enum StatsCalculator {
               let previous = range.previousInterval(before: current, calendar: calendar),
               let earliest = history.first?.capturedAt, earliest < current.start
         else { return nil }
-        let elapsed = min(now, current.end).timeIntervalSince(current.start)
-        return DateInterval(start: previous.start, end: min(previous.end, previous.start.addingTimeInterval(elapsed)))
+        // An ended period is summed up as of its last second; it compares with all of the
+        // period before, however long each was.
+        guard now.addingTimeInterval(1) < current.end else { return previous }
+        return DateInterval(start: previous.start, end: samePoint(as: now, in: current, within: previous, calendar: calendar))
+    }
+
+    /// As far into `previous` as `now` is into `current`: the same day of the period at the
+    /// same time on the clock, or the end of `previous` when it's shorter.
+    ///
+    /// Counted in calendar days, not seconds: otherwise a leap day put "this time last year" a
+    /// day out, and a day the clocks changed put "this time last week" an hour out.
+    static func samePoint(as now: Date, in current: DateInterval, within previous: DateInterval, calendar: Calendar) -> Date {
+        let elapsed = now.timeIntervalSince(current.start)
+        let fallback = min(previous.end, previous.start.addingTimeInterval(elapsed))
+        // Between noons, which every day has, as in `daysBetween`.
+        guard let from = calendar.date(bySettingHour: 12, minute: 0, second: 0, of: current.start),
+              let to = calendar.date(bySettingHour: 12, minute: 0, second: 0, of: now),
+              let base = calendar.date(bySettingHour: 12, minute: 0, second: 0, of: previous.start),
+              let day = calendar.date(byAdding: calendar.dateComponents([.month, .day], from: from, to: to), to: base)
+        else { return fallback }
+        let clock = calendar.dateComponents([.hour, .minute, .second, .nanosecond], from: now)
+        guard let point = calendar.date(
+            bySettingHour: clock.hour ?? 0, minute: clock.minute ?? 0, second: clock.second ?? 0, of: day
+        ) else { return fallback }
+        let precise = point.addingTimeInterval(Double(clock.nanosecond ?? 0) / 1_000_000_000)
+        return min(previous.end, max(previous.start, precise))
     }
 
     /// Days of the range so far, including today.

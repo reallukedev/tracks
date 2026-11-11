@@ -199,7 +199,8 @@ private struct MacHistoryTable: View {
             .inspectorColumnWidth(min: 280, ideal: 320, max: 420)
         }
         .navigationTitle("History")
-        .navigationSubtitle(String(AttributedString(localized: "^[\(total ?? rows.count) play](inflect: true)").characters))
+        // Blank until counted: the loaded page's size would flash up first as the total.
+        .navigationSubtitle(total.map { String(AttributedString(localized: "^[\($0) play](inflect: true)").characters) } ?? "")
         .toolbar {
             ToolbarItem {
                 Menu {

@@ -75,9 +75,13 @@ public struct RadioTuning: Codable, Sendable, Equatable {
     public static func genreChoices(in history: ListeningHistory, limit: Int = 12) -> [String] {
         var plays: [String: Int] = [:]
         var spelling: [String: String] = [:]
+        // A history has only so many spellings of genres, and folding one for every play was
+        // most of what this cost.
+        var folded: [String: String] = [:]
         for capture in history.captures {
             guard let genre = history.songMetadata[capture.songIdentity]?.genre, !genre.isEmpty, genre != "Music" else { continue }
-            let key = StatsCalculator.folded(genre)
+            let key = folded[genre] ?? StatsCalculator.folded(genre)
+            folded[genre] = key
             plays[key, default: 0] += 1
             spelling[key] = genre
         }

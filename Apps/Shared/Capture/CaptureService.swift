@@ -533,6 +533,11 @@ public final class CaptureService {
     }
 
     private func currentObservation() async -> NowPlayingObservation? {
+        #if os(iOS)
+        // Each read below can reconnect to Apple's player service on the main thread. The poll
+        // keeps running in the background, so it waits out scene changes (see PlayerQuiet).
+        await PlayerQuiet.settled()
+        #endif
         // Whichever player is making sound. Tracks’ own wins when it's playing: on iPhone
         // starting it interrupted the Music app, and on the Mac capture only listens to
         // Music.app while Tracks’ is quiet.

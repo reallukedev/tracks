@@ -67,8 +67,66 @@ The rules are in `RadioHeuristic`, with tests.
   and after.
 - Addressing Music when it isn't running launches it, so check first.
 
+## HomePod and AirPlay
+
+What a third-party app can do with HomePods, as of iOS 27 and macOS 27. Read from the SDK and
+Music's scripting dictionary; the device-only items are marked untested.
+
+- **Mac, Music's speakers.** Music's `AirPlay device` elements and `current AirPlay devices`
+  are in the `com.apple.Music.playback` access group (read and write), which the
+  scripting-targets entitlement already holds. Each device has `name`, `kind` (`computer`,
+  `HomePod`, `Apple TV`, `AirPlay device`, `Bluetooth device`, `TV`, `AirPort Express`),
+  `available`, `supports audio`, `selected` (settable, which groups rooms) and
+  `sound volume` (0 to 100, settable). Read them as lists, `name of every AirPlay device`,
+  one Apple event per property, not per device. Setting `current AirPlay devices` to a list
+  plays to those alone. This only moves what Music.app plays. Untested on a sandboxed build
+  against a real HomePod.
+- **Mac, Tracks' own player.** `ApplicationMusicPlayer` plays inside Tracks, and
+  `AVRoutePickerView` without a `player` was reported to leave it on the Mac's speakers on
+  macOS 14 (FB13521393, developer forums thread 744128). There is no public API to pick an
+  AirPlay output for it. The Mac's sound output in Control Center does move it.
+- **iPhone.** No public API chooses a route; only the system's `AVRoutePickerView` can.
+  `AVAudioSession.currentRoute.outputs` names the AirPlay receivers (`portType == .airPlay`,
+  `portName` is the room) and `routeChangeNotification` says when it changes, so nothing has
+  to poll. A HomePod's kind isn't exposed, only its name. Tracks' session is only long-form
+  (`.longFormAudio`) while your own music plays; whether the Apple Music player's route
+  shows in the app's session otherwise is untested on a device.
+- **`AVRouteDetector`** says whether there's anywhere besides the phone to play. Apple says
+  detection "significantly increases power consumption", so Tracks enables it only while Your
+  Devices is open.
+- **Now Playing, Control Center, a HomePod's own controls and Handoff** to a HomePod come
+  from `MPNowPlayingInfoCenter` and `MPRemoteCommandCenter`. `ApplicationMusicPlayer` fills
+  both itself; the local player sets them in `LocalPlayerEngine.activate()`. iOS 26.4 fixed
+  the route picker showing "Not Playing" for MusicKit players (forum thread 815154).
+- **Siri on a HomePod** ("play X on Tracks") needs SiriKit Media Intents with a cloud
+  extension and Media Setup, which is a program Apple admits services to. Not available to
+  Tracks.
+
 ## SwiftUI on the Mac
 
 - A `MenuBarExtra` with the `.window` style sizes itself to its content, and a `ScrollView`
   has no height of its own, so a scrolling list inside one collapses to nothing. Give the
   window a fixed width and the scrolling part a definite height.
+
+## Notification observers and the main thread
+
+Measured from TestFlight crash reports on iOS 27.2, November 2026.
+
+- `NotificationCenter.addObserver(forName:object:queue:using:)` with `queue: .main` makes the
+  posting thread wait until the main thread has run the block. A notification posted from a
+  framework's private queue therefore blocks that queue on the main thread.
+- MusicKit's first call to the system player (`SystemMusicPlayer.shared`, then
+  `nowPlayingAudioFormat`) waits on the main thread for iTunesCloud's account queue. That
+  queue writes iTunesCloud's own `UserDefaults` while it starts and posts
+  `UserDefaults.didChangeNotification`. An observer of that name with `object: nil` and
+  `queue: .main` closes the loop: each waits for the other, and the scene-update watchdog
+  kills the app after 10 seconds (0x8BADF00D). CarPlay relaunched Tracks into the same
+  deadlock four times in a minute.
+- So: observe with `queue: nil` and hop with `Task { @MainActor in ... }` for anything a
+  framework can post off the main thread (Core Data and CloudKit changes, iCloud key-value
+  changes, `UserDefaults`, audio session, media library, power state). `queue: .main` is only
+  for notifications UIKit or AppKit post on the main thread themselves (scene and window
+  changes). Always pass the `object` you mean; `UserDefaults.didChangeNotification` with
+  `object: nil` hears Apple's frameworks' defaults too.
+- The Xcode debugger turns the watchdog off, so this never shows when running from Xcode.
+  Test CarPlay connects and lock/unlock with the app launched from the Home Screen.

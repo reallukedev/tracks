@@ -22,6 +22,9 @@ public struct WidgetReading: Sendable {
     /// app only looks this far down when deciding whether to reload.
     public static let mostTodayRows = 6
     public static let mostUpNextRows = 3
+    /// The Top Songs widget's most covers, and the days it counts back over.
+    public static let mostTopSongs = 4
+    public static let topSongDays = 7
 
     public var allSongs: [CaptureSnapshot] {
         [lastPlayed].compactMap(\.self) + today + (upNext?.songs ?? [])
@@ -70,7 +73,38 @@ public extension TracksStore {
             now: now,
             calendar: calendar
         )
-        return WidgetFaces(reading, captureCount: try context.fetchCount(FetchDescriptor<Capture>()))
+        return WidgetFaces(
+            reading,
+            topSongs: try widgetTopSongs(limit: WidgetReading.mostTopSongs, now: now, calendar: calendar),
+            captureCount: try context.fetchCount(FetchDescriptor<Capture>())
+        )
+    }
+
+    /// The most played songs of the last `days` days, today included, most played first.
+    ///
+    /// Reads only those days, and only the columns a tally needs, so it fits in a widget
+    /// extension's memory however long the history is.
+    func widgetTopSongs(
+        limit: Int,
+        days: Int = WidgetReading.topSongDays,
+        now: Date = .now,
+        calendar: Calendar = .current
+    ) throws -> [SongTally] {
+        guard limit > 0, days > 0 else { return [] }
+        let today = calendar.startOfDay(for: now)
+        let start = calendar.date(byAdding: .day, value: -(days - 1), to: today) ?? today
+        var descriptor = Self.allCaptures(since: start)
+        descriptor.propertiesToFetch = [
+            \.songKey, \.songID, \.title, \.artistName, \.albumTitle, \.artworkURL, \.capturedAt, \.kindRawValue,
+        ]
+        let rows = try context.fetch(descriptor).filter { $0.capturedAt <= now }
+        let history = ListeningHistory(rows.map { row in
+            CaptureStat(
+                songKey: row.songKey, songID: row.songID, title: row.title, artistName: row.artistName,
+                albumTitle: row.albumTitle, artworkURL: row.artworkURL, capturedAt: row.capturedAt, kind: row.kind
+            )
+        })
+        return Array(StatsCalculator.tallySongs(history.captures.indices, in: history).prefix(limit))
     }
 }
 
@@ -92,6 +126,12 @@ public struct WidgetFaces: Equatable, Sendable {
             artistName = snapshot.artistName
             artworkURL = snapshot.artworkURL
         }
+
+        init(_ tally: SongTally) {
+            title = tally.title
+            artistName = tally.artistName
+            artworkURL = tally.artworkURL
+        }
     }
 
     let lastPlayed: Song?
@@ -99,12 +139,15 @@ public struct WidgetFaces: Equatable, Sendable {
     let upNext: [Song]?
     /// Shown as "3 songs" and "2 more".
     let upNextCount: Int?
+    /// The Top Songs widget, in rank order.
+    let topSongs: [Song]
     /// Stands in for the Listening widget. Its time, bars and streak only move when a row is
     /// added or removed, and counting is much cheaper than working them out.
     let captureCount: Int
 
-    init(_ reading: WidgetReading, captureCount: Int) {
+    init(_ reading: WidgetReading, topSongs: [SongTally], captureCount: Int) {
         lastPlayed = reading.lastPlayed.map(Song.init)
+        self.topSongs = topSongs.map(Song.init)
         today = reading.today.map(Song.init)
         upNext = reading.upNext?.songs.map(Song.init)
         upNextCount = reading.upNext?.totalCount
@@ -119,6 +162,8 @@ public struct WidgetFaces: Equatable, Sendable {
             kinds.append(WidgetKind.today)
         }
         if captureCount != previous.captureCount { kinds.append(WidgetKind.listening) }
+        // Most plays move no song past another, so this reloads far less often than Listening.
+        if topSongs != previous.topSongs { kinds.append(WidgetKind.topSongs) }
         return kinds
     }
 }

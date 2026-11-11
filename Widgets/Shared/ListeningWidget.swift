@@ -268,19 +268,25 @@ struct ListeningWidgetView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// The streak while there is one. Without one, a flame over a zero reads as a loss, so it
+    /// shows today's minutes instead, as the inline widget does.
     private var circular: some View {
-        ZStack {
+        let hasStreak = entry.streak > 1
+        return ZStack {
             AccessoryWidgetBackground()
             VStack(spacing: 0) {
-                Image(systemName: "flame.fill")
+                Image(systemName: hasStreak ? "flame.fill" : "headphones")
                     .font(.caption)
                     .widgetAccentable()
-                Text(entry.streak.formatted())
-                    .font(.system(.title3, design: .rounded, weight: .bold))
+                Text(hasStreak ? entry.streak.formatted() : Self.duration(entry.todaySeconds))
+                    .font(.system(hasStreak ? .title3 : .footnote, design: .rounded, weight: .bold))
+                    .minimumScaleFactor(0.6)
+                    .lineLimit(1)
                     .privacySensitive()
             }
+            .padding(.horizontal, 4)
         }
-        .accessibilityLabel("\(entry.streak)-day listening streak")
+        .accessibilityLabel(hasStreak ? "\(entry.streak)-day listening streak" : "\(Self.duration(entry.todaySeconds)) listened today")
     }
 
     /// "3h 5m", "42m".
@@ -313,3 +319,21 @@ private extension String {
 } timeline: {
     ListeningEntry.sample
 }
+
+#if os(iOS)
+#Preview("Lock Screen circle", as: .accessoryCircular) {
+    ListeningWidget()
+} timeline: {
+    ListeningEntry.sample
+    ListeningEntry(
+        date: .now, todaySeconds: 47 * 60, todaySongs: 12, weekSeconds: 47 * 60, days: [],
+        streak: 0, topArtist: nil, isStoreReadable: true
+    )
+}
+
+#Preview("Lock Screen rectangle", as: .accessoryRectangular) {
+    ListeningWidget()
+} timeline: {
+    ListeningEntry.sample
+}
+#endif

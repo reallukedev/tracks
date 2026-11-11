@@ -7,6 +7,7 @@ import TracksCore
 struct AlbumDetailView: View {
     let albumID: String
     @Environment(AppModel.self) private var model
+    @SeenRevision private var revision
     @Environment(PlaybackController.self) private var playback
     @Environment(\.playSongs) private var playSongs
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -26,7 +27,7 @@ struct AlbumDetailView: View {
             } else if loadedID == albumID {
                 ContentUnavailableView("No Plays", systemImage: "square.stack")
             } else {
-                ProgressView()
+                LateProgressView()
                     .frame(maxWidth: .infinity)
                     .padding(.top, 120)
             }
@@ -36,7 +37,7 @@ struct AlbumDetailView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
-        .task(id: "\(albumID)|\(model.library.revision)") {
+        .task(id: "\(albumID)|\(revision)") {
             let (id, history, isLoaded) = (albumID, model.library.history, model.library.isLoaded)
             let next = await OffMainActor.run { StatsCalculator.albumProfile(id: id, history: history) }
             guard !Task.isCancelled else { return }

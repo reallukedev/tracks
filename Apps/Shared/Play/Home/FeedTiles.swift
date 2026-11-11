@@ -47,11 +47,14 @@ struct FeedTile: View {
     let item: FeedItem
     @Environment(PlayerModel.self) private var player
     @State private var isHovered = false
+    /// From a tap on a station until it plays: a live station takes a moment to tune in.
+    @State private var isStarting = false
 
     var body: some View {
         Group {
             if let (request, context) = item.stationRequest {
                 Button {
+                    if !isPlayingThis { isStarting = true }
                     player.play(request, from: context)
                 } label: {
                     label
@@ -65,6 +68,7 @@ struct FeedTile: View {
         .tileHover($isHovered, play: play) { FeedItemMenu(item: item) }
         .contextMenu { FeedItemMenu(item: item) }
         .macDraggable(url)
+        .endsPlayStart($isStarting, hasStarted: isPlayingThis)
     }
 
     /// What Play over the cover does: the station, or the album or playlist from the top.
@@ -100,6 +104,8 @@ struct FeedTile: View {
                 .overlay(alignment: .bottomTrailing) {
                     if isPlayingThis {
                         NowPlayingBadge().padding(8)
+                    } else {
+                        PlayStartingBadge(isStarting: isStarting).padding(8)
                     }
                 }
         }

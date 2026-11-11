@@ -83,7 +83,10 @@ final class ClipModel {
         }
         #endif
         let storefront = SharePlaySongSearch.storefront(region: Locale.current.region?.identifier)
-        guard let url = SharePlaySongSearch.url(for: term, storefront: storefront) else { return }
+        guard let url = SharePlaySongSearch.url(for: term, storefront: storefront) else {
+            searchState = .failed
+            return
+        }
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
             guard !Task.isCancelled else { return }

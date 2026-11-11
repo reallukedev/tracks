@@ -16,6 +16,9 @@ struct MacRootView: View {
     @State private var showsTuner = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.isOnScreen) private var isOnScreen
+    /// The sidebar row when macOS last saved the window, so a window it restores at launch
+    /// opens on the same page, as Music's does. A new window opens where Settings says.
+    @SceneStorage("sidebarSelection") private var savedSelection = ""
     #if DEBUG
     @Environment(\.openSettings) private var openSettings
     #endif
@@ -44,7 +47,9 @@ struct MacRootView: View {
             // Under the full player, the page and its bar stop ticking.
             .environment(\.isOnScreen, isOnScreen && !isShowingFullPlayer)
             .environment(playerWindow)
+            .onAppear(perform: restoreSelection)
             .onChange(of: model.sidebarSelection) { _, selection in
+                savedSelection = selection?.rawValue ?? ""
                 history.reset()
                 navigator.path = NavigationPath()
                 // Clicking Search puts the cursor in its field, as Podcasts does. Arrowing
@@ -217,6 +222,17 @@ struct MacRootView: View {
             model.sidebarSelection = .listenNow
         }
         if source == .yourMusic { model.prepareYourMusic() }
+    }
+
+    /// The saved row, if it's still in the sidebar (Lidarr may be gone, or the source
+    /// changed) and the launch didn't ask for a page of its own.
+    private func restoreSelection() {
+        guard let item = SidebarItem(rawValue: savedSelection), item != model.sidebarSelection,
+              LaunchScene.sidebar == nil, LaunchScene.searchText == nil, model.pendingRoute == nil
+        else { return }
+        let shown = [.search] + SidebarItem.leading(opening: openingTab)
+            + SidebarItem.library(for: model.musicSource, hasLidarr: model.lidarr.isSetUp)
+        if shown.contains(item) { model.sidebarSelection = item }
     }
 
     private var isShowingFullPlayer: Bool {

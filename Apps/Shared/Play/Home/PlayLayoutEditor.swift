@@ -143,7 +143,7 @@ struct PlayLayoutEditor: View {
             VStack(alignment: .leading, spacing: SettingsSpacing.tight) {
                 Text("Edit Listen Now")
                     .font(.title2.bold())
-                Text("Choose the sections Listen Now shows. Drag to change their order.")
+                Text("Drag to change the order.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -220,7 +220,7 @@ struct PlayLayoutList: View {
                 }
             } footer: {
                 #if os(iOS)
-                Text("Drag to change the order. Hidden sections keep their place for when you turn them back on.")
+                Text("Drag to change the order.")
                 #endif
             }
 

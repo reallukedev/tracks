@@ -148,4 +148,23 @@ struct RecentSearchesStorageTests {
         #expect(RecentSearches.list("a\n\nb") == ["a", "b"])
         #expect(RecentSearches.limit == 8)
     }
+
+    /// Spotlight and Shortcuts hand back only an id, sometimes long after it was indexed.
+    @Test("an id given out earlier finds the same song, artist and album, and a stale one finds nothing")
+    func lookupByID() throws {
+        let search = SearchIndexMatchingTests().index()
+        let song = try #require(search.topSongs(limit: 1).first)
+        let artist = try #require(search.topArtists(limit: 1).first)
+        let album = try #require(search.topAlbums(limit: 1).first)
+
+        #expect(song.title == "Driftwood")
+        #expect(search.song(id: song.id)?.title == "Driftwood")
+        #expect(search.artist(id: artist.id)?.name == "Mara Solís")
+        #expect(search.album(id: album.id)?.title == "Tides")
+        #expect(search.topSongs(limit: 10).map(\.title) == ["Driftwood", "Satellite", "Open Ocean"])
+
+        #expect(search.song(id: "forgotten") == nil)
+        #expect(search.artist(id: "") == nil)
+        #expect(search.album(id: "forgotten") == nil)
+    }
 }

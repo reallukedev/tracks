@@ -157,27 +157,39 @@ struct SearchLead<SongsTitle: View, Songs: View>: View {
     let hasSongs: Bool
     @ViewBuilder var songsTitle: SongsTitle
     @ViewBuilder var songs: Songs
+    #if os(macOS)
+    /// Whether the window has room for the two side by side. Decided from the width rather
+    /// than by `ViewThatFits`, which would lay out every song row twice on each update, the
+    /// playing one's AppKit waveform included.
+    @State private var isWide = true
+    #endif
 
     var body: some View {
         Group {
             #if os(macOS)
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 28) {
+            if isWide {
+                HStack(alignment: .top, spacing: Self.gap) {
                     if top != nil {
                         topBlock
                             .frame(width: Self.cardWidth)
                     }
                     if hasSongs {
                         songsBlock
-                            .frame(minWidth: 420, maxWidth: .infinity, alignment: .leading)
+                            .frame(minWidth: Self.songsWidth, maxWidth: .infinity, alignment: .leading)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
                 stacked
             }
             #else
             stacked
             #endif
         }
+        #if os(macOS)
+        // A yes or no, never a size, so the choice can't feed back into the width it reads.
+        .onGeometryChange(for: Bool.self) { $0.size.width >= Self.cardWidth + Self.gap + Self.songsWidth } action: { isWide = $0 }
+        #endif
         .padding(.horizontal, PlayMetrics.margin)
     }
 
@@ -211,6 +223,8 @@ struct SearchLead<SongsTitle: View, Songs: View>: View {
 
     private static var cardWidth: CGFloat { 340 }
     #if os(macOS)
+    private static var gap: CGFloat { 28 }
+    private static var songsWidth: CGFloat { 420 }
     private static var titleSpacing: CGFloat { 10 }
     #else
     private static var titleSpacing: CGFloat { 6 }
@@ -250,11 +264,14 @@ struct SearchTopResult {
     let open: () -> Void
     /// Nil when nothing of it can play right now.
     let play: (() -> Void)?
+    /// A song's history key, so the card knows when it's the one playing.
+    var songIdentity: String?
 }
 
 /// The best match, large: its picture, what it is, and Play, as Music's Top Result is.
 struct TopResultCard: View {
     let result: SearchTopResult
+    @Environment(PlayerModel.self) private var player
     @State private var tint: Color?
 
     var body: some View {
@@ -285,8 +302,10 @@ struct TopResultCard: View {
             }
             .overlay(alignment: .bottomTrailing) {
                 if let play = result.play {
-                Button(action: play) {
-                    Image(systemName: "play.fill")
+                // The song playing pauses and goes on from here, rather than starting over.
+                Button(action: isCurrent ? player.togglePlayPause : play) {
+                    Image(systemName: isCurrent && player.isPlaying ? "pause.fill" : "play.fill")
+                        .contentTransition(.symbolEffect(.replace))
                         .font(.title3.weight(.bold))
                         .foregroundStyle(.black)
                         .frame(width: 48, height: 48)
@@ -308,9 +327,18 @@ struct TopResultCard: View {
         .accessibilityElement(children: .combine)
         .accessibilityActions {
             if let play = result.play {
-                Button("Play", action: play)
+                if isCurrent {
+                    Button(player.isPlaying ? "Pause" : "Play", action: player.togglePlayPause)
+                } else {
+                    Button("Play", action: play)
+                }
             }
         }
+    }
+
+    private var isCurrent: Bool {
+        guard let identity = result.songIdentity else { return false }
+        return player.current?.songIdentity == identity
     }
 
     @ViewBuilder

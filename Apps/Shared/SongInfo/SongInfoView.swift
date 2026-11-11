@@ -56,6 +56,7 @@ private extension View {
 struct SongInfoPage: View {
     let subject: SongInfoSubject
     @Environment(AppModel.self) private var model
+    @SeenRevision private var revision
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var info: SongInfoModel
     @State private var retries = 0
@@ -119,7 +120,7 @@ struct SongInfoPage: View {
         #else
         .navigationTitle(subject.title)
         #endif
-        .task(id: model.library.revision) {
+        .task(id: revision) {
             await info.loadHistory(of: subject, library: model.library)
         }
         .task(id: retries) {
