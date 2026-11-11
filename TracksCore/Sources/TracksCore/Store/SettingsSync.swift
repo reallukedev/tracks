@@ -92,22 +92,27 @@ public final class SettingsSync {
             observers.append(NotificationCenter.default.addObserver(
                 forName: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
                 object: cloud,
-                queue: .main
+                // Posted from iCloud's queue; a `.main` observer would make it wait for the
+                // main thread.
+                queue: nil
             ) { [weak self] notification in
                 // `Notification` isn't `Sendable`, so the two values that matter are read
                 // out here rather than carried into the isolated call.
                 let reason = notification.userInfo?[NSUbiquitousKeyValueStoreChangeReasonKey] as? Int
                 let keys = notification.userInfo?[NSUbiquitousKeyValueStoreChangedKeysKey] as? [String]
-                MainActor.assumeIsolated { self?.cloudChanged(reason: reason, keys: keys) }
+                Task { @MainActor in self?.cloudChanged(reason: reason, keys: keys) }
             })
 
             // `UserDefaults` doesn't say which key changed, so this diffs against `snapshot`.
             observers.append(NotificationCenter.default.addObserver(
                 forName: UserDefaults.didChangeNotification,
                 object: defaults,
-                queue: .main
+                // Never `.main`: that makes whichever thread wrote the default wait for the
+                // main thread, and a framework writing from a queue the main thread is
+                // waiting on deadlocks (see CarPlaySceneDelegate's settings observer).
+                queue: nil
             ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.pushLocalChanges() }
+                Task { @MainActor in self?.pushLocalChanges() }
             })
         }
 

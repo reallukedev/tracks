@@ -95,9 +95,10 @@ struct ActivityChart: View {
         }
     }
 
+    /// Rounded, so it doesn't move with every song: see ``ChartCeiling``.
     private var yCeiling: Double {
         let peak = buckets.map(value).max() ?? 0
-        return max(peak, average ?? 0) * 1.08
+        return ChartCeiling.rounded(max(peak, average ?? 0) * 1.08)
     }
 
     /// Round values for the y axis: whole hours (or half hours, or minutes) for listening,

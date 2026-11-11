@@ -89,6 +89,17 @@ struct QueueView: View {
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
+                // A long queue fades out above the scrubber, as Music's does, rather than a
+                // row being cut through; the last row scrolls clear of the fade. A live mix's
+                // short list is sized to its rows instead.
+                .contentMargins(.bottom, player.isLive ? 0 : Self.fade, for: .scrollContent)
+                .mask {
+                    VStack(spacing: 0) {
+                        Color.black
+                        LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
+                            .frame(height: player.isLive ? 0 : Self.fade)
+                    }
+                }
                 .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { _, height in
                     listContentHeight = height
                 }
@@ -261,6 +272,9 @@ struct QueueView: View {
 
     /// The row's insets, top and bottom. See ``row(_:at:isLast:)``.
     private static let rowInsets: CGFloat = 12
+
+    /// The height of the fade at the foot of a long queue.
+    private static let fade: CGFloat = 28
 
     /// A new find Tracks Radio is getting ready: downloading, or waiting for its server.
     private func isGettingReady(_ track: PlayerTrack) -> Bool {

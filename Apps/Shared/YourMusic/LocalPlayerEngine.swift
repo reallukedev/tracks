@@ -93,28 +93,28 @@ final class LocalPlayerEngine: NSObject, PlayerEngine {
             Self.onMain { self?.currentItemChanged() }
         })
         let center = NotificationCenter.default
-        notifications.append(center.addObserver(forName: AVPlayerItem.didPlayToEndTimeNotification, object: nil, queue: .main) { [weak self] note in
+        notifications.append(center.addObserver(forName: AVPlayerItem.didPlayToEndTimeNotification, object: nil, queue: nil) { [weak self] note in
             let item = (note.object as AnyObject?).map(ObjectIdentifier.init)
-            MainActor.assumeIsolated { self?.itemFinished(item) }
+            Task { @MainActor in self?.itemFinished(item) }
         })
-        notifications.append(center.addObserver(forName: AVPlayerItem.failedToPlayToEndTimeNotification, object: nil, queue: .main) { [weak self] note in
+        notifications.append(center.addObserver(forName: AVPlayerItem.failedToPlayToEndTimeNotification, object: nil, queue: nil) { [weak self] note in
             let item = note.object as? AVPlayerItem
             let error = note.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? NSError
-            MainActor.assumeIsolated { self?.itemFailed(item, error: error) }
+            Task { @MainActor in self?.itemFailed(item, error: error) }
         })
         #if os(iOS)
-        notifications.append(center.addObserver(forName: AVAudioSession.didBecomeInactiveNotification, object: nil, queue: .main) { [weak self] note in
+        notifications.append(center.addObserver(forName: AVAudioSession.didBecomeInactiveNotification, object: nil, queue: nil) { [weak self] note in
             // Only the system's: a session Tracks let go of itself isn't an interruption.
             let context = note.userInfo?[AVAudioSession.deactivationContextKey] as? AVAudioSession.DeactivationContext
             guard context?.source == .system else { return }
-            MainActor.assumeIsolated { self?.interruptionBegan() }
+            Task { @MainActor in self?.interruptionBegan() }
         })
-        notifications.append(center.addObserver(forName: AVAudioSession.resumptionRecommendationNotification, object: nil, queue: .main) { [weak self] note in
+        notifications.append(center.addObserver(forName: AVAudioSession.resumptionRecommendationNotification, object: nil, queue: nil) { [weak self] note in
             let context = note.userInfo?[AVAudioSession.resumptionContextKey] as? AVAudioSession.ResumptionContext
             let shouldResume = context?.recommendation == .shouldResume
-            MainActor.assumeIsolated { self?.interruptionEnded(shouldResume: shouldResume) }
+            Task { @MainActor in self?.interruptionEnded(shouldResume: shouldResume) }
         })
-        notifications.append(center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] note in
+        notifications.append(center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: nil) { [weak self] note in
             let reason = (note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt).flatMap(AVAudioSession.RouteChangeReason.init(rawValue:))
             guard reason == .oldDeviceUnavailable else { return }
             // Headphones out: stop, as every player does, rather than play from the speaker. Not
@@ -122,7 +122,7 @@ final class LocalPlayerEngine: NSObject, PlayerEngine {
             let previous = (note.userInfo?[AVAudioSessionRouteChangePreviousRouteKey] as? AVAudioSessionRouteDescription)?.outputs.map(\.portType) ?? []
             let current = AVAudioSession.sharedInstance().currentRoute.outputs.map(\.portType)
             guard RoutePause.shouldPause(previous: previous, current: current, isPrivate: Self.privateOutputs.contains) else { return }
-            MainActor.assumeIsolated { self?.pause() }
+            Task { @MainActor in self?.pause() }
         })
         #endif
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 1, preferredTimescale: 10), queue: .main) { [weak self] _ in
@@ -275,8 +275,10 @@ final class LocalPlayerEngine: NSObject, PlayerEngine {
             // Past the end: stop on the last song, back at its start.
             isMeantToPlay = false
             player.pause()
-            await player.seek(to: .zero)
+            // Before the seek's wait: set after it, it marked a queue played in the meantime as
+            // run out, and the next song added jumped away from the one playing.
             ranOut = true
+            await player.seek(to: .zero)
             return
         }
         loadItems(startPlaying: true)
@@ -295,8 +297,11 @@ final class LocalPlayerEngine: NSObject, PlayerEngine {
     }
 
     func seek(to time: TimeInterval) {
+        // A drag across a bar with no width gives NaN, and an invalid time can make AVPlayer
+        // raise.
+        guard time.isFinite else { return }
         ranOut = false
-        player.seek(to: CMTime(seconds: time, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+        player.seek(to: CMTime(seconds: max(0, time), preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
             Task { @MainActor in self?.updateNowPlayingInfo() }
         }
     }

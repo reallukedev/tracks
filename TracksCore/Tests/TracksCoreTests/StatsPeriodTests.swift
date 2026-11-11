@@ -70,6 +70,24 @@ struct StatsPeriodTests {
         #expect(august.previousCaptureCount == 2)
     }
 
+    /// February is three days shorter than January, so its 28 days of seconds stopped short
+    /// of the end of January.
+    @Test("an ended short month is compared with all of the longer month before")
+    func endedFebruaryComparesAllOfJanuary() {
+        let captures = [
+            capture("january-early", at: date(2026, 1, 2)),
+            capture("january-late", at: date(2026, 1, 30)),
+            capture("february", at: date(2026, 2, 10)),
+        ]
+
+        let february = StatsCalculator.summary(
+            range: .month, captures: captures, sessions: [],
+            calendar: calendar, now: date(2026, 3, 10), periodOffset: -1
+        )
+
+        #expect(february.previousCaptureCount == 2)
+    }
+
     @Test("an earlier period is offered only while there's history before it")
     func earlierPeriodNeedsHistory() {
         let captures = [capture("august", at: date(2026, 8, 10)), capture("september", at: date(2026, 9, 2))]

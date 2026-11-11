@@ -4,6 +4,7 @@ import TracksCore
 /// Summary on the Mac: the same cards as the iPhone, laid out as a dashboard.
 struct MacSummaryView: View {
     @Environment(AppModel.self) private var model
+    @SeenRevision private var revision
     @Environment(UnexpectedQuitMonitor.self) private var quitMonitor
     @AppStorage("statsRange") private var range: StatsRange = .month
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -36,6 +37,10 @@ struct MacSummaryView: View {
                         } else {
                             Dashboard(summary: summary)
                         }
+                    } else {
+                        // All Time over years of history takes a moment: the dashboard's
+                        // shape rather than an empty window while it's worked out.
+                        DashboardSkeleton()
                     }
                 }
                 .padding(24)
@@ -51,7 +56,6 @@ struct MacSummaryView: View {
         }
         .groupedBackground()
         .navigationTitle("Summary")
-        .navigationSubtitle(subtitle)
         .toolbar {
             ToolbarItem(placement: .principal) {
                 // Sized by its segments, so the insets either side match, as in Calendar.
@@ -71,7 +75,7 @@ struct MacSummaryView: View {
                 .help("Fill in anything you played while Tracks wasn't running")
             }
         }
-        .task(id: "\(range.rawValue)|\(periodOffset)|\(sources.scope.rawValue)|\(model.library.revision)") {
+        .task(id: "\(range.rawValue)|\(periodOffset)|\(sources.scope.rawValue)|\(revision)") {
             // Not from the empty history before it's read, which would say nothing was played
             // and then animate the real week in as if it had just been heard.
             guard model.library.isLoaded else { return }
@@ -111,11 +115,6 @@ struct MacSummaryView: View {
             offset.wrappedValue = min(0, offset.wrappedValue + step)
         }
     }
-
-    private var subtitle: String {
-        guard let summary, summary.captureCount > 0 else { return "" }
-        return String(AttributedString(localized: "^[\(summary.captureCount) song](inflect: true)").characters)
-    }
 }
 
 private struct Dashboard: View {
@@ -148,14 +147,17 @@ private struct Dashboard: View {
                 }
             }
 
-            if !summary.insights.isEmpty {
+            // Whole rows of three, so no row is left with a gap.
+            let highlights = summary.summaryHighlights
+            let shown = Array(highlights.prefix(highlights.count >= 6 ? 6 : highlights.count >= 3 ? 3 : highlights.count))
+            if !shown.isEmpty {
                 VStack(alignment: .leading, spacing: 10) {
                     SectionHeader(title: "Highlights") {
-                        if summary.insights.count > 3 {
+                        if summary.insights.count > shown.count {
                             NavigationLink("See All", value: Route.highlights(summary.range, periodOffset: summary.periodOffset))
                         }
                     }
-                    EqualHeightRows(items: Array(summary.insights.prefix(6)), columns: 3, spacing: 14) { insight in
+                    EqualHeightRows(items: shown, columns: 3, spacing: 14) { insight in
                         HighlightCard(insight: insight)
                     }
                 }
@@ -275,5 +277,37 @@ private struct Dashboard: View {
                 DayTypeFootnotes(summary: summary, keysWeekdayChart: !summary.heatMapIsInformative)
             }
         }
+    }
+}
+
+/// The top of the dashboard as plain cards, in the same arrangement, while the summary is
+/// worked out.
+private struct DashboardSkeleton: View {
+    @State private var width: CGFloat = 1000
+
+    var body: some View {
+        Group {
+            if width >= 836 {
+                HStack(alignment: .top, spacing: 16) {
+                    CardBackground()
+                        .frame(minWidth: 560)
+                        .frame(height: 332)
+                    VStack(spacing: 12) {
+                        ForEach(0..<4, id: \.self) { _ in CardBackground().frame(height: 74) }
+                    }
+                    .frame(width: 260)
+                }
+            } else {
+                VStack(spacing: 16) {
+                    CardBackground().frame(height: 330)
+                    HStack(spacing: 12) {
+                        ForEach(0..<4, id: \.self) { _ in CardBackground().frame(height: 74) }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        .accessibilityHidden(true)
     }
 }

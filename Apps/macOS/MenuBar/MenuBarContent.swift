@@ -95,7 +95,7 @@ private struct MenuBarBody: View {
 
             Divider().padding(.horizontal, 14)
 
-            RecentList(captures: recent)
+            RecentList(captures: recent, day: day)
 
             Divider()
 
@@ -434,6 +434,10 @@ private struct TodaySummary: View {
     @Environment(\.modelContext) private var context
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var stats: TodayStats?
+    /// Days in a row before today. Fixed for the day (this view's identity is the day), so
+    /// it's counted once, off the main actor, and not again for every song: with years of
+    /// history, counting back on each song read thousands of rows on the main thread.
+    @State private var daysBefore: Int?
 
     init(day: Date) {
         self.day = day
@@ -443,9 +447,13 @@ private struct TodaySummary: View {
     var body: some View {
         TodayStrip(stats: stats ?? TodayStats())
             .task(id: "\(todays.count)|\(todays.last?.capturedAt.timeIntervalSinceReferenceDate ?? 0)") {
+                if daysBefore == nil {
+                    daysBefore = await TodayStats.daysInARow(before: day, container: context.container)
+                }
+                guard !Task.isCancelled else { return }
                 let next = TodayStats(
                     todays: todays,
-                    streak: TodayStats.currentStreak(day: day, playedToday: !todays.isEmpty, context: context)
+                    streak: (todays.isEmpty ? 0 : 1) + (daysBefore ?? 0)
                 )
                 LiveUpdate.apply(isLive: stats != nil, reduceMotion: reduceMotion) { stats = next }
             }
@@ -467,19 +475,19 @@ private struct TodayStats: Equatable {
         self.streak = streak
     }
 
-    /// Days in a row with a play, counted back from today, or from yesterday when nothing has
-    /// played yet today: the current streak as ``StatsCalculator/streak(in:calendar:now:)``
-    /// counts it.
+    /// Days in a row with a play just before `day`, which with today's play (if any) makes
+    /// the current streak as ``StatsCalculator/streak(in:calendar:now:)`` counts it.
     ///
     /// Reads only play dates, a few weeks at a time and further back only while the streak
     /// continues, instead of loading the whole history.
-    static func currentStreak(
-        day: Date,
-        playedToday: Bool,
-        context: ModelContext,
+    @concurrent
+    nonisolated static func daysInARow(
+        before day: Date,
+        container: ModelContainer,
         calendar: Calendar = .current
-    ) -> Int {
-        var run = playedToday ? 1 : 0
+    ) async -> Int {
+        let context = ModelContext(container)
+        var run = 0
         var days = Set<Date>()
         var fetchedFrom = day
         var span = 32
@@ -547,11 +555,15 @@ private struct TodayStrip: View {
 
 private struct RecentList: View {
     let captures: [Capture]
+    /// Today, moved at midnight and when the window opens, so a time from today turns into
+    /// "Yesterday" without waiting for the next song.
+    let day: Date
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(PlaybackController.self) private var playback
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.isOnScreen) private var isOnScreen
     /// Which rows Music can play, found when the window opens. Music can only be told to
     /// play songs in the library; the rest are opened in Music instead. Missing while
     /// unknown, which is treated as playable: a click finds out and falls back.
@@ -597,11 +609,24 @@ private struct RecentList: View {
             }
         }
         .frame(height: 300)
-        .task(id: captures.map(\.persistentModelID)) { await checkLibrary() }
+        // Only while the window is open: its views outlive closing, and a song arriving
+        // behind a closed menu doesn't need Music asked about it.
+        .task(id: LibraryCheck(rows: captures.map(\.persistentModelID), isOnScreen: isOnScreen)) {
+            guard isOnScreen else { return }
+            await checkLibrary()
+        }
+    }
+
+    private struct LibraryCheck: Hashable {
+        let rows: [PersistentIdentifier]
+        let isOnScreen: Bool
     }
 
     /// One round of Apple events for every row that could be played or opened.
     private func checkLibrary() async {
+        // Only the rows on show, so a menu left open for days doesn't keep every song since.
+        let shown = Set(captures.map(\.persistentModelID))
+        isInLibrary = isInLibrary.filter { shown.contains($0.key) }
         let rows = captures.filter { !$0.songID.isEmpty && isInLibrary[$0.persistentModelID] == nil }
         guard !rows.isEmpty else { return }
         let tracks = rows.map { MusicLibraryPlayback.Track(name: $0.title, artist: $0.artistName) }
@@ -634,12 +659,12 @@ private struct RecentList: View {
     @ViewBuilder
     private func row(_ item: Capture) -> some View {
         if item.songID.isEmpty {
-            RecentRow(capture: item)
+            RecentRow(capture: item, day: day)
         } else {
             Button {
                 activate(item)
             } label: {
-                RecentRow(capture: item)
+                RecentRow(capture: item, day: day)
             }
             // The system's own press feedback. Rows are content, so no glass: that's for
             // the controls floating above it.
@@ -695,6 +720,8 @@ private struct RecentList: View {
 /// A compact history row that highlights on hover, like a menu item.
 private struct RecentRow: View {
     let capture: Capture
+    /// Only changes at midnight; the time it shows changes no more often than that.
+    let day: Date
     @State private var isHovering = false
 
     var body: some View {
@@ -717,7 +744,7 @@ private struct RecentRow: View {
                 .lineLimit(1)
             }
             Spacer(minLength: 6)
-            Text(Format.relativeTime(capture.capturedAt))
+            Text(Format.relativeTime(capture.capturedAt, now: day))
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .monospacedDigit()

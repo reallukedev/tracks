@@ -38,16 +38,38 @@ enum TracksRadioSource {
                     )
                 }
             }
-            let newFinds = discovery.newFinds.map(MixSong.init(catalog:))
+            var newFinds = discovery.newFinds.map(MixSong.init(catalog:))
+            // No history to play from or walk out from yet: Apple Music's most played start
+            // it, and your own songs take over as you listen.
+            if newFinds.isEmpty, history.captures.count < firstListensCount {
+                newFinds = await firstListens(isDemo: isDemo).map(MixSong.init(catalog:))
+            }
             let reasons = discovery.newFindReasons
+            let finds = newFinds
             return await OffMainActor.run {
                 LiveMix.tracksRadio(
-                    from: history, signals: signals, newFinds: newFinds, newFindReasons: reasons, tuning: tuning,
+                    from: history, signals: signals, newFinds: finds, newFindReasons: reasons, tuning: tuning,
                     moment: moment, drives: drives, seed: .random(in: 0...UInt64.max)
                 )
                 .playable(isDemo: isDemo)
             }
         }
+    }
+
+    /// Below this many plays, with nothing found from your artists, Tracks Radio adds the
+    /// charts to what little there is.
+    private static let firstListensCount = 20
+
+    /// Songs for a Tracks Radio with no history to draw from.
+    private static func firstListens(isDemo: Bool) async -> [Song] {
+        #if DEBUG
+        if isDemo { return DemoCatalog.songs(count: 40, offset: 900, artists: nil) }
+        #endif
+        guard MusicAuthorization.currentStatus == .authorized else { return [] }
+        var request = MusicCatalogChartsRequest(kinds: [.mostPlayed], types: [Song.self])
+        request.limit = 50
+        guard let chart = try? await request.response().songCharts.first else { return [] }
+        return Array(chart.items)
     }
 
     /// The moment Tracks Radio plays for now, as its settings allow: the hour and the feel set
@@ -83,6 +105,10 @@ enum TracksRadioSource {
                 let genres = await OffMainActor.run { RadioTuning.genreChoices(in: history) }
                 guard let player else { return }
                 if player.radioGenres != genres { player.radioGenres = genres }
+                // The genres you can tune to barely move from one song to the next, so they're
+                // read again at most every few minutes. Observations hands over only the latest
+                // change once this wakes, so nothing is missed.
+                try? await Task.sleep(for: .seconds(300))
             }
         }
     }

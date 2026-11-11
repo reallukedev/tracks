@@ -47,7 +47,9 @@ public final class CloudSyncMonitor {
         observer = NotificationCenter.default.addObserver(
             forName: NSPersistentCloudKitContainer.eventChangedNotification,
             object: nil,
-            queue: .main
+            // Posted from CloudKit's queue, which a `.main` observer would make wait for the
+            // main thread.
+            queue: nil
         ) { [weak self] notification in
             guard let event = notification.userInfo?[
                 NSPersistentCloudKitContainer.eventNotificationUserInfoKey
@@ -58,7 +60,7 @@ public final class CloudSyncMonitor {
             else { return }
             let succeeded = event.succeeded
             let message = event.error.map(Self.message(for:))
-            MainActor.assumeIsolated {
+            Task { @MainActor in
                 self?.record(activity, succeeded: succeeded, message: message, at: endDate)
             }
         }

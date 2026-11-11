@@ -55,6 +55,17 @@ public struct SearchIndex: Sendable {
         albums.prefix(limit).map(\.item)
     }
 
+    /// The most played songs of all time.
+    public func topSongs(limit: Int) -> [SongTally] {
+        songs.prefix(limit).map(\.item)
+    }
+
+    /// The song, artist or album with this identity, as Siri, Shortcuts and Spotlight ask for
+    /// one they were given before.
+    public func song(id: String) -> SongTally? { songs.first { $0.item.id == id }?.item }
+    public func artist(id: String) -> ArtistTally? { artists.first { $0.item.id == id }?.item }
+    public func album(id: String) -> AlbumTally? { albums.first { $0.item.id == id }?.item }
+
     /// Matches every typed word, ignoring case and accents ("mara sol" finds Mara Solís).
     /// Songs match on their genre too, so "jazz" finds the jazz you've played. Most played
     /// first in each group. When nothing matches, words a letter off match too, so "driftwod"
@@ -239,6 +250,9 @@ public struct SearchIndex: Sendable {
     /// A few things to try remembering by, each with something to find, for before anything
     /// is typed. Phrases search understands, as they'd be typed.
     public func recallSuggestions(now: Date = .now, calendar: Calendar = .current) -> [String] {
+        // The month is named in English, so it's a Gregorian one: a Hebrew year's 13th
+        // month ran off the end of the names.
+        let calendar = HistoryRecall.gregorian(like: calendar)
         let hour = calendar.component(.hour, from: now)
         let lastMonth = calendar.date(byAdding: .month, value: -1, to: now).map {
             Self.englishMonthNames[calendar.component(.month, from: $0) - 1]

@@ -24,6 +24,11 @@ struct DevicesPanel: View {
     @State private var notFoundOn: String?
     /// Counts the moves someone made here, for a tap of feedback on each.
     @State private var moves = 0
+    #if os(macOS)
+    @State private var musicSpeakers = MusicSpeakersModel()
+    #else
+    @State private var routes = SpeakerRouteObserver()
+    #endif
 
     private static let here = "this-device"
 
@@ -59,6 +64,11 @@ struct DevicesPanel: View {
             } footer: {
                 Text(footer)
             }
+            if showsRoute {
+                Section("Speakers") {
+                    SpeakerRouteRow(route: routes.route)
+                }
+            }
             if !model.nearby.away.isEmpty {
                 Section("Recently Seen") {
                     awayRows
@@ -78,7 +88,17 @@ struct DevicesPanel: View {
         .contentMargins(.top, 8, for: .scrollContent)
         .animation(reduceMotion ? nil : .snappy, value: model.nearby.devices.map(\.id))
         .animation(reduceMotion ? nil : .snappy, value: model.musicLocation)
+        .animation(reduceMotion ? nil : .snappy, value: showsRoute)
         .sensoryFeedback(.success, trigger: moves)
+        .onAppear { routes.start() }
+        .onDisappear { routes.stop() }
+    }
+
+    /// The iPhone's speaker, unless another device has the music, while there's somewhere
+    /// else the sound could go.
+    private var showsRoute: Bool {
+        if case .device = model.musicLocation { return false }
+        return routes.route != nil || routes.hasOtherRoutes
     }
     #endif
 
@@ -97,6 +117,14 @@ struct DevicesPanel: View {
             }
             module("Play On") {
                 rows
+            }
+            if let speakers = shownSpeakers {
+                module(speakers.hasScreens ? "Speakers & TVs" : "Speakers") {
+                    ForEach(speakers.speakers) { speaker in
+                        AirPlaySpeakerRow(speaker: speaker, model: musicSpeakers)
+                    }
+                }
+                .transition(.opacity)
             }
             if !model.nearby.away.isEmpty {
                 module("Recently Seen") {
@@ -126,6 +154,16 @@ struct DevicesPanel: View {
         .padding(14)
         .animation(reduceMotion ? nil : .snappy, value: model.nearby.devices.map(\.id))
         .animation(reduceMotion ? nil : .snappy, value: model.musicLocation)
+        .animation(reduceMotion ? nil : .snappy, value: shownSpeakers)
+        .task { await musicSpeakers.follow() }
+    }
+
+    /// Music's speakers, while Music has the song rather than Tracks' own player, which plays
+    /// where the Mac's sound goes. Nothing when there's only the Mac to play on.
+    private var shownSpeakers: MusicSpeakers? {
+        guard let speakers = musicSpeakers.speakers, speakers.hasSpeakers else { return nil }
+        if player.isDemo { return speakers }
+        return speakers.state != .stopped && !player.isPlaying ? speakers : nil
     }
 
     /// A titled group, as Control Center's modules have.
@@ -247,9 +285,9 @@ struct DevicesPanel: View {
 
     private var footer: String {
         if model.nearby.devices.isEmpty {
-            String(localized: "Your other devices appear here while Tracks is open on them, on the same Wi‑Fi and iCloud account.")
+            String(localized: "Open Tracks on your other devices to see them here.")
         } else {
-            String(localized: "Choose a device to move the music there. It carries on from the same moment.")
+            String(localized: "Choose a device to move the music there.")
         }
     }
 

@@ -58,16 +58,54 @@ final class CenteredVolumeView: MPVolumeView {
 }
 
 /// AirPlay and Bluetooth: the system's own picker, so every output the phone knows is there.
+/// It lights up while the sound is elsewhere, and VoiceOver says where.
 struct RoutePicker: UIViewRepresentable {
+    /// Clear, laid over a row that draws its own look and opens the picker when tapped.
+    var isHidden = false
+
     func makeUIView(context: Context) -> AVRoutePickerView {
         let view = AVRoutePickerView()
-        view.tintColor = UIColor.playerInk.withAlphaComponent(0.7)
-        view.activeTintColor = .playerInk
+        if isHidden {
+            view.tintColor = .clear
+            view.activeTintColor = .clear
+        } else {
+            view.tintColor = UIColor.playerInk.withAlphaComponent(0.7)
+            view.activeTintColor = .playerInk
+            context.coordinator.follow(view)
+        }
         view.prioritizesVideoDevices = false
         return view
     }
 
     func updateUIView(_ view: AVRoutePickerView, context: Context) {}
+
+    static func dismantleUIView(_ view: AVRoutePickerView, coordinator: Coordinator) {
+        coordinator.stop()
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    /// Names the speakers in the button's VoiceOver value as the route changes. A route
+    /// change is a notification, so this costs nothing while nothing changes.
+    @MainActor
+    final class Coordinator {
+        private var observer: NSObjectProtocol?
+
+        func follow(_ view: AVRoutePickerView) {
+            let describe: @MainActor () -> Void = { [weak view] in
+                view?.accessibilityValue = SpeakerRouteObserver.currentRoute.map { $0.names.formatted(.list(type: .and)) }
+            }
+            describe()
+            observer = NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { _ in
+                MainActor.assumeIsolated { describe() }
+            }
+        }
+
+        func stop() {
+            if let observer { NotificationCenter.default.removeObserver(observer) }
+            observer = nil
+        }
+    }
 }
 
 extension UIColor {

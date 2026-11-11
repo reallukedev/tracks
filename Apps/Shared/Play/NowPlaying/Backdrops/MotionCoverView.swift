@@ -92,6 +92,11 @@ private struct LoopingVideo {
         func load(_ url: URL, into layer: AVPlayerLayer, onReady: @escaping @MainActor @Sendable () -> Void) {
             guard url != self.url else { return }
             self.url = url
+            // The view stays as the song changes. The last album's looper is let go first:
+            // its copies of the old loop would otherwise stay queued ahead of the new one,
+            // and play first, in the one player the two share.
+            looper?.disableLooping()
+            player.removeAllItems()
             looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
             watch = layer.observe(\.isReadyForDisplay, options: [.initial, .new]) { layer, _ in
                 guard layer.isReadyForDisplay else { return }

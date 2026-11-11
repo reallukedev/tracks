@@ -45,6 +45,7 @@ extension CarPlaySceneDelegate {
                 )
             }
             var lastSong: String?
+            var last: NowPlayingKey?
             for await key in changes {
                 guard let self else { return }
                 if key.song != lastSong {
@@ -55,7 +56,12 @@ extension CarPlaySceneDelegate {
                 updateNowPlayingButtons()
                 updateKeepTicker()
                 refreshRadioIfNeeded()
-                if queue != nil { refreshQueue() }
+                if key.song != last?.song || key.context != last?.context || key.kind != last?.kind {
+                    refreshPlayingMarks()
+                }
+                // Up Next only for what it shows: not for play and pause, or the star.
+                if queue != nil, last.map({ !key.showsSameQueue(as: $0) }) ?? true { refreshQueue() }
+                last = key
             }
         }
     }
@@ -113,6 +119,13 @@ extension CarPlaySceneDelegate {
         let askedForMore: Bool
         /// Up Next's SharePlay row, and which of its songs passengers added.
         let sharePlay: String
+
+        /// Whether Up Next would read the same for both.
+        func showsSameQueue(as other: NowPlayingKey) -> Bool {
+            song == other.song && upNext == other.upNext && isAutoplaying == other.isAutoplaying
+                && autoplay == other.autoplay && context == other.context && kind == other.kind
+                && plays == other.plays && isLive == other.isLive && sharePlay == other.sharePlay
+        }
     }
 
     /// Whether the star can be given: only a song from Apple Music's catalog has a rating to
@@ -184,8 +197,25 @@ extension CarPlaySceneDelegate {
             }
             buttons.append(notForMe)
         }
+        // Sent to the car only when one would look or work differently: each update redraws
+        // the whole row of buttons there.
+        var hasher = Hasher()
+        hasher.combine(current?.id)
+        for button in buttons {
+            hasher.combine(ObjectIdentifier(type(of: button)))
+            hasher.combine(button.isSelected)
+            hasher.combine(button.isEnabled)
+        }
+        hasher.combine(keepStep)
+        hasher.combine(current.flatMap { model.playFeed.facts(for: $0)?.plays })
+        hasher.combine(current?.song.map(player.isFavorite))
+        let albumEnabled = current.map(hasAlbum) ?? false
+        hasher.combine(albumEnabled)
+        let signature = hasher.finalize()
+        guard signature != shownButtons else { return }
+        shownButtons = signature
         CPNowPlayingTemplate.shared.updateNowPlayingButtons(buttons)
-        CPNowPlayingTemplate.shared.isAlbumArtistButtonEnabled = current.map(hasAlbum) ?? false
+        CPNowPlayingTemplate.shared.isAlbumArtistButtonEnabled = albumEnabled
     }
 
     /// Whether the song on has an album to open: one from Apple Music, off a station, or one
@@ -202,6 +232,7 @@ extension CarPlaySceneDelegate {
         template.emptyViewTitleVariants = [String(localized: "Nothing Playing")]
         queue = template
         isQueueShown = false
+        shownQueue = nil
         refreshQueue()
         // Counted as open only once it's on screen: until then a refresh from the watch
         // mustn't take it for closed and stop keeping it current. Deep in a tab, the trail
@@ -215,18 +246,15 @@ extension CarPlaySceneDelegate {
     /// The song's name opens its album, as Music's does.
     func nowPlayingTemplateAlbumArtistButtonTapped(_ nowPlayingTemplate: CPNowPlayingTemplate) {
         guard let track = model.player.current else { return }
-        Task { [weak self] in
-            guard let self else { return }
-            let page: CPListTemplate? = if let local = track.local, let album = model.yourMusic.index.album(id: local.albumKey) {
-                await localAlbumPage(album)
+        open({ [weak self] in
+            guard let self else { return nil }
+            if let local = track.local, let album = model.yourMusic.index.album(id: local.albumKey) {
+                return await localAlbumPage(album)
             } else if let song = track.song, let album = await SongLinks.album(of: song) {
-                await appleMusicAlbumPage(album)
-            } else {
-                nil
+                return await appleMusicAlbumPage(album)
             }
-            guard let page else { return }
-            push(page)
-        }
+            return nil
+        }, then: {})
     }
 
     /// The ring, in words: the song's plays, and when it counts.
@@ -322,7 +350,11 @@ extension CarPlaySceneDelegate {
             row.isEnabled = false
             sections.append(CPListSection(items: [row], header: String(localized: "Up Next"), sectionIndexTitle: nil))
         }
-        queue.updateSections(Self.capped(sections))
+        let capped = Self.capped(sections)
+        let signature = Self.signature(of: capped)
+        guard signature != shownQueue else { return }
+        shownQueue = signature
+        queue.updateSections(capped)
         let tracks = covered.map(\.track)
         fillImages(covered.map(\.row)) { [weak self] index in
             await self?.cover(for: tracks[index], side: side)

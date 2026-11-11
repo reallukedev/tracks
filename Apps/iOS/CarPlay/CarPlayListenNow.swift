@@ -13,7 +13,7 @@ extension CarPlaySceneDelegate {
         let player = model.player
         let model = self.model
         listenNow.emptyViewTitleVariants = [String(localized: "Nothing Played Yet")]
-        listenNow.emptyViewSubtitleVariants = [String(localized: "Pick a mood in Radio to start. Tracks makes mixes from what you play.")]
+        listenNow.emptyViewSubtitleVariants = [String(localized: "Pick a mood in Radio to start.")]
         let isAppleMusic = model.musicSource == .appleMusic
         var sections = accessSection()
 
@@ -42,7 +42,7 @@ extension CarPlaySceneDelegate {
         if hasTracksRadio {
             cards.append(CarCard(
                 title: String(localized: "Tracks Radio"),
-                detail: String(localized: "Your station, picked as you drive"),
+                detail: String(localized: "Made from your listening"),
                 image: { await CarPlayImages.tracksRadio(side: side, scale: scale) }
             ) { [weak self] in
                 await self?.startOrResumeTracksRadio()
@@ -65,7 +65,7 @@ extension CarPlaySceneDelegate {
             let title = String(localized: "Discover")
             cards.append(CarCard(
                 title: title,
-                detail: String(localized: "Songs new to you, by artists like the ones you love"),
+                detail: String(localized: "New songs picked for you"),
                 image: { await CarPlayImages.cover(art, side: side, scale: scale) }
             ) {
                 await player.start(.songs(songs), from: PlayContext(kind: .mix, title: title), shuffled: true)
@@ -136,7 +136,7 @@ extension CarPlaySceneDelegate {
             for (mix, image) in zip(mixes, images) {
                 let item = CPListItem(text: mix.kind.title, detailText: mix.kind.tileLine, image: image)
                 item.userInfo = Self.contentToken(mix.songs.map(\.songIdentity))
-                item.isPlaying = isPlaying(mix.kind.title)
+                mark(item) { [weak self] in self?.isPlaying(mix.kind.title) ?? false }
                 let songs = player.songs(in: mix)
                 item.handler = { [weak self] _, completion in
                     self?.play({ await player.start(.history(songs), from: PlayContext(kind: .mix, title: mix.kind.title)) }, completion: completion)
@@ -223,13 +223,13 @@ extension CarPlaySceneDelegate {
     private func weekSections() async -> [CPListSection] {
         let (history, sessions) = (model.library.history, model.library.sessions)
         guard !history.isEmpty else { return [] }
-        let (week, artistSongs) = await OffMainActor.run {
-            let week = StatsCalculator.summary(range: .week, history: history, sessions: sessions, topLimit: 8)
-            // Worked out here, off the main actor, since it walks the whole history.
-            let songs = Dictionary(uniqueKeysWithValues: week.topArtists.prefix(6).map {
-                ($0.id, Self.mostPlayed(byArtist: $0.id, in: history))
-            })
-            return (week, songs)
+        let week = await OffMainActor.run {
+            StatsCalculator.summary(range: .week, history: history, sessions: sessions, topLimit: 8)
+        }
+        // An artist's songs are worked out when one is played, off the main actor: each walks
+        // the whole history, which shouldn't happen for every song that counts.
+        let artistSongs: @Sendable (String) async -> [HistorySong] = { identity in
+            await OffMainActor.run { Self.mostPlayed(byArtist: identity, in: history) }
         }
         let player = model.player
         var sections: [CPListSection] = []
@@ -260,11 +260,15 @@ extension CarPlaySceneDelegate {
             row.handler = { [weak self] _, completion in
                 let rows = chart.enumerated().map { index, song in
                     let plays = String(AttributedString(localized: "^[\(song.count) play](inflect: true)").characters)
-                    return CarRow(title: "\(index + 1). \(song.title)", detail: "\(song.artistName) · \(plays)", cover: {
+                    var row = CarRow(title: "\(index + 1). \(song.title)", detail: "\(song.artistName) · \(plays)", cover: {
                         await CarPlayImages.cover(url: song.artworkURL, seed: song.albumTitle ?? song.title, side: rowSide, scale: scale)
                     }) {
                         await player.start(.history(songs, startingAt: index), from: .songs(title))
                     }
+                    // By the song, since its row carries its place in the chart.
+                    let identity = HistoryImport.key(title: song.title, artistName: song.artistName)
+                    row.isPlaying = { player.current?.songIdentity == identity }
+                    return row
                 }
                 self?.openPage(title, rows, completion: completion)
             }
@@ -282,9 +286,9 @@ extension CarPlaySceneDelegate {
             }) { index in
                 await CarPlayImages.cover(url: artists[index].artworkURL, seed: artists[index].name, side: side, scale: scale)
             }
+            // Names only at a glance: the order says who's on top, and the page has the plays.
             let elements = zip(artists, images).map { artist, image in
-                let plays = String(AttributedString(localized: "^[\(artist.count) play](inflect: true)").characters)
-                return CPListImageRowItemCondensedElement(image: image, imageShape: .circular, title: artist.name, subtitle: plays, accessorySymbolName: nil)
+                CPListImageRowItemCondensedElement(image: image, imageShape: .circular, title: artist.name, subtitle: nil, accessorySymbolName: nil)
             }
             // Not "On Repeat", which is a mix's name on the cards above.
             late.attach(elements)
@@ -294,11 +298,10 @@ extension CarPlaySceneDelegate {
             row.handler = { [weak self] _, completion in
                 let rows = artists.map { artist in
                     let plays = String(AttributedString(localized: "^[\(artist.count) play](inflect: true)").characters)
-                    let songs = artistSongs[artist.id] ?? []
                     return CarRow(title: artist.name, detail: "\(plays) · \(Format.listening(artist.listeningSeconds))", cover: {
                         CarPlayImages.circle(await CarPlayImages.cover(url: artist.artworkURL, seed: artist.name, side: rowSide, scale: scale))
                     }) {
-                        await player.start(.history(songs), from: PlayContext(kind: .artist, title: artist.name), shuffled: true)
+                        await player.start(.history(await artistSongs(artist.id)), from: PlayContext(kind: .artist, title: artist.name), shuffled: true)
                     }
                 }
                 self?.openPage(title, rows, completion: completion)
@@ -306,8 +309,7 @@ extension CarPlaySceneDelegate {
             row.listImageRowHandler = { [weak self] _, index, completion in
                 guard artists.indices.contains(index) else { return completion() }
                 let artist = artists[index]
-                let songs = artistSongs[artist.id] ?? []
-                self?.play({ await player.start(.history(songs), from: PlayContext(kind: .artist, title: artist.name), shuffled: true) }, completion: completion)
+                self?.play({ await player.start(.history(await artistSongs(artist.id)), from: PlayContext(kind: .artist, title: artist.name), shuffled: true) }, completion: completion)
             }
             sections.append(CPListSection(items: [row]))
         }
@@ -332,7 +334,7 @@ extension CarPlaySceneDelegate {
         let standIn = CarPlayImages.placeholder(symbol: "music.note", side: CPListItem.maximumImageSize.height, scale: scale)
         let items = rows.map { row in
             let item = CPListItem(text: row.title, detailText: row.detail, image: row.image ?? standIn)
-            item.isPlaying = isPlaying(row.title)
+            mark(item) { [weak self] in row.isPlaying?() ?? self?.isPlaying(row.title) ?? false }
             item.handler = { [weak self] _, completion in
                 self?.play(row.action, completion: completion)
             }
@@ -369,6 +371,8 @@ extension CarPlaySceneDelegate {
 struct CarRow {
     var image: UIImage?
     var cover: (@MainActor () async -> UIImage)?
+    /// Whether it's what's playing, when that isn't the row's name.
+    var isPlaying: (@MainActor () -> Bool)?
     let title: String
     let detail: String?
     let action: () async -> Void

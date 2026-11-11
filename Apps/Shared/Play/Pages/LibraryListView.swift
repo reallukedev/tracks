@@ -179,9 +179,11 @@ private struct LibraryPlaylistsPage: View {
     var body: some View {
         content
             .toolbar {
-                ToolbarItem(placement: .libraryAction) {
-                    LibrarySortMenu(selection: $order, options: LibraryOrder.playlistOrders) { order in
-                        order.field == .title ? "Name" : order.menuTitle
+                if pager.offersOrder {
+                    ToolbarItem(placement: .libraryAction) {
+                        LibrarySortMenu(selection: $order, options: LibraryOrder.playlistOrders) { order in
+                            order.field == .title ? "Name" : order.menuTitle
+                        }
                     }
                 }
             }
@@ -338,8 +340,10 @@ private struct LibraryAlbumsPage: View {
             .padding(.bottom, PlayMetrics.sectionSpacing)
         }
         .toolbar {
-            ToolbarItem(placement: .libraryAction) {
-                LibrarySortMenu(selection: $order, options: LibraryOrder.albumOrders) { $0.menuTitle }
+            if pager.offersOrder {
+                ToolbarItem(placement: .libraryAction) {
+                    LibrarySortMenu(selection: $order, options: LibraryOrder.albumOrders) { $0.menuTitle }
+                }
             }
         }
         .loads(pager, query: query, order: order, server: LibraryServerSort.albums(order)) { LibrarySortKeys(album: $0) }

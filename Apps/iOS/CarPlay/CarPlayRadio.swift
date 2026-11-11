@@ -26,14 +26,16 @@ extension CarPlaySceneDelegate {
             let image = await CarPlayImages.mood(mood, side: side, scale: scale)
             moodTiles.append(CPListImageRowItemImageGridElement(image: image, imageShape: .roundedRectangle, title: mood.title, accessorySymbolName: nil))
         }
-        // On as many lines as they need: CarPlay draws every one, past its usual eight.
-        let moodRow = CPListImageRowItem(text: String(localized: "Moods"), imageGridElements: moodTiles, allowsMultipleLines: true)
+        // On as many lines as they need: CarPlay draws every one, past its usual eight. Named
+        // by the section, not the row: a row's name carries a chevron, and every mood is
+        // already here, so there's no page for it to open.
+        let moodRow = CPListImageRowItem(text: nil, imageGridElements: moodTiles, allowsMultipleLines: true)
         moodRow.listImageRowHandler = { [weak self] _, index, completion in
             guard moods.indices.contains(index) else { return completion() }
             let mood = moods[index]
             self?.play({ await MoodPlayback.start(mood, model: model) }, completion: completion)
         }
-        sections.append(CPListSection(items: [moodRow]))
+        sections.append(CPListSection(items: [moodRow], header: String(localized: "Moods"), sectionIndexTitle: nil))
 
         if let genres = await genreSection() {
             sections.append(genres)
@@ -56,7 +58,7 @@ extension CarPlaySceneDelegate {
             for (station, cover) in zip(stations, covers) {
                 let line = station.subtitle.flatMap { $0.isEmpty ? nil : $0 }
                 let item = CPListItem(text: station.title, detailText: line, image: station.isLive ? CarPlayImages.live(cover) : cover)
-                item.isPlaying = isPlaying(station.title)
+                mark(item) { [weak self] in self?.isPlaying(station.title) ?? false }
                 item.handler = { [weak self] _, completion in
                     self?.play({ await Self.play(station, player: player) }, completion: completion)
                 }
@@ -97,7 +99,7 @@ extension CarPlaySceneDelegate {
         let line = switch state {
         case .playing: String(localized: "Now Playing")
         case .paused: String(localized: "Paused")
-        case .idle, .off: String(localized: "Your station, picked as you drive")
+        case .idle, .off: String(localized: "Made from your listening")
         }
         let row = CPListItem(text: String(localized: "Tracks Radio"), detailText: line, image: image)
         row.isPlaying = state == .playing

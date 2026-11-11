@@ -81,6 +81,45 @@ struct ListeningHistoryReaderTests {
         #expect(await reader.lastRead == .incremental)
     }
 
+    // After a song is kept, the playlist write, the scrobble and its hold each save the row
+    // again. Each used to hand out a new history, and the app rebuilt everything from it.
+    @Test("a save that changes nothing a play shows hands out no new history")
+    func bookkeepingIsNotAChange() async throws {
+        let capture = try insert("One")
+        let session = Session(startedAt: start)
+        store.context.insert(session)
+        try store.context.save()
+        _ = try await reader.read()
+
+        capture.needsPlaylistWrite = false
+        capture.addedToPlaylistAt = start.addingTimeInterval(30)
+        capture.scrobbledAt = start.addingTimeInterval(60)
+        capture.scrobbleAttempts = 1
+        try store.context.save()
+        #expect(try await reader.read() == nil)
+
+        // A session's end does show, so it still counts.
+        session.endedAt = start.addingTimeInterval(600)
+        try store.context.save()
+        let snapshot = try #require(try await reader.read())
+        #expect(snapshot.sessions.first?.finishedAt == start.addingTimeInterval(600))
+    }
+
+    @Test("duplicates found earlier are found again once a new copy arrives")
+    func duplicatesFollowChanges() async throws {
+        try insert("One")
+        #expect(try await reader.duplicatePlayGroups(policy: DedupePolicy()).isEmpty)
+        // Asked again with nothing new, as the Mac's timer does.
+        #expect(try await reader.duplicatePlayGroups(policy: DedupePolicy()).isEmpty)
+
+        try insert("One", at: 5)
+        let groups = try await reader.duplicatePlayGroups(policy: DedupePolicy())
+        #expect(groups.map(\.count) == [2])
+
+        // A wider or narrower window is its own question, not the one answered before.
+        #expect(try await reader.duplicatePlayGroups(policy: DedupePolicy(window: 1)).isEmpty)
+    }
+
     @Test("a deleted play is dropped")
     func deleteIsApplied() async throws {
         let capture = try insert("One")

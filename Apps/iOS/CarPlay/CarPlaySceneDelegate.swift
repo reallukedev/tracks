@@ -2,6 +2,7 @@ import UIKit
 import CarPlay
 import MusicKit
 import TracksCore
+import TracksMusic
 
 /// Tracks in the car: four tabs made for a glance and one tap, as Music has them, built from
 /// CarPlay's own templates so they look and work like the rest of the car.
@@ -27,11 +28,17 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     let model = AppModel.shared
     private var watch: Task<Void, Never>?
     private var refresh: Task<Void, Never>?
+    /// The source Search was last drawn for.
+    private var searchBuiltFor: MusicSource?
+    /// Whether the rebuild waiting to run was asked for at once.
+    private var isRebuildingNow = false
     private var radioRefresh: Task<Void, Never>?
     /// Watches the settings the car shows (Tracks Radio on or off, Autoplay), which live in
     /// UserDefaults, where nothing observable says they changed.
     private var settingsObserver: NSObjectProtocol?
     private var shownSettings: (radio: Bool, autoplay: Bool)?
+    /// A look at the settings, waiting out a burst of changes.
+    private var settingsCheck: Task<Void, Never>?
     private var showsAccessProblem = false
     /// What each tab was last built from, so a tab only reloads when something on it changed.
     /// A reload while someone's scrolling moves the list under their finger.
@@ -59,9 +66,21 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     /// Whether Now Playing is on screen, for the ring's ticker, which only runs while it is.
     var isNowPlayingShown = false
     /// Your genres as last worked out, and what from, since it walks the whole history.
-    var genres: (key: String, items: [GenreTileItem])?
+    var genres: (key: String, items: [GenreTileItem], at: ContinuousClock.Instant)?
     private var listenRefresh: Task<Void, Never>?
     private var libraryRefresh: Task<Void, Never>?
+    /// Apple Music access as last read: nil until the car's scene has settled, since it's
+    /// never read in a scene callback (see `refreshMusicAccess`).
+    private(set) var musicAccess: MusicAuthorization.Status?
+    /// Rows that show the playing marker, and how each knows it's the one playing, so the
+    /// marker follows the music on pages already open rather than staying where it was drawn.
+    private var marked: [(row: WeakRow, isOn: () -> Bool)] = []
+    /// Counts pages being built to open, so only the latest tap opens one.
+    private var openID = 0
+    /// What Now Playing's buttons were last drawn from, so they're only sent again on a change.
+    var shownButtons: Int?
+    /// What Up Next was last drawn from, for the list open now.
+    var shownQueue: Int?
 
     lazy var listenNow = tab(String(localized: "Listen Now"), symbol: "play.circle.fill")
     lazy var radio = tab(String(localized: "Radio"), symbol: "dot.radiowaves.left.and.right")
@@ -95,6 +114,13 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         }
         // Radio's moods are drawn here, not fetched, so it's never a blank tab while the rest loads.
         refreshRadioList()
+        // Apple Music access, once the car has finished connecting. Held back from now even
+        // when the car started Tracks and nothing has asked the player to wait yet.
+        PlayerQuiet.followScenes()
+        Task { [weak self] in
+            await PlayerQuiet.settled()
+            self?.settingsMayHaveChanged()
+        }
 
         // The car can start Tracks with no phone window, so nothing else has started capture,
         // or listened for SharePlay.
@@ -109,8 +135,13 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         }
         shownSettings = (PlayPreferences.isTracksRadioOn, PlayPreferences.autoplay)
         showsAccessProblem = needsAppleMusicAccess
-        settingsObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.settingsMayHaveChanged() }
+        // Only our own defaults, and never on the main queue. With `object: nil` this heard
+        // Apple's private iTunesCloud defaults too, and a `.main` observer makes the posting
+        // thread wait for the main thread. iTunesCloud posts from the queue that MusicKit's
+        // first player call waits on, so the two waited on each other until the scene-update
+        // watchdog killed the app as the car connected (0x8BADF00D, Nov 2026).
+        settingsObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: UserDefaults.standard, queue: nil) { [weak self] _ in
+            Task { @MainActor in self?.settingsMayHaveChanged() }
         }
         watch = Task { [weak self] in
             guard let model = self?.model else { return }
@@ -140,11 +171,14 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     func templateApplicationScene(_ scene: CPTemplateApplicationScene, didDisconnectInterfaceController interfaceController: CPInterfaceController) {
         watch?.cancel()
         refresh?.cancel()
+        isRebuildingNow = false
         listenRefresh?.cancel()
         libraryRefresh?.cancel()
         radioRefresh?.cancel()
         if let settingsObserver { NotificationCenter.default.removeObserver(settingsObserver) }
         settingsObserver = nil
+        settingsCheck?.cancel()
+        settingsCheck = nil
         nowPlayingWatch?.cancel()
         keepTicker?.cancel()
         keepTicker = nil
@@ -156,9 +190,13 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         isNowPlayingShown = false
         queue = nil
         isQueueShown = false
+        shownQueue = nil
+        shownButtons = nil
+        marked = []
         radioRowState = nil
         builtFrom = [:]
         libraryBuiltFor = nil
+        searchBuiltFor = nil
     }
 
     /// Search's recent searches can change on the phone at any time, and nothing says so: they're
@@ -225,12 +263,21 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     /// the mixes and the stats one after another. Each tab on its own, so one waiting on covers
     /// doesn't hold up the others. A tab whose rows came out the same is left alone.
     private func rebuild(after delay: Duration = .milliseconds(500)) {
+        // A rebuild asked for at once isn't put off by changes arriving behind it: on
+        // connecting, the watch's first look would otherwise hold the tabs back half a second.
+        if isRebuildingNow, delay > .zero { return }
         refresh?.cancel()
+        isRebuildingNow = delay == .zero
         refresh = Task {
             if delay > .zero { try? await Task.sleep(for: delay) }
             guard !Task.isCancelled else { return }
-            // The recent searches are the source's own.
-            update(search, searchSections())
+            isRebuildingNow = false
+            // The recent searches are the source's own. Otherwise Search is read again as it's
+            // opened, rather than changing under someone looking at it with every song.
+            if searchBuiltFor != model.musicSource {
+                searchBuiltFor = model.musicSource
+                update(search, searchSections())
+            }
             refreshRadioList()
             listenRefresh?.cancel()
             listenRefresh = Task {
@@ -241,13 +288,17 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
             // The library doesn't change with a capture: once, and again if the source,
             // access, or your own music changes.
             let music = model.yourMusic
+            let access = musicAccess.map { "\($0)" } ?? "unknown"
             let key = model.musicSource == .yourMusic
-                ? "yourMusic.\(music.index.albums.count).\(music.playlists.all.count).\(music.downloads.items.isEmpty).\(MusicAuthorization.currentStatus)"
-                : "appleMusic.\(MusicAuthorization.currentStatus).\(music.hasMusic)"
+                ? "yourMusic.\(music.index.albums.count).\(music.playlists.all.count).\(music.downloads.items.isEmpty).\(access)"
+                : "appleMusic.\(access).\(music.hasMusic)"
             let libraryKey = "\(key).\(model.player.current == nil)"
             guard libraryBuiltFor != libraryKey else { return }
             libraryRefresh?.cancel()
             libraryRefresh = Task {
+                // MusicKit's library, only once the car has finished connecting.
+                await PlayerQuiet.settled()
+                guard !Task.isCancelled else { return }
                 let shelves = model.musicSource == .yourMusic ? await yourMusicLibrarySections() : await appleMusicLibrarySections()
                 guard !Task.isCancelled else { return }
                 library.showsSpinnerWhileEmpty = false
@@ -261,7 +312,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     /// on carries on from the other source when it has it, so switching while driving doesn't
     /// stop the music.
     private func sourceSwitchSection() -> CPListSection? {
-        guard model.isDemoLaunch || (MusicAuthorization.currentStatus == .authorized && model.yourMusic.hasMusic) else { return nil }
+        guard model.isDemoLaunch || (musicAccess == .authorized && model.yourMusic.hasMusic) else { return nil }
         let other: MusicSource = model.musicSource == .appleMusic ? .yourMusic : .appleMusic
         let item = CPListItem(
             text: String(localized: "Switch to \(other.name)"),
@@ -283,9 +334,24 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     /// Redraws what shows a setting when one the car shows has changed: any change to
     /// UserDefaults lands here, most of them nothing to do with the car.
     private func settingsMayHaveChanged() {
+        // Once for a burst: the phone writes its own defaults several times a second while
+        // music plays, and each write lands here.
+        guard settingsCheck == nil else { return }
+        settingsCheck = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(300))
+            guard let self, !Task.isCancelled else { return }
+            settingsCheck = nil
+            checkSettings()
+        }
+    }
+
+    private func checkSettings() {
         // Apple Music access, turned on in Settings, says nothing either.
+        let accessChanged = refreshMusicAccess()
         if needsAppleMusicAccess != showsAccessProblem {
             showsAccessProblem = needsAppleMusicAccess
+            rebuild()
+        } else if accessChanged {
             rebuild()
         }
         let now = (radio: PlayPreferences.isTracksRadioOn, autoplay: PlayPreferences.autoplay)
@@ -293,6 +359,18 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         shownSettings = now
         updateNowPlayingButtons()
         if shown.radio != now.radio { rebuild() }
+    }
+
+    /// Reads Apple Music access again, and says whether it changed. Not while a scene is
+    /// changing: a MusicKit call made then can wait on the services the car's connection is
+    /// still starting, holding the main thread until the watchdog ends the app.
+    @discardableResult
+    private func refreshMusicAccess() -> Bool {
+        guard !PlayerQuiet.isQuiet else { return false }
+        let now = MusicAuthorization.currentStatus
+        guard now != musicAccess else { return false }
+        musicAccess = now
+        return true
     }
 
     /// Radio's list again, on its own: its first row follows Tracks Radio starting and pausing.
@@ -342,7 +420,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
 
     /// What a list shows, as one number: its headers, rows, what they say, which is playing,
     /// and what they play.
-    private static func signature(of sections: [CPListSection]) -> Int {
+    static func signature(of sections: [CPListSection]) -> Int {
         var hasher = Hasher()
         for section in sections {
             hasher.combine(section.header)
@@ -389,7 +467,8 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     /// Whether Apple Music is the source but Tracks can't play from it: asked for from the car,
     /// the prompt would land on a phone no one is looking at.
     var needsAppleMusicAccess: Bool {
-        !model.isDemoLaunch && model.musicSource == .appleMusic && MusicAuthorization.currentStatus != .authorized
+        guard let musicAccess else { return false }
+        return !model.isDemoLaunch && model.musicSource == .appleMusic && musicAccess != .authorized
     }
 
     /// Said at the top of a tab when nothing from Apple Music can play, rather than on every
@@ -408,6 +487,33 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     /// Whether what's playing came from here: a mix, mood or station by its name.
     func isPlaying(_ title: String) -> Bool {
         model.player.hasQueue && model.player.context?.title == title
+    }
+
+    /// Shows the playing marker on a row while `isOn` says so, now and as the music moves on.
+    func mark(_ row: CPListItem, _ isOn: @escaping () -> Bool) {
+        row.isPlaying = isOn()
+        if marked.count > 400 { marked.removeAll { $0.row.value == nil } }
+        marked.append((WeakRow(value: row), isOn))
+    }
+
+    /// Marks the row of what's playing now, wherever one is open, and unmarks the rest.
+    func refreshPlayingMarks() {
+        marked.removeAll { $0.row.value == nil }
+        for (box, isOn) in marked {
+            guard let row = box.value else { continue }
+            let on = isOn()
+            if row.isPlaying != on { row.isPlaying = on }
+        }
+    }
+
+    /// Whether the song playing is this one from Apple Music.
+    func isPlayingSong(_ id: MusicItemID) -> Bool {
+        model.player.current?.song?.id == id
+    }
+
+    /// Whether the song playing is this one of yours.
+    func isPlayingTrack(_ id: LocalTrack.ID) -> Bool {
+        model.player.current?.local?.id == id
     }
 
     // MARK: - Playing
@@ -438,4 +544,22 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     func show(_ problem: PlayerProblem) {
         present(CPActionSheetTemplate(title: problem.title, message: problem.message, actions: [okAction()]))
     }
+
+    /// Pushes a page once it's built. The row keeps its spinner until then. Only the latest
+    /// tap opens its page: two rows tapped in a row would otherwise stack both pages.
+    func open(_ make: @escaping () async -> CPListTemplate?, then completion: @escaping () -> Void) {
+        openID &+= 1
+        let id = openID
+        Task { [weak self] in
+            let page = await make()
+            guard let self, let page, openID == id else { return completion() }
+            push(page, completion: completion)
+        }
+    }
 }
+
+/// A row held without keeping it: a page gone from the car takes its rows with it.
+struct WeakRow {
+    weak var value: CPListItem?
+}
+

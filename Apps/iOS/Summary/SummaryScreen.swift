@@ -3,6 +3,7 @@ import TracksCore
 
 struct SummaryScreen: View {
     @Environment(AppModel.self) private var model
+    @SeenRevision private var revision
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("statsRange") private var range: StatsRange = .month
     @State private var summary: StatsSummary?
@@ -61,10 +62,12 @@ struct SummaryScreen: View {
         .sheet(isPresented: $showsSettings) {
             SettingsSheet()
         }
-        .refreshable {
+        // Holds the model only. Capturing the whole screen would keep each summary it was
+        // drawn with alive through the environment, a summary for every song.
+        .refreshable { [model] in
             if !model.isShowingSampleData { await model.capture?.catchUp() }
         }
-        .task(id: "\(range.rawValue)|\(periodOffset)|\(sources.scope.rawValue)|\(model.library.revision)") {
+        .task(id: "\(range.rawValue)|\(periodOffset)|\(sources.scope.rawValue)|\(revision)") {
             // Not from the empty history before it's read, which would say nothing was played
             // and then animate the real week in as if it had just been heard.
             guard model.library.isLoaded else { return }
@@ -121,14 +124,15 @@ struct SummaryContent: View {
                 GlanceGrid(summary: summary, columns: 2)
             }
 
-            if !summary.insights.isEmpty {
+            let highlights = summary.summaryHighlights
+            if !highlights.isEmpty {
                 VStack(alignment: .leading, spacing: 10) {
                     SectionHeader(title: "Highlights") {
-                        if summary.insights.count > 3 {
+                        if summary.insights.count > min(highlights.count, 3) {
                             NavigationLink("See All", value: Route.highlights(summary.range, periodOffset: summary.periodOffset))
                         }
                     }
-                    EqualHeightRows(items: Array(summary.insights.prefix(3)), columns: 1) { insight in
+                    EqualHeightRows(items: Array(highlights.prefix(3)), columns: 1) { insight in
                         HighlightCard(insight: insight)
                     }
                 }

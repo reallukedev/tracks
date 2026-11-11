@@ -7,13 +7,13 @@ import TracksCore
 struct TracksWidgetBundle: WidgetBundle {
     var body: some Widget {
         ListeningWidget()
+        TopSongsWidget()
         LastCapturedWidget()
         TodayOnRadioWidget()
-        // Gated here because a `@main` type can't be `@available`, and gating the bundle
-        // would drop the other widgets on older systems.
-        if #available(iOS 18.0, macOS 26.0, *) {
-            PlayBackTodayControl()
-        }
+        PlayInTracksControl()
+        SaveRadioSongControl()
+        IdentifySongControl()
+        PlayBackTodayControl()
     }
 }
 
@@ -24,9 +24,9 @@ struct LastCapturedWidget: Widget {
             kind: WidgetKind.lastPlayed,
             provider: CaptureTimelineProvider(content: .lastPlayed)
         ) { entry in
+            // Sets its own background, from the cover.
             LastCapturedView(entry: entry)
                 .tint(.tracks)
-                .containerBackground(.fill.tertiary, for: .widget)
         }
         .configurationDisplayName("Last Played")
         .description("The last song Tracks kept.")

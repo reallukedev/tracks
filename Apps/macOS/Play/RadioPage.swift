@@ -38,8 +38,6 @@ struct RadioPage: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Tracks Radio Is Off")
                 .font(.title3.bold())
-            Text("Your own station plays everything you love and new finds like it, picked as it plays.")
-                .foregroundStyle(.secondary)
             Button("Turn On Tracks Radio") { isRadioOn = true }
                 .buttonStyle(.bordered)
                 .padding(.top, 4)
@@ -54,6 +52,8 @@ private struct TracksRadioStage: View {
     @Environment(PlayerModel.self) private var player
     @AppStorage(PlayPreferences.radioTuningKey) private var storedTuning = ""
     @State private var showsTuner = false
+    /// From a click on Play until the station plays: its first song is picked as it starts.
+    @State private var isStarting = false
 
     var body: some View {
         let isOn = player.isPlayingTracksRadio
@@ -84,10 +84,19 @@ private struct TracksRadioStage: View {
                     .padding(.top, 8)
                 HStack(spacing: 10) {
                     Button {
-                        if isOn { player.togglePlayPause() } else { player.playTracksRadio() }
+                        if isOn {
+                            player.togglePlayPause()
+                        } else {
+                            isStarting = true
+                            player.playTracksRadio()
+                        }
                     } label: {
-                        Label(isOn && player.isPlaying ? "Pause" : isOn ? "Resume" : "Play", systemImage: isOn && player.isPlaying ? "pause.fill" : "play.fill")
-                            .contentTransition(.symbolEffect(.replace))
+                        Label {
+                            Text(isOn && player.isPlaying ? "Pause" : isOn ? "Resume" : "Play")
+                        } icon: {
+                            PlayStartingIcon(systemImage: isOn && player.isPlaying ? "pause.fill" : "play.fill", isStarting: isStarting)
+                                .contentTransition(.symbolEffect(.replace))
+                        }
                     }
                     .buttonStyle(.stagePrimary(tint: TracksRadioArt.color))
                     Button("Tune…", systemImage: "slider.horizontal.3") { showsTuner = true }
@@ -114,10 +123,10 @@ private struct TracksRadioStage: View {
             Button("Tune Tracks Radio…", systemImage: "slider.horizontal.3") { showsTuner = true }
         }
         .sheet(isPresented: $showsTuner) { RadioTunerSheet() }
+        .endsPlayStart($isStarting, hasStarted: isOn)
     }
 
-    /// What's on it now, while it plays: the song, and that what's next is being picked. Before
-    /// then, what it does, in a line.
+    /// What's on it now, while it plays.
     @ViewBuilder
     private func onAir(isOn: Bool) -> some View {
         if isOn, let track = player.current {
@@ -142,12 +151,6 @@ private struct TracksRadioStage: View {
             .background(.white.opacity(0.12), in: .capsule)
             .transition(.opacity)
             .id(track.id)
-        } else {
-            Text("Picked one song at a time as it plays. What you skip steers what comes next.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: 440, alignment: .leading)
         }
     }
 }

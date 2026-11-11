@@ -115,8 +115,8 @@ final class DownloadedSongs {
     private func startWatching() {
         guard libraryObserver == nil, !isDemo else { return }
         MPMediaLibrary.default().beginGeneratingLibraryChangeNotifications()
-        libraryObserver = NotificationCenter.default.addObserver(forName: .MPMediaLibraryDidChange, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated {
+        libraryObserver = NotificationCenter.default.addObserver(forName: .MPMediaLibraryDidChange, object: nil, queue: nil) { [weak self] _ in
+            Task { @MainActor in
                 // Changes come in bursts while songs download: look once they settle.
                 self?.reload?.cancel()
                 self?.reload = Task { [weak self] in

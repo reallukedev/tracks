@@ -13,7 +13,14 @@ enum LiveUpdate {
 
     /// Runs `body`, animated when `isLive` says the change is new listening on the same
     /// screen rather than a first load or a different selection.
+    ///
+    /// Never animated on the Mac, where an animated change lays out the whole window on every
+    /// frame it runs: the Summary dashboard spent about 200 ms laying out per song.
     static func apply(isLive: Bool, reduceMotion: Bool, _ body: () -> Void) {
+        #if os(macOS)
+        body()
+        #else
         withAnimation(isLive ? animation(reduceMotion: reduceMotion) : nil, body)
+        #endif
     }
 }

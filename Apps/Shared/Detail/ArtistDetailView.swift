@@ -4,6 +4,7 @@ import TracksCore
 struct ArtistDetailView: View {
     let artistID: String
     @Environment(AppModel.self) private var model
+    @SeenRevision private var revision
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var profile: ArtistProfile?
     /// The id whose profile was last worked out from a loaded library, so "No Plays" waits
@@ -22,7 +23,7 @@ struct ArtistDetailView: View {
             } else if loadedID == artistID {
                 ContentUnavailableView("No Plays", systemImage: "music.microphone")
             } else {
-                ProgressView()
+                LateProgressView()
                     .frame(maxWidth: .infinity)
                     .padding(.top, 120)
             }
@@ -32,7 +33,7 @@ struct ArtistDetailView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
-        .task(id: "\(artistID)|\(model.library.revision)") {
+        .task(id: "\(artistID)|\(revision)") {
             let (id, history, isLoaded) = (artistID, model.library.history, model.library.isLoaded)
             let next = await OffMainActor.run { StatsCalculator.artistProfile(id: id, history: history) }
             guard !Task.isCancelled else { return }

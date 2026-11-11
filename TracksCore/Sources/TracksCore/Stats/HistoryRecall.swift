@@ -118,9 +118,24 @@ public struct HistoryRecall: Sendable, Equatable {
                 // The longest first, so "late night jazz radio" isn't read as "late night".
                 .sorted { $0.tokens.count > $1.tokens.count },
             now: now,
-            calendar: calendar
+            calendar: gregorian(like: calendar)
         )
         return reader.read()
+    }
+
+    /// `calendar` as a Gregorian one, keeping its time zone, locale and weeks.
+    ///
+    /// What's typed is read as English, Gregorian months and years ("march 2024"). In a
+    /// Japanese calendar the year is 8 and `1990...8` trapped; in a Hebrew one month 13
+    /// has no English name.
+    static func gregorian(like calendar: Calendar) -> Calendar {
+        guard calendar.identifier != .gregorian else { return calendar }
+        var gregorian = Calendar(identifier: .gregorian)
+        gregorian.timeZone = calendar.timeZone
+        gregorian.locale = calendar.locale
+        gregorian.firstWeekday = calendar.firstWeekday
+        gregorian.minimumDaysInFirstWeek = calendar.minimumDaysInFirstWeek
+        return gregorian
     }
 }
 
@@ -551,8 +566,11 @@ private struct RecallReader {
     }
 
     private func year(_ word: String) -> Int? {
+        // A clock reset to 1970 would make the range run backwards, which traps.
         guard word.count == 4, let value = Int(word) else { return nil }
-        return (1990...calendar.component(.year, from: now)).contains(value) ? value : nil
+        let thisYear = calendar.component(.year, from: now)
+        guard thisYear >= 1990 else { return nil }
+        return (1990...thisYear).contains(value) ? value : nil
     }
 
     /// Whether summer comes at the end of the year where the person is.

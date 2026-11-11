@@ -163,9 +163,9 @@ enum PlaySettingsWords {
     /// Why your devices can't be found, and where to fix it.
     static var localNetworkOff: String {
         #if os(macOS)
-        String(localized: "Tracks can’t look for them: turn on Tracks in System Settings › Privacy & Security › Local Network.")
+        String(localized: "Tracks can’t look for them: turn on Tracks in System Settings ▸ Privacy & Security ▸ Local Network.")
         #else
-        String(localized: "Tracks can’t look for them: turn on Local Network in Settings › Apps › Tracks.")
+        String(localized: "Tracks can’t look for them: turn on Local Network in Settings ▸ Apps ▸ Tracks.")
         #endif
     }
 

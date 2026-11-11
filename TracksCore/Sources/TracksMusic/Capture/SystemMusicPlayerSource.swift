@@ -53,8 +53,13 @@ public final class SystemMusicPlayerSource: NowPlayingSource {
     }
 
     private func startObserving() {
-        let player = SystemMusicPlayer.shared
         task = Task { @MainActor [weak self] in
+            // The first touch of the shared player connects to Apple's player service on the
+            // main thread and can wait there a long time. Capture starts as the car connects,
+            // inside a scene update, so it waits for the scene to settle (see PlayerQuiet).
+            await PlayerQuiet.settled()
+            if Task.isCancelled { return }
+            let player = SystemMusicPlayer.shared
             let changes = Observations { player.queue.currentEntry?.id }
             for await _ in changes {
                 if Task.isCancelled { return }

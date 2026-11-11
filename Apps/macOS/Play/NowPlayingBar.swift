@@ -417,12 +417,14 @@ private struct BarProgress: View {
     @Environment(PlayerModel.self) private var player
     @Environment(\.isOnScreen) private var isOnScreen
     @State private var dragFraction: Double?
+    @State private var pendingSeek: PendingSeek?
     @State private var isHovering = false
 
     var body: some View {
         // Once a second, as the times change. Every tick lays the window out again.
-        TimelineView(.animation(minimumInterval: 1, paused: !player.isPlaying || dragFraction != nil || !isOnScreen)) { _ in
-            let fraction = dragFraction ?? min(1, max(0, player.playbackTime / duration))
+        TimelineView(.animation(minimumInterval: 1, paused: !player.isPlaying || dragFraction != nil || !isOnScreen)) { context in
+            let shown = PendingSeek.time(player.playbackTime, pending: pendingSeek, isPlaying: player.isPlaying, at: context.date)
+            let fraction = dragFraction ?? Scrubber.fraction(shown, of: duration)
             HStack(spacing: 6) {
                 if showsTimes {
                     time(fraction * duration)
@@ -447,7 +449,7 @@ private struct BarProgress: View {
                                 dragFraction = min(1, max(0, value.location.x / max(1, proxy.size.width)))
                             }
                             .onEnded { _ in
-                                if let dragFraction { player.seek(to: dragFraction * duration) }
+                                if let dragFraction { seek(to: dragFraction * duration) }
                                 dragFraction = nil
                             }
                     )
@@ -463,9 +465,15 @@ private struct BarProgress: View {
             .accessibilityValue(Text("\(Scrubber.format(fraction * duration)) of \(Scrubber.format(duration))"))
             .accessibilityAdjustableAction { direction in
                 let step: TimeInterval = direction == .increment ? 15 : -15
-                player.seek(to: min(duration, max(0, fraction * duration + step)))
+                seek(to: min(duration, max(0, fraction * duration + step)))
             }
         }
+        .expiresPendingSeek($pendingSeek)
+    }
+
+    private func seek(to time: TimeInterval) {
+        pendingSeek = PendingSeek(time: time, at: .now)
+        player.seek(to: time)
     }
 
     private func time(_ seconds: TimeInterval, isRemaining: Bool = false) -> some View {
@@ -554,11 +562,13 @@ struct BarScrubber: View {
     @Environment(PlayerModel.self) private var player
     @Environment(\.isOnScreen) private var isOnScreen
     @State private var dragFraction: Double?
+    @State private var pendingSeek: PendingSeek?
     @State private var isHovering = false
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1, paused: !player.isPlaying || dragFraction != nil || !isOnScreen)) { _ in
-            let fraction = dragFraction ?? min(1, max(0, player.playbackTime / duration))
+        TimelineView(.animation(minimumInterval: 1, paused: !player.isPlaying || dragFraction != nil || !isOnScreen)) { context in
+            let shown = PendingSeek.time(player.playbackTime, pending: pendingSeek, isPlaying: player.isPlaying, at: context.date)
+            let fraction = dragFraction ?? Scrubber.fraction(shown, of: duration)
             HStack(spacing: 8) {
                 if showsTimes {
                     time(fraction * duration)
@@ -582,7 +592,7 @@ struct BarScrubber: View {
                                 dragFraction = min(1, max(0, value.location.x / max(1, proxy.size.width)))
                             }
                             .onEnded { _ in
-                                if let dragFraction { player.seek(to: dragFraction * duration) }
+                                if let dragFraction { seek(to: dragFraction * duration) }
                                 dragFraction = nil
                             }
                     )
@@ -598,9 +608,15 @@ struct BarScrubber: View {
             .accessibilityValue(Text("\(Scrubber.format(fraction * duration)) of \(Scrubber.format(duration))"))
             .accessibilityAdjustableAction { direction in
                 let step: TimeInterval = direction == .increment ? 15 : -15
-                player.seek(to: min(duration, max(0, fraction * duration + step)))
+                seek(to: min(duration, max(0, fraction * duration + step)))
             }
         }
+        .expiresPendingSeek($pendingSeek)
+    }
+
+    private func seek(to time: TimeInterval) {
+        pendingSeek = PendingSeek(time: time, at: .now)
+        player.seek(to: time)
     }
 
     private func time(_ seconds: TimeInterval, isRemaining: Bool = false) -> some View {

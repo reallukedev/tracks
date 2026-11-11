@@ -47,7 +47,7 @@ struct TransportControls: View {
     /// Only for radio. "Nothing is playing" is obvious enough without a caption.
     private var unavailableNote: String? {
         guard monitor.music.isRadio else { return nil }
-        return "A radio station can't be skipped."
+        return String(localized: "A radio station can’t be skipped.")
     }
 
     /// Uses a real title hidden by the label style, so VoiceOver has something to read.
@@ -89,10 +89,10 @@ struct TransportControls: View {
     }
 
     private var reasonUnavailable: String {
-        guard monitor.music.isRunning else { return "Nothing is playing." }
+        guard monitor.music.isRunning else { return String(localized: "Nothing is playing.") }
         if monitor.music.isRadio {
-            return "A radio station can't be skipped."
+            return String(localized: "A radio station can’t be skipped.")
         }
-        return "Nothing is playing."
+        return String(localized: "Nothing is playing.")
     }
 }

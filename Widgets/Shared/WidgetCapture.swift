@@ -12,6 +12,8 @@ struct WidgetCapture: Identifiable, Sendable, Hashable {
     let artistName: String
     let capturedAt: Date
     let artwork: Data?
+    /// Only worked out for a song shown on its own, over its colour.
+    var coverColor: CoverColor?
 
     init(snapshot: CaptureSnapshot, artwork: Data?) {
         self.id = snapshot.id
@@ -27,6 +29,13 @@ struct WidgetCapture: Identifiable, Sendable, Hashable {
         self.artistName = artistName
         self.capturedAt = capturedAt
         self.artwork = artwork
+    }
+
+    /// This song with its cover's colour, for a widget drawn over it.
+    func withCoverColor() -> WidgetCapture {
+        var copy = self
+        copy.coverColor = artwork.flatMap(CoverColor.init(artwork:))
+        return copy
     }
 }
 
@@ -108,7 +117,7 @@ extension CaptureEntry {
         )
         return CaptureEntry(
             date: .now,
-            lastPlayed: today.first,
+            lastPlayed: today.first?.withCoverColor(),
             today: Array(today.prefix(capacity.today)),
             upNext: capacity.upNext.map { UpNextQueue(songs: Array(upNext.prefix($0)), totalCount: upNext.count) },
             isStoreReadable: true

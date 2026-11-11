@@ -49,6 +49,17 @@ struct ListeningEstimateTests {
         #expect(seconds[0] == ListeningEstimate.typicalSongSeconds)
     }
 
+    /// Two devices can each record the same play before iCloud merges them. Until then the
+    /// copy is one play, not another typical song's worth of listening.
+    @Test func `a play recorded twice at the same moment is heard once`() {
+        let seconds = ListeningEstimate.seconds(for: [
+            play("a", at: date(2026, 9, 7, 9, 0)),
+            play("a", at: date(2026, 9, 7, 9, 0)),
+            play("b", at: date(2026, 9, 7, 9, 4)),
+        ])
+        #expect(seconds.prefix(2).reduce(0, +) == 240)
+    }
+
     @Test func `imported songs are not measured against each other`() {
         let found = date(2026, 9, 7, 9)
         let seconds = ListeningEstimate.seconds(for: [

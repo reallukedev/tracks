@@ -59,7 +59,7 @@ final class WidgetRefresher {
         // If the read fails, leave it to the widgets' own refresh schedule.
         guard let now = currentFaces() else { return }
         let changed = faces.map { now.kindsChanged(since: $0) }
-            ?? [WidgetKind.lastPlayed, WidgetKind.today, WidgetKind.listening]
+            ?? [WidgetKind.lastPlayed, WidgetKind.today, WidgetKind.listening, WidgetKind.topSongs]
         faces = now
         for kind in changed {
             WidgetCenter.shared.reloadTimelines(ofKind: kind)

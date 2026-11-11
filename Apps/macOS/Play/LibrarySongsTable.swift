@@ -189,7 +189,9 @@ struct LibrarySongsTablePage: View {
             LibrarySortKeys(song: song, plays: facts[HistoryImport.key(title: song.title, artistName: song.artistName)]?.plays ?? 0)
         }
         .task(id: "\(pager.revision)\u{1F}\(allowsExplicit)\u{1F}\(feed.builtRevision ?? 0)") {
-            rows = await Self.rows(of: pager.items, facts: feed.facts, allowsExplicit: allowsExplicit)
+            let made = await Self.rows(of: pager.items, facts: feed.facts, allowsExplicit: allowsExplicit)
+            // Most new plays change no row here; the table is left alone unless one did.
+            if made != rows { rows = made }
         }
     }
 

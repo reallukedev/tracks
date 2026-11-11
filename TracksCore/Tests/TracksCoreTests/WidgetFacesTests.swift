@@ -49,7 +49,7 @@ struct WidgetFacesTests {
         capture("Second", minutesAgo: 1)
         try store.context.save()
 
-        #expect(try faces().kindsChanged(since: before) == [WidgetKind.lastPlayed, WidgetKind.today, WidgetKind.listening])
+        #expect(try faces().kindsChanged(since: before) == [WidgetKind.lastPlayed, WidgetKind.today, WidgetKind.listening, WidgetKind.topSongs])
     }
 
     /// These happen for every song and show on no widget.
@@ -105,7 +105,7 @@ struct WidgetFacesTests {
         song.artworkURL = "https://is1-ssl.mzstatic.com/image/thumb/cover/100x100bb.jpg"
         try store.context.save()
 
-        #expect(try faces().kindsChanged(since: before) == [WidgetKind.lastPlayed, WidgetKind.today])
+        #expect(try faces().kindsChanged(since: before) == [WidgetKind.lastPlayed, WidgetKind.today, WidgetKind.topSongs])
     }
 
     @Test("forgetting a song changes every widget it counted in")
@@ -119,7 +119,7 @@ struct WidgetFacesTests {
         defer { ScratchDefaults.remove(suiteName: suite) }
         try store.forgetSong(title: "Forget", artistName: "Artist", settings: CaptureSettings(suiteName: suite))
 
-        #expect(try faces().kindsChanged(since: before) == [WidgetKind.lastPlayed, WidgetKind.today, WidgetKind.listening])
+        #expect(try faces().kindsChanged(since: before) == [WidgetKind.lastPlayed, WidgetKind.today, WidgetKind.listening, WidgetKind.topSongs])
     }
 
     /// Recently Played can bring back a song from days ago. It isn't the latest or from
@@ -133,7 +133,7 @@ struct WidgetFacesTests {
         capture("Two days ago", minutesAgo: 2 * 24 * 60)
         try store.context.save()
 
-        #expect(try faces().kindsChanged(since: before) == [WidgetKind.listening])
+        #expect(try faces().kindsChanged(since: before) == [WidgetKind.listening, WidgetKind.topSongs])
     }
 
     /// The artwork backfill touches rows below what any widget shows.
@@ -197,5 +197,71 @@ struct WidgetFacesTests {
         try store.context.save()
 
         #expect(announced == 1)
+    }
+
+    // MARK: - Top Songs
+
+    /// Another play of the song already on top is the commonest save of all. It moves the
+    /// Listening totals but not the Top Songs covers, so only Listening spends a reload.
+    @Test("another play of the top song changes Listening, not Top Songs")
+    func replayingTopSongKeepsTopSongs() throws {
+        capture("Favourite", minutesAgo: 60)
+        capture("Favourite", minutesAgo: 40)
+        capture("Other", minutesAgo: 30)
+        try store.context.save()
+        let before = try faces()
+
+        capture("Favourite", minutesAgo: 1)
+        try store.context.save()
+
+        #expect(!(try faces().kindsChanged(since: before)).contains(WidgetKind.topSongs))
+        #expect(try faces().kindsChanged(since: before).contains(WidgetKind.listening))
+    }
+
+    @Test("a song played more often overtakes, and Top Songs reloads")
+    func overtakingChangesTopSongs() throws {
+        capture("Leader", minutesAgo: 90)
+        capture("Leader", minutesAgo: 80)
+        capture("Chaser", minutesAgo: 70)
+        try store.context.save()
+        let before = try faces()
+
+        capture("Chaser", minutesAgo: 20)
+        capture("Chaser", minutesAgo: 10)
+        try store.context.save()
+
+        #expect(try faces().kindsChanged(since: before).contains(WidgetKind.topSongs))
+        let top = try store.widgetTopSongs(limit: 4, now: now, calendar: calendar)
+        #expect(top.map(\.title) == ["Chaser", "Leader"])
+        #expect(top.map(\.count) == [3, 2])
+    }
+
+    /// Seven days counting today: a song from the eighth day back has fallen off, and one from
+    /// later than now (a clock that moved back) isn't counted yet.
+    @Test("only the last seven days count, today included")
+    func topSongsWindow() throws {
+        let day = 24.0 * 60
+        capture("Six days ago", minutesAgo: 6 * day)
+        capture("Eight days ago", minutesAgo: 8 * day)
+        capture("Eight days ago", minutesAgo: 8 * day + 5)
+        capture("In the future", minutesAgo: -30)
+        try store.context.save()
+
+        let top = try store.widgetTopSongs(limit: 4, now: now, calendar: calendar)
+        #expect(top.map(\.title) == ["Six days ago"])
+        #expect(try store.widgetTopSongs(limit: 0, now: now, calendar: calendar).isEmpty)
+    }
+
+    @Test("Top Songs stops at its limit, most played first")
+    func topSongsLimit() throws {
+        for (index, title) in ["A", "B", "C", "D", "E"].enumerated() {
+            for play in 0...index {
+                capture(title, minutesAgo: Double(100 - index * 10 - play))
+            }
+        }
+        try store.context.save()
+
+        let top = try store.widgetTopSongs(limit: WidgetReading.mostTopSongs, now: now, calendar: calendar)
+        #expect(top.map(\.title) == ["E", "D", "C", "B"])
     }
 }

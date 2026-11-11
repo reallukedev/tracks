@@ -5,13 +5,65 @@ import Foundation
 /// `Capture` is a SwiftData model and can't leave the main actor, so the views map rows
 /// into these before calculating anything.
 public struct CaptureStat: Sendable, Equatable {
-    public let songKey: String
-    /// Catalog id, if the song was resolved. Lets a row in a chart be played.
-    public let songID: String
-    public let title: String
-    public let artistName: String
-    public let albumTitle: String?
-    public let artworkURL: String?
+    /// What every play of one song's row shares: its names, cover and ids, and what's folded
+    /// from them. Held once, however often the song was played.
+    ///
+    /// Each play used to carry its own copy of all of it: about fifteen hundred bytes a play,
+    /// held by the reader and again by every history, in a library of a hundred thousand
+    /// plays or more.
+    final class Song: Sendable {
+        let songKey: String
+        let songID: String
+        let title: String
+        let artistName: String
+        let albumTitle: String?
+        let artworkURL: String?
+        let songIdentity: String
+        let credits: [ArtistCredit]
+        let artistIdentity: String
+        let albumIdentity: String?
+        let mayCreditSeveral: Bool
+
+        init(songKey: String, songID: String, title: String, artistName: String, albumTitle: String?, artworkURL: String?) {
+            self.songKey = songKey
+            self.songID = songID
+            self.title = title
+            self.artistName = artistName
+            self.albumTitle = albumTitle
+            self.artworkURL = artworkURL
+            self.songIdentity = HistoryImport.key(title: title, artistName: artistName)
+            self.mayCreditSeveral = ArtistCredits.mayCreditSeveral(artist: artistName, title: title)
+            self.credits = ArtistCredits.byName(artist: artistName, title: title)
+            self.artistIdentity = credits.first?.identity ?? ""
+            let album = albumTitle.map(StatsCalculator.folded) ?? ""
+            self.albumIdentity = album.isEmpty ? nil : "\(album)\u{1F}\(artistIdentity)"
+        }
+
+        /// The same song credited otherwise. The album stays where the name alone puts it.
+        init(copying other: Song, credits: [ArtistCredit]) {
+            songKey = other.songKey
+            songID = other.songID
+            title = other.title
+            artistName = other.artistName
+            albumTitle = other.albumTitle
+            artworkURL = other.artworkURL
+            songIdentity = other.songIdentity
+            self.credits = credits
+            artistIdentity = credits.first?.identity ?? ""
+            albumIdentity = other.albumIdentity
+            mayCreditSeveral = other.mayCreditSeveral
+        }
+
+        func isSame(as other: Song) -> Bool {
+            self === other || (
+                songKey == other.songKey && songID == other.songID && title == other.title
+                    && artistName == other.artistName && albumTitle == other.albumTitle
+                    && artworkURL == other.artworkURL && credits == other.credits
+            )
+        }
+    }
+
+    let song: Song
     public let capturedAt: Date
     public let stationName: String?
     public let playedBackAt: Date?
@@ -19,23 +71,30 @@ public struct CaptureStat: Sendable, Equatable {
     /// Apple Music or Your Music.
     public let source: PlaySource
 
+    public var songKey: String { song.songKey }
+    /// Catalog id, if the song was resolved. Lets a row in a chart be played.
+    public var songID: String { song.songID }
+    public var title: String { song.title }
+    public var artistName: String { song.artistName }
+    public var albumTitle: String? { song.albumTitle }
+    public var artworkURL: String? { song.artworkURL }
     /// Folded title and artist. We group on this rather than `songKey` because the key
     /// depends on the device (iOS uses the catalog id, macOS the title and artist), so one
     /// song heard on both would otherwise show up twice in a chart.
-    public let songIdentity: String
+    public var songIdentity: String { song.songIdentity }
     /// Everyone the song credits, main artists first: a play of "A & B" counts for both.
     /// From the artist and title, and Apple Music's own list once it's been looked up.
-    public let credits: [ArtistCredit]
+    public var credits: [ArtistCredit] { song.credits }
     /// The first credited artist, folded: whose song it is when one artist is needed, as for
     /// a link from the song's page. Empty for a blank artist.
-    public let artistIdentity: String
+    public var artistIdentity: String { song.artistIdentity }
     /// Album and lead artist together, since plenty of artists have an album called "Home".
     /// The lead alone, so "Umbra feat. Yuki Tanabe" and "Umbra & Mara Solis" count on
     /// Umbra's album.
-    public let albumIdentity: String?
+    public var albumIdentity: String? { song.albumIdentity }
     /// Whether the credit could name more than one artist, so Apple Music's list of the
     /// song's artists is worth having.
-    public let mayCreditSeveral: Bool
+    public var mayCreditSeveral: Bool { song.mayCreditSeveral }
 
     public init(
         songKey: String,
@@ -50,23 +109,29 @@ public struct CaptureStat: Sendable, Equatable {
         kind: CaptureKind = .radio,
         source: PlaySource = .appleMusic
     ) {
-        self.songKey = songKey
-        self.songID = songID
-        self.title = title
-        self.artistName = artistName
-        self.albumTitle = albumTitle
-        self.artworkURL = artworkURL
+        self.init(
+            song: Song(songKey: songKey, songID: songID, title: title, artistName: artistName, albumTitle: albumTitle, artworkURL: artworkURL),
+            capturedAt: capturedAt,
+            stationName: stationName,
+            playedBackAt: playedBackAt,
+            kind: kind,
+            source: source
+        )
+    }
+
+    init(song: Song, capturedAt: Date, stationName: String?, playedBackAt: Date?, kind: CaptureKind, source: PlaySource) {
+        self.song = song
         self.capturedAt = capturedAt
         self.stationName = stationName
         self.playedBackAt = playedBackAt
         self.kind = kind
         self.source = source
-        self.songIdentity = HistoryImport.key(title: title, artistName: artistName)
-        self.mayCreditSeveral = ArtistCredits.mayCreditSeveral(artist: artistName, title: title)
-        self.credits = ArtistCredits.byName(artist: artistName, title: title)
-        self.artistIdentity = credits.first?.identity ?? ""
-        let album = albumTitle.map(StatsCalculator.folded) ?? ""
-        self.albumIdentity = album.isEmpty ? nil : "\(album)\u{1F}\(artistIdentity)"
+    }
+
+    public static func == (lhs: CaptureStat, rhs: CaptureStat) -> Bool {
+        lhs.capturedAt == rhs.capturedAt && lhs.stationName == rhs.stationName
+            && lhs.playedBackAt == rhs.playedBackAt && lhs.kind == rhs.kind
+            && lhs.source == rhs.source && lhs.song.isSame(as: rhs.song)
     }
 
     /// Every credited artist's identity, main artists first.
@@ -105,32 +170,18 @@ public struct CaptureStat: Sendable, Equatable {
     /// can touch thousands of plays at once.
     public func with(stationName: String?) -> CaptureStat {
         guard stationName != self.stationName else { return self }
-        return CaptureStat(copying: self, stationName: stationName, credits: credits)
+        return CaptureStat(song: song, capturedAt: capturedAt, stationName: stationName, playedBackAt: playedBackAt, kind: kind, source: source)
     }
 
     /// The same play credited otherwise, as Apple Music's list of the song's artists says.
     /// The album stays where the name alone puts it, so a link to it made anywhere finds it.
     func with(credits: [ArtistCredit]) -> CaptureStat {
-        CaptureStat(copying: self, stationName: stationName, credits: credits)
+        with(song: Song(copying: song, credits: credits))
     }
 
-    private init(copying other: CaptureStat, stationName: String?, credits: [ArtistCredit]) {
-        songKey = other.songKey
-        songID = other.songID
-        title = other.title
-        artistName = other.artistName
-        albumTitle = other.albumTitle
-        artworkURL = other.artworkURL
-        capturedAt = other.capturedAt
-        self.stationName = stationName
-        playedBackAt = other.playedBackAt
-        kind = other.kind
-        source = other.source
-        songIdentity = other.songIdentity
-        self.credits = credits
-        artistIdentity = credits.first?.identity ?? ""
-        albumIdentity = other.albumIdentity
-        mayCreditSeveral = other.mayCreditSeveral
+    /// The same play of another copy of its song.
+    func with(song: Song) -> CaptureStat {
+        CaptureStat(song: song, capturedAt: capturedAt, stationName: stationName, playedBackAt: playedBackAt, kind: kind, source: source)
     }
 }
 

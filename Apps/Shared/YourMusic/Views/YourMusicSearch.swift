@@ -306,7 +306,8 @@ struct YourMusicSearchResults: View {
                 kind: String(localized: "Song · \(track.artist)"),
                 cover: .url(music.artworkURL(track.artwork)?.absoluteString, seed: track.album ?? track.title),
                 open: { remember(); playFromTop(track) },
-                play: { remember(); playFromTop(track) }
+                play: { remember(); playFromTop(track) },
+                songIdentity: track.identity
             )
         }
     }

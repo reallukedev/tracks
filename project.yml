@@ -142,6 +142,9 @@ targets:
       # The whole Intents folder would pull the capture stack into the extension.
       - path: Apps/Shared/Intents/PlayBackTodayIntent.swift
       - path: Apps/Shared/Playback/PlatformPlaybackService.swift
+      # The controls' intents, which run in the app; their work is in ControlIntents+App.swift.
+      - path: Apps/Shared/Intents/ControlIntents.swift
+      - path: Apps/Shared/Intents/PlayChoice.swift
       # The widgets build the links the apps open; the apps' half is DeepLink+Routing.swift.
       - path: Apps/Shared/App/DeepLink.swift
     dependencies:
@@ -169,6 +172,8 @@ targets:
       - path: Widgets/iOS
       - path: Apps/Shared/Intents/PlayBackTodayIntent.swift
       - path: Apps/Shared/Playback/PlatformPlaybackService.swift
+      - path: Apps/Shared/Intents/ControlIntents.swift
+      - path: Apps/Shared/Intents/PlayChoice.swift
       # The widgets build the links the apps open; the apps' half is DeepLink+Routing.swift.
       - path: Apps/Shared/App/DeepLink.swift
     dependencies:

@@ -1,6 +1,19 @@
 import SwiftUI
 import TracksCore
 
+extension StatsSummary {
+    /// Highlights for the Summary's own cards, less the streak and the trend: the Streak tile
+    /// and the line under the listening total already say those just above. See All keeps them.
+    var summaryHighlights: [Insight] {
+        insights.filter {
+            switch $0 {
+            case .streak, .listeningTrend: false
+            default: true
+            }
+        }
+    }
+}
+
 /// One highlight, as a card: coloured heading, symbol, sentence.
 struct HighlightCard: View {
     let insight: Insight
@@ -83,6 +96,7 @@ struct HighlightsList: View {
     let range: StatsRange
     var periodOffset = 0
     @Environment(AppModel.self) private var model
+    @SeenRevision private var revision
     @State private var insights: [Insight] = []
     @State private var hasLoaded = false
     private var sources = SourceScopeSetting()
@@ -100,7 +114,7 @@ struct HighlightsList: View {
         }
         .overlay {
             if !hasLoaded {
-                ProgressView()
+                LateProgressView()
             } else if insights.isEmpty {
                 ContentUnavailableView("No Highlights", systemImage: "sparkles", description: Text("Play a few more songs and highlights will show up here."))
             }
@@ -108,7 +122,7 @@ struct HighlightsList: View {
         .groupedBackground()
         .navigationTitle("Highlights")
         .sourceScopeSubtitle(sources.scope)
-        .task(id: "\(sources.scope.rawValue)|\(model.library.revision)") {
+        .task(id: "\(sources.scope.rawValue)|\(revision)") {
             let (range, offset, scope, history, sessions) = (range, periodOffset, sources.scope, model.library.history, model.library.sessions)
             let includesStations = scope.includesStations
             let next = await OffMainActor.run {

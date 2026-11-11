@@ -23,8 +23,8 @@ final class BackgroundRefreshAvailability {
         // Lives as long as the process, so the observers are never removed.
         let names = [UIApplication.backgroundRefreshStatusDidChangeNotification, .NSProcessInfoPowerStateDidChange]
         for name in names {
-            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.blocker = Self.currentBlocker() }
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: nil) { [weak self] _ in
+                Task { @MainActor in self?.blocker = Self.currentBlocker() }
             }
         }
     }

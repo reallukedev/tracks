@@ -107,6 +107,8 @@ struct TracksApp: App {
             MenuBarLabel(
                 nowPlaying: model.capture?.nowPlaying,
                 lastCapture: model.capture?.lastCapture,
+                // The open radio session's, so {station} is empty once the station ends.
+                station: model.capture?.openSession?.station?.name,
                 isCapturing: model.capture?.isRunning == true,
                 isPlaying: model.capture?.isSomethingPlaying,
                 style: menuBarLabelStyle,
@@ -136,6 +138,7 @@ struct TracksCommands: Commands {
     @Bindable var model: AppModel
     @AppStorage(OpeningTab.storageKey) private var openingTab: OpeningTab = .standard
     @FocusedValue(\.refreshPage) private var refreshPage
+    @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
         CommandGroup(before: .toolbar) {
@@ -143,6 +146,8 @@ struct TracksCommands: Commands {
             ForEach(SidebarItem.leading(opening: openingTab).enumerated(), id: \.element) { index, item in
                 Button(item.title, systemImage: item.symbol) {
                     model.sidebarSelection = item
+                    // From the Mini Player, or with the window closed, the page has to show.
+                    if MainWindow.open?.isKeyWindow != true { MainWindow.bringForward(openWindow: openWindow) }
                 }
                 .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: .command)
                 .labelStyle(.titleAndIcon)

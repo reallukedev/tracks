@@ -155,6 +155,10 @@ struct GenreShelf: View {
     @Environment(PlayFeed.self) private var feed
     /// Nil until worked out: the shelf holds its shape meanwhile.
     @State private var items: [GenreTileItem]?
+    /// When the genres were last worked out. One more song rarely reorders them, and working
+    /// them out goes through the whole history, so while music plays they're looked at again
+    /// only every few minutes.
+    @State private var loaded: (key: GenreKey, at: ContinuousClock.Instant)?
     @ScaledMetric(relativeTo: .headline) private var height: CGFloat = MoodShelf.height
 
     var body: some View {
@@ -174,9 +178,27 @@ struct GenreShelf: View {
                 placeholder(height: height)
             }
         }
-        .task(id: GenreKey(source: model.musicSource, revision: model.library.revision, songs: model.yourMusic.index.tracks.count)) {
-            items = await GenreShelfItems.load(model: model, facts: feed.facts)
+        .task(id: key) {
+            let key = key
+            // Only the history moving on waits; another source or library looks at once.
+            if let loaded, loaded.key.source == key.source, loaded.key.songs == key.songs {
+                let due = loaded.at + Self.refreshInterval
+                if due > .now {
+                    try? await Task.sleep(until: due)
+                    guard !Task.isCancelled else { return }
+                }
+            }
+            let found = await GenreShelfItems.load(model: model, facts: feed.facts)
+            guard !Task.isCancelled else { return }
+            items = found
+            loaded = (key, .now)
         }
+    }
+
+    private static let refreshInterval: Duration = .seconds(300)
+
+    private var key: GenreKey {
+        GenreKey(source: model.musicSource, revision: model.library.revision, songs: model.yourMusic.index.tracks.count)
     }
 
     /// The shelf's shape while the genres are worked out: its name, and plain tiles.

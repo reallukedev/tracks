@@ -119,6 +119,16 @@ nonisolated extension LibraryDemo {
             catalog.songs += decode(Song.self, id: id, type: "songs", attributes: #""name":"\#(escaped(song.play.title))","artistName":"\#(escaped(song.play.artistName))","albumName":"\#(escaped(song.play.albumTitle))","durationInMillis":\#(duration)"#)
             catalog.dates[id] = Dates(added: song.first, played: song.last)
         }
+        // `-TracksDemoLibrarySongs 5000`: a library as big as a real one, to scroll and sort.
+        let wanted = UserDefaults.standard.integer(forKey: "TracksDemoLibrarySongs")
+        let names = artistNames.isEmpty ? ["Juniper Lane"] : artistNames
+        for index in stride(from: catalog.songs.count, to: wanted, by: 1) {
+            let id = MusicItemID("i.demo-filler-\(index)")
+            let artist = names[index % names.count]
+            let duration = 150_000 + (index * 7_919) % 140_000
+            catalog.songs += decode(Song.self, id: id, type: "songs", attributes: #""name":"Track \#(index)","artistName":"\#(escaped(artist))","albumName":"Volume \#(index / 12)","durationInMillis":\#(duration)"#)
+            catalog.dates[id] = Dates(added: .now.addingTimeInterval(-Double(index) * 3_600), played: nil)
+        }
 
         for (index, name) in playlistNames.enumerated() {
             let id = MusicItemID("p.demo-playlist-\(index)")

@@ -45,7 +45,8 @@ extension CarPlaySceneDelegate {
         suggestions.append((String(localized: "“Play driving music”"), { await TracksPlayback.start(.drive, model: model) }))
         if let last = model.library.history.captures.last, model.player.canPlay(songID: last.songID) {
             let song = HistorySong(songID: last.songID, title: last.title, artistName: last.artistName, albumTitle: last.albumTitle, artworkURL: last.artworkURL)
-            suggestions.append((String(localized: "“Play \(last.title) by \(last.artistName)”"), {
+            // The lead artist only: a full credit makes a phrase too long to take in at a glance.
+            suggestions.append((String(localized: "“Play \(last.title) by \(ArtistCredits.lead(of: last.artistName))”"), {
                 await model.player.start(.history([song]), from: .songs(song.title))
             }))
         }
@@ -72,7 +73,7 @@ extension CarPlaySceneDelegate {
 
     /// Nil when Apple Music couldn't be asked.
     private func appleMusicResults(_ term: String) async -> [CPListSection]? {
-        guard MusicAuthorization.currentStatus == .authorized, !model.isDemoLaunch else { return nil }
+        guard musicAccess == .authorized, !model.isDemoLaunch else { return nil }
         var request = MusicCatalogSearchRequest(term: term, types: [Song.self, Artist.self, Album.self, Playlist.self])
         request.limit = 8
         guard let response = try? await request.response() else { return nil }
@@ -88,7 +89,7 @@ extension CarPlaySceneDelegate {
             for (index, song) in songs.enumerated() {
                 let row = CPListItem(text: song.title, detailText: song.artistName, image: standIn)
                 row.isExplicitContent = song.contentRating == .explicit
-                row.isPlaying = player.current?.song?.id == song.id
+                mark(row) { [weak self] in self?.isPlayingSong(song.id) ?? false }
                 row.handler = { [weak self] _, completion in
                     self?.play({ await player.start(.songs(songs, startingAt: index), from: context) }, completion: completion)
                 }
@@ -146,7 +147,7 @@ extension CarPlaySceneDelegate {
             let standIn = CarPlayImages.placeholder(symbol: "music.note", side: side, scale: scale)
             for (index, track) in tracks.enumerated() {
                 let row = CPListItem(text: track.title, detailText: track.artist, image: standIn)
-                row.isPlaying = player.current?.local?.id == track.id
+                mark(row) { [weak self] in self?.isPlayingTrack(track.id) ?? false }
                 row.handler = { [weak self] _, completion in
                     self?.play({ await player.start(.local(tracks, startingAt: index), from: context) }, completion: completion)
                 }
@@ -211,14 +212,23 @@ extension CarPlaySceneDelegate {
         )
         var sections: [CPListSection] = []
         if !songs.isEmpty {
-            let rows = songs.prefix(10).enumerated().map { index, song in
-                let row = CPListItem(text: song.title, detailText: song.albumTitle)
+            let listed = Array(songs.prefix(10))
+            let (side, scale) = (CPListItem.maximumImageSize.height, scale)
+            let standIn = CarPlayImages.placeholder(symbol: "music.note", side: side, scale: scale)
+            // With covers, so the songs' names line up with Play and Shuffle above them.
+            let rows = listed.enumerated().map { index, song in
+                let row = CPListItem(text: song.title, detailText: song.albumTitle, image: standIn)
                 row.isExplicitContent = song.contentRating == .explicit
-                row.isPlaying = player.current?.song?.id == song.id
+                mark(row) { [weak self] in self?.isPlayingSong(song.id) ?? false }
                 row.handler = { [weak self] _, completion in
                     self?.play({ await player.start(.songs(songs, startingAt: index), from: context) }, completion: completion)
                 }
                 return row
+            }
+            fillImages(rows) { index in
+                let song = listed[index]
+                let art = song.artwork.map(CoverArt.artwork) ?? .url(nil, seed: song.albumTitle ?? song.title)
+                return await CarPlayImages.cover(art, side: side, scale: scale)
             }
             sections.append(CPListSection(items: rows, header: String(localized: "Top Songs"), sectionIndexTitle: nil))
         }

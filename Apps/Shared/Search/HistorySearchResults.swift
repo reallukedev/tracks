@@ -13,6 +13,9 @@ struct HistorySearchResults: View {
     let search: (String) -> Void
 
     @Environment(AppModel.self) private var model
+    /// The index is built again from every play, so it follows the library only while search
+    /// can be seen, and catches up in one go when it's back.
+    @SeenRevision private var revision
     @Environment(PlayerModel.self) private var player
     @Environment(\.openPlayRoute) private var openRoute
     @AppStorage("recentHistorySearches") private var recentStorage = ""
@@ -56,7 +59,7 @@ struct HistorySearchResults: View {
         .overlay { overlay }
         // A play that just finished, or one deleted or synced in, shows up in results already
         // on screen.
-        .task(id: model.library.revision) {
+        .task(id: revision) {
             let history = model.library.history
             let (next, phrases) = await OffMainActor.run {
                 let index = SearchIndex(history: history)
@@ -410,7 +413,8 @@ struct HistorySearchResults: View {
                 kind: String(localized: "Song · \(song.artistName)"),
                 cover: .url(song.artworkURL, seed: song.albumTitle ?? song.title),
                 open: { remember(); push(.song(song.id)) },
-                play: playable([song]).isEmpty ? nil : { remember(); play(results.songs, from: song) }
+                play: playable([song]).isEmpty ? nil : { remember(); play(results.songs, from: song) },
+                songIdentity: song.id
             )
         }
     }

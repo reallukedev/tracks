@@ -19,6 +19,10 @@ public struct ListeningHistory: Sendable {
     /// Whether any play came from Your Music, so the statistics can offer to show it apart.
     /// Stays true for a history scoped to Apple Music, which still has Your Music to switch to.
     public let hasYourMusic: Bool
+    /// Every song and every artist heard, for telling whether a play added at the end is the
+    /// first of its song or introduces an artist, without walking the history again.
+    let heardSongs: Set<String>
+    let heardArtists: Set<String>
 
     public init(
         _ captures: [CaptureStat],
@@ -40,8 +44,100 @@ public struct ListeningHistory: Sendable {
             firstSong[index] = songs.insert(capture.songIdentity).inserted
         }
         self.isFirstHearing = firstSong
-        self.newArtists = Self.newArtists(in: ordered)
+        self.heardSongs = songs
+        var artists = Set<String>()
+        self.newArtists = Self.newArtists(in: ordered, heard: &artists)
+        self.heardArtists = artists
         self.hasYourMusic = ordered.contains { $0.source == .yourMusic }
+    }
+
+    /// This history with plays added after its last one, the same as building it again from
+    /// every play with the same lookups, without sorting or walking the plays already here.
+    ///
+    /// Each new song used to cost a whole rebuild: in a long history, a sort of a hundred
+    /// thousand plays or more after every one.
+    ///
+    /// - Returns: nil when a play doesn't come after every play here (one synced in late, say),
+    ///   so it has to be built again from everything.
+    public func appending(_ newer: [CaptureStat]) -> ListeningHistory? {
+        guard !newer.isEmpty else { return self }
+        let added = newer.sorted {
+            ($0.capturedAt, $0.songIdentity) < ($1.capturedAt, $1.songIdentity)
+        }
+        if let last = captures.last, let first = added.first,
+           !((last.capturedAt, last.songIdentity) < (first.capturedAt, first.songIdentity)) {
+            return nil
+        }
+        return ListeningHistory(appending: Self.credited(added, songMetadata: songMetadata) ?? added, to: self)
+    }
+
+    /// This history brought up to date by the reader's steps, or nil when one of them can't
+    /// be taken without building it again from everything.
+    public func applying(_ steps: [ListeningHistoryReader.Step]) -> ListeningHistory? {
+        var history = self
+        for step in steps {
+            // A step's changes are all to plays from before it.
+            guard let next = history.replacing(step.changed)?.appending(step.added) else { return nil }
+            history = next
+        }
+        return history
+    }
+
+    /// This history with plays that changed in place: a cover or catalog id found, an album
+    /// filled in, a station renamed. The same as building it again from every play.
+    ///
+    /// - Returns: nil when a change moves a play, or could change what's worked out from the
+    ///   plays around it (its time, kind, source or artists), or when the play can't be told
+    ///   apart from another; then it has to be built again from everything.
+    public func replacing(_ changes: [(old: CaptureStat, new: CaptureStat)]) -> ListeningHistory? {
+        guard !changes.isEmpty else { return self }
+        var updated = captures
+        for (old, new) in changes {
+            guard old.capturedAt == new.capturedAt, old.songIdentity == new.songIdentity,
+                  old.kind == new.kind, old.source == new.source
+            else { return nil }
+            let lower = firstIndex { ($0.capturedAt, $0.songIdentity) >= (new.capturedAt, new.songIdentity) }
+            guard lower < updated.count,
+                  (updated[lower].capturedAt, updated[lower].songIdentity) == (new.capturedAt, new.songIdentity),
+                  lower + 1 == updated.count
+                    || (updated[lower + 1].capturedAt, updated[lower + 1].songIdentity) != (new.capturedAt, new.songIdentity)
+            else { return nil }
+            let credited = Self.credited([new], songMetadata: songMetadata)?.first ?? new
+            guard credited.creditIdentities == updated[lower].creditIdentities else { return nil }
+            updated[lower] = credited
+        }
+        return ListeningHistory(replacing: updated, in: self)
+    }
+
+    private init(replacing updated: [CaptureStat], in other: ListeningHistory) {
+        captures = updated
+        seconds = other.seconds
+        isFirstHearing = other.isFirstHearing
+        newArtists = other.newArtists
+        heardSongs = other.heardSongs
+        heardArtists = other.heardArtists
+        hasYourMusic = other.hasYourMusic
+        artistArtwork = other.artistArtwork
+        songMetadata = other.songMetadata
+    }
+
+    private init(appending added: [CaptureStat], to other: ListeningHistory) {
+        artistArtwork = other.artistArtwork
+        songMetadata = other.songMetadata
+        captures = other.captures + added
+        // Only the last play whose time is known is measured by what comes next; the plays
+        // before it keep what they had.
+        let measured = other.captures.lastIndex { $0.kind.timeIsKnown } ?? other.captures.count
+        seconds = Array(other.seconds[..<measured])
+            + ListeningEstimate.seconds(for: Array(other.captures[measured...]) + added)
+
+        var songs = other.heardSongs
+        isFirstHearing = other.isFirstHearing + added.map { songs.insert($0.songIdentity).inserted }
+        heardSongs = songs
+        var artists = other.heardArtists
+        newArtists = other.newArtists + Self.newArtists(in: added, heard: &artists)
+        heardArtists = artists
+        hasYourMusic = other.hasYourMusic || added.contains { $0.source == .yourMusic }
     }
 
     public var isEmpty: Bool { captures.isEmpty }
@@ -56,15 +152,19 @@ public struct ListeningHistory: Sendable {
     private init(copying other: ListeningHistory, artistArtwork: [String: String], songMetadata: [String: SongMetadata]) {
         seconds = other.seconds
         isFirstHearing = other.isFirstHearing
+        heardSongs = other.heardSongs
         hasYourMusic = other.hasYourMusic
         self.artistArtwork = artistArtwork
         self.songMetadata = songMetadata
         if let credited = Self.credited(other.captures, songMetadata: songMetadata) {
             captures = credited
-            newArtists = Self.newArtists(in: credited)
+            var artists = Set<String>()
+            newArtists = Self.newArtists(in: credited, heard: &artists)
+            heardArtists = artists
         } else {
             captures = other.captures
             newArtists = other.newArtists
+            heardArtists = other.heardArtists
         }
     }
 
@@ -76,6 +176,8 @@ public struct ListeningHistory: Sendable {
         var changed = false
         // Each spelling of a song is parsed once, however often it was played.
         var parsed: [String: [ArtistCredit]] = [:]
+        // And each song credited anew once, shared by its plays as before.
+        var recredited: [ObjectIdentifier: CaptureStat.Song] = [:]
         for index in captures.indices where captures[index].mayCreditSeveral {
             let capture = captures[index]
             guard let artists = songMetadata[capture.songIdentity]?.artists, !artists.isEmpty else { continue }
@@ -83,15 +185,16 @@ public struct ListeningHistory: Sendable {
             let credits = parsed[key] ?? ArtistCredits.parse(artist: capture.artistName, title: capture.title, catalogArtists: artists)
             parsed[key] = credits
             guard !credits.isEmpty, credits != capture.credits else { continue }
-            updated[index] = capture.with(credits: credits)
+            let song = recredited[ObjectIdentifier(capture.song)] ?? CaptureStat.Song(copying: capture.song, credits: credits)
+            recredited[ObjectIdentifier(capture.song)] = song
+            updated[index] = capture.with(song: song)
             changed = true
         }
         return changed ? updated : nil
     }
 
-    private static func newArtists(in ordered: [CaptureStat]) -> [[String]] {
-        var heard = Set<String>()
-        return ordered.map { capture in
+    private static func newArtists(in ordered: [CaptureStat], heard: inout Set<String>) -> [[String]] {
+        ordered.map { capture in
             capture.credits.compactMap { heard.insert($0.identity).inserted ? $0.identity : nil }
         }
     }
@@ -112,6 +215,9 @@ public struct ListeningHistory: Sendable {
         seconds = indices.map { other.seconds[$0] }
         isFirstHearing = indices.map { other.isFirstHearing[$0] }
         newArtists = indices.map { other.newArtists[$0] }
+        // A part of the history is never added to, so what the whole has heard will do.
+        heardSongs = other.heardSongs
+        heardArtists = other.heardArtists
         hasYourMusic = other.hasYourMusic
         artistArtwork = other.artistArtwork
         songMetadata = other.songMetadata

@@ -15,17 +15,23 @@ public enum ListeningEstimate {
     /// since the song after the end of a range is what measures the last one in it.
     public static func seconds(for ordered: [CaptureStat]) -> [TimeInterval] {
         var result = [TimeInterval](repeating: typicalSongSeconds, count: ordered.count)
-        var nextWitnessed: Date?
+        var nextWitnessed: CaptureStat?
         for index in ordered.indices.reversed() {
             let capture = ordered[index]
             // Imports are timestamped when we found them, often dozens at once, so their
             // gaps mean nothing. They keep the typical length.
             guard capture.kind.timeIsKnown else { continue }
             if let next = nextWitnessed {
-                let gap = next.timeIntervalSince(capture.capturedAt)
-                if gap > 0, gap <= longestPlausibleGap { result[index] = gap }
+                let gap = next.capturedAt.timeIntervalSince(capture.capturedAt)
+                if gap > 0, gap <= longestPlausibleGap {
+                    result[index] = gap
+                } else if gap == 0, next.songIdentity == capture.songIdentity {
+                    // The same play from two devices, not yet merged: the copy after it has
+                    // the listening.
+                    result[index] = 0
+                }
             }
-            nextWitnessed = capture.capturedAt
+            nextWitnessed = capture
         }
         return result
     }

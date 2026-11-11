@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import OSLog
+import Synchronization
 import TracksCore
 
 /// Songs downloaded from your servers to play without a connection: the original files, FLAC
@@ -392,9 +393,23 @@ private final class DownloadDelegate: NSObject, URLSessionDownloadDelegate, @unc
     @MainActor weak var owner: Downloads?
     private nonisolated static let log = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Tracks", category: "Downloads")
 
+    /// The share last handed on for each task, or -1 for one of unknown size.
+    private let reported = Mutex<[Int: Double]>([:])
+
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
         guard let (id, attempt) = Downloads.parse(downloadTask.taskDescription) else { return }
         let fraction = totalBytesExpectedToWrite > 0 ? Double(totalBytesWritten) / Double(totalBytesExpectedToWrite) : nil
+        // The session reports every chunk, and each report was a trip to the main actor: a
+        // few FLACs at once kept it busy. The owner only shows a change of a percent or more,
+        // by the same rule.
+        let share = fraction ?? -1
+        let isNew = reported.withLock { reported in
+            if let last = reported[downloadTask.taskIdentifier],
+               share < 1, fraction == nil ? last == -1 : share - last < 0.01 { return false }
+            reported[downloadTask.taskIdentifier] = share
+            return true
+        }
+        guard isNew else { return }
         Task { @MainActor in self.owner?.didWrite(id, attempt: attempt, fraction: fraction) }
     }
 
@@ -435,6 +450,7 @@ private final class DownloadDelegate: NSObject, URLSessionDownloadDelegate, @unc
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: (any Error)?) {
+        _ = reported.withLock { $0.removeValue(forKey: task.taskIdentifier) }
         guard let error, let (id, attempt) = Downloads.parse(task.taskDescription) else { return }
         // A cancel Tracks didn't ask for (the app was quit, say) is a failure, to try again; one it
         // did ask for is ignored by the owner, which knows the attempt was stopped.

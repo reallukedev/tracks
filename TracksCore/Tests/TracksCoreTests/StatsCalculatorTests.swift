@@ -180,6 +180,43 @@ struct StatsCalculatorTests {
         #expect(summary.capturesWithoutStation == 2)
     }
     
+    /// 1 March 2028 is the 61st day of a leap year, and 61 days into 2027 is 2 March.
+    @Test("this time last year lines up by date across a leap day")
+    func lastYearLinesUpByDate() {
+        let captures = [
+            capture("last-year-same-day", at: date(2027, 3, 1, 6)),
+            capture("last-year-next-day", at: date(2027, 3, 2, 6)),
+            capture("this-year", at: date(2028, 2, 1)),
+        ]
+        let summary = StatsCalculator.summary(
+            range: .year, captures: captures, sessions: [],
+            calendar: calendar, now: date(2028, 3, 1)
+        )
+        #expect(summary.previousCaptureCount == 1)
+    }
+
+    /// The clocks went forward early on Sunday 29 March 2026, so noon that day is 11 hours
+    /// into the week's last day, and 11 hours into the Sunday before is 11 AM.
+    @Test("this time last week lines up by the clock across a change of the clocks")
+    func lastWeekLinesUpByClock() throws {
+        var london = Calendar(identifier: .gregorian)
+        london.timeZone = try #require(TimeZone(identifier: "Europe/London"))
+        london.firstWeekday = 2
+        func at(_ day: Int, _ hour: Int, _ minute: Int = 0) throws -> Date {
+            try #require(london.date(from: DateComponents(year: 2026, month: 3, day: day, hour: hour, minute: minute)))
+        }
+        let captures = [
+            capture("last-sunday-before-noon", at: try at(22, 11, 30)),
+            capture("last-sunday-after-noon", at: try at(22, 12, 30)),
+            capture("this-sunday", at: try at(29, 10)),
+        ]
+        let summary = StatsCalculator.summary(
+            range: .week, captures: captures, sessions: [],
+            calendar: london, now: try at(29, 12)
+        )
+        #expect(summary.previousCaptureCount == 1)
+    }
+
     @Test("week range covers 7 days")
     func weekInterval() throws {
         let interval = try #require(StatsRange.week.interval(containing: date(2026, 9, 8), calendar: calendar))

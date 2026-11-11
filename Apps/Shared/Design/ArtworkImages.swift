@@ -2,6 +2,11 @@ import Foundation
 import ImageIO
 import CryptoKit
 import TracksCore
+#if os(iOS)
+import UIKit
+#else
+import AppKit
+#endif
 
 /// Album covers, fetched once, decoded off the main actor at the size they're drawn, and
 /// kept in memory.
@@ -20,13 +25,36 @@ nonisolated final class ArtworkImages: Sendable {
     }
 
     /// Thread-safe, and emptied by the system under memory pressure.
-    private nonisolated(unsafe) let images: NSCache<KeyBox, ImageBox> = {
-        let cache = NSCache<KeyBox, ImageBox>()
-        // Enough for several screens of rows at any size, measured in decoded pixels.
-        cache.totalCostLimit = 96 * 1024 * 1024
-        return cache
-    }()
+    private nonisolated(unsafe) let images: NSCache<KeyBox, ImageBox>
     private let loads = InFlight<Key, CGImage?>()
+    private nonisolated(unsafe) let observers: [any NSObjectProtocol]
+    private let pressure: any DispatchSourceMemoryPressure
+
+    private init() {
+        let images = NSCache<KeyBox, ImageBox>()
+        // Enough for a few screens of rows at any size, measured in decoded pixels. It was
+        // 96 MB, which an app left open all day filled and kept.
+        images.totalCostLimit = 64 * 1024 * 1024
+        self.images = images
+        // Let go whenever nothing's being looked at, or memory is short: covers come back from
+        // disk, decoded at their size, in a moment. Playing in the background, the system ends
+        // the apps holding the most first.
+        #if os(iOS)
+        let names = [UIApplication.didEnterBackgroundNotification, UIApplication.didReceiveMemoryWarningNotification]
+        #else
+        let names = [NSApplication.didHideNotification]
+        #endif
+        // NSCache is safe to use from any thread; it just isn't marked Sendable.
+        nonisolated(unsafe) let cache = images
+        observers = names.map { name in
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: nil) { _ in
+                cache.removeAllObjects()
+            }
+        }
+        pressure = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .global(qos: .utility))
+        pressure.setEventHandler { cache.removeAllObjects() }
+        pressure.activate()
+    }
 
     /// A cover already decoded at this size, without waiting.
     func cached(_ key: Key) -> CGImage? {

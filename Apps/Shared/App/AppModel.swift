@@ -175,6 +175,8 @@ final class AppModel {
             // Starts the first read of the history now, in the background, so it's under way
             // before any screen asks for it.
             library.connect(to: store, looksUpCatalog: !isDemoLaunch)
+            // Sample songs must never reach Spotlight.
+            if !isDemoLaunch { HistorySpotlight.indexWhenDue() }
         } catch {
             self.store = nil
             self.capture = nil
@@ -530,7 +532,8 @@ final class AppModel {
         if musicSource == .yourMusic { prepareYourMusic() }
         // Twenty seconds at most: a long history on a busy phone takes a few.
         for _ in 0..<200 {
-            if library.isLoaded, playFeed.builtRevision == library.revision { return }
+            // Made from the history once is enough: later plays reach the mixes a little after.
+            if library.isLoaded, playFeed.builtRevision != nil { return }
             try? await Task.sleep(for: .milliseconds(100))
         }
     }
@@ -550,20 +553,34 @@ final class AppModel {
             // Synced rows arrive without a save of any context in this process.
             .NSPersistentStoreRemoteChange,
         ]
+        // Not on the main queue: these are posted from Core Data's own queues, and a `.main`
+        // observer makes the poster wait for the main thread, which can be waiting on them.
         for name in refreshes {
-            observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.library.refresh() }
+            observers.append(center.addObserver(forName: name, object: nil, queue: nil) { [weak self] _ in
+                Task { @MainActor in self?.library.refresh() }
             })
         }
-        observers.append(center.addObserver(forName: .NSCalendarDayChanged, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.library.invalidate() }
+        observers.append(center.addObserver(forName: .NSCalendarDayChanged, object: nil, queue: nil) { [weak self] _ in
+            Task { @MainActor in self?.library.invalidate() }
         })
 
         let (library, player, feed, discovery) = (library, player, playFeed, discovery)
         feedFollower = Task {
             let inputs = Observations { FeedInputs(revision: library.revision, isLoaded: library.isLoaded, signals: player.signals) }
+            var lastBuild: (at: ContinuousClock.Instant, signals: ListeningSignals)?
             for await input in inputs where input.isLoaded {
-                await feed.rebuild(history: library.history, signals: input.signals, revision: input.revision)
+                // Every mix is made again from every play, so a run of new plays (a song every
+                // few seconds, or a batch from iCloud) waits for a while and is made into the
+                // mixes together. Anything you do, a skip or a block, is made at once.
+                if let lastBuild, input.signals == lastBuild.signals {
+                    let due = lastBuild.at + Self.feedSpacing
+                    while ContinuousClock.now < due, player.signals == lastBuild.signals, !Task.isCancelled {
+                        try? await Task.sleep(for: .milliseconds(500))
+                    }
+                }
+                let signals = player.signals
+                lastBuild = (.now, signals)
+                await feed.rebuild(history: library.history, signals: signals, revision: library.revision)
                 // Songs just played, and blocked artists, aren't suggestions any more.
                 discovery.prune()
             }
@@ -580,6 +597,10 @@ final class AppModel {
     }
 
     @ObservationIgnored private var discoveryFollower: Task<Void, Never>?
+
+    /// The least time between two makings of the mixes for new plays alone. Longer than a
+    /// burst of saves, shorter than any song.
+    private static let feedSpacing: Duration = .seconds(30)
 
     private struct DiscoverySeeds: Equatable {
         let hasBuilt: Bool

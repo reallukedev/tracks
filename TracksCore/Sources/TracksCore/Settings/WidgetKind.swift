@@ -6,4 +6,5 @@ public enum WidgetKind {
     public static let lastPlayed = "LastCaptured"
     public static let today = "TodayOnRadio"
     public static let listening = "Listening"
+    public static let topSongs = "TopSongs"
 }

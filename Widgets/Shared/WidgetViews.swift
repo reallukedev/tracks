@@ -8,9 +8,24 @@ import TracksCore
 /// covers as white rectangles.
 struct WidgetArtwork: View {
     let data: Data?
-    var size: CGFloat = 44
+    /// Nil fills the width it's offered, as a square.
+    var size: CGFloat? = 44
 
     var body: some View {
+        if let size {
+            cover
+                .frame(width: size, height: size)
+                .clipShape(.rect(cornerRadius: size / 7))
+        } else {
+            // Clear, so the square takes its size from the width alone.
+            Color.clear
+                .aspectRatio(1, contentMode: .fit)
+                .overlay { cover }
+                .clipShape(.rect(cornerRadius: 8))
+        }
+    }
+
+    private var cover: some View {
         Group {
             if let data, let image = platformImage(from: data) {
                 // `widgetAccentedRenderingMode` only exists on `Image`, so it has to come
@@ -22,12 +37,10 @@ struct WidgetArtwork: View {
             } else {
                 Image(systemName: "music.note")
                     .foregroundStyle(.secondary)
-                    .frame(width: size, height: size)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(.quaternary)
             }
         }
-        .frame(width: size, height: size)
-        .clipShape(.rect(cornerRadius: size / 7))
         // A cover says what someone listened to as plainly as the title does. Redacted on a
         // locked device when they've asked for that, in the same square.
         .privacySensitive()
@@ -52,9 +65,11 @@ struct LastCapturedView: View {
             LastPlayedCard(capture: capture)
                 // A small widget has one tap target, so the whole card opens the song.
                 .widgetURL(DeepLink.song(title: capture.title, artistName: capture.artistName).url)
+                .coverBackground(capture.coverColor)
         } else {
             WidgetEmptyState(isStoreReadable: entry.isStoreReadable, compact: true)
                 .widgetURL(DeepLink.history.url)
+                .containerBackground(.fill.tertiary, for: .widget)
         }
     }
 }
@@ -88,22 +103,22 @@ struct TodayOnRadioView: View {
     }
 }
 
-/// Nothing captured today, or the store couldn't be read.
+/// Nothing played yet (Last Played, `compact`) or today (Today), or the store couldn't be read.
 struct WidgetEmptyState: View {
     let isStoreReadable: Bool
     let compact: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Image(systemName: isStoreReadable ? "radio" : "exclamationmark.triangle")
+            Image(systemName: isStoreReadable ? "music.note.list" : "exclamationmark.triangle")
                 .foregroundStyle(.secondary)
-            Text(isStoreReadable ? "Nothing captured today" : "Can't read captures")
+                .widgetAccentable()
+            // Last Played shows the last song from any day, so it's only empty before the first.
+            Text(isStoreReadable ? (compact ? "Nothing played yet" : "Nothing played today") : "Can't read your history")
                 .font(compact ? .caption : .callout)
                 .foregroundStyle(.secondary)
-            if !compact {
-                Text(isStoreReadable
-                     ? "Play an Apple Music radio station."
-                     : "Open Tracks once to set it up.")
+            if !isStoreReadable {
+                Text("Open Tracks once to set it up.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }

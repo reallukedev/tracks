@@ -282,7 +282,8 @@ final class LibraryPager<Item: MusicLibraryRequestable & Sendable> {
         guard let batch = next, !isLoading else { return }
         let asked = generation
         isLoading = true
-        defer { isLoading = false }
+        // A new query's load owns the flag once it starts.
+        defer { if asked == generation { isLoading = false } }
         let more = try? await batch.nextBatch()
         guard asked == generation else { return }
         guard let more else {
@@ -316,6 +317,16 @@ final class LibraryPager<Item: MusicLibraryRequestable & Sendable> {
     var isLibraryEmpty: Bool {
         if let gatherer { return gatherer.isComplete && gatherer.items.isEmpty }
         return items.isEmpty && loadedQuery.isEmpty
+    }
+
+    /// Whether Sort By has anything to put in order: not for an empty library, or one that
+    /// couldn't be read. Nothing matching the filter keeps it, as the filter will change.
+    var offersOrder: Bool {
+        switch phase {
+        case .failed: false
+        case .empty: !isLibraryEmpty && LibraryDebugState.current != .empty
+        case .loading, .ready: true
+        }
     }
 
     /// "2,431 songs" once they're all counted; "100 songs and more" on iPhone while there are

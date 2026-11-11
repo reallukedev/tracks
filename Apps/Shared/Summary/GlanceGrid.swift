@@ -24,13 +24,21 @@ struct GlanceGrid: View {
                 symbol: "music.note.list",
                 tint: .blue
             ),
-            GlanceTile(
-                title: "New to You",
-                value: summary.firstTimeHeardCount.formatted(),
-                symbol: "sparkles",
-                tint: .purple,
-                detail: summary.newArtistCount > 0 ? "^[\(summary.newArtistCount) new artist](inflect: true)" : nil
-            ),
+            // Over all time every song was new once, so this would only repeat Different Songs.
+            summary.range == .allTime
+                ? GlanceTile(
+                    title: "Albums",
+                    value: summary.uniqueAlbumCount.formatted(),
+                    symbol: "square.stack",
+                    tint: .purple
+                )
+                : GlanceTile(
+                    title: "New to You",
+                    value: summary.firstTimeHeardCount.formatted(),
+                    symbol: "sparkles",
+                    tint: .purple,
+                    detail: summary.newArtistCount > 0 ? "^[\(summary.newArtistCount) new artist](inflect: true)" : nil
+                ),
             GlanceTile(
                 title: "Streak",
                 value: summary.streak.current.formatted(),

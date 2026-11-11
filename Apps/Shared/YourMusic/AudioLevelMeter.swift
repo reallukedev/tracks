@@ -125,7 +125,12 @@ nonisolated final class AudioLevelMeter: @unchecked Sendable {
         )
         var tap: MTAudioProcessingTap?
         let status = MTAudioProcessingTapCreate(kCFAllocatorDefault, &callbacks, kMTAudioProcessingTapCreationFlag_PostEffects, &tap)
-        return status == noErr ? tap : nil
+        guard status == noErr, let tap else {
+            // No tap, so no finalize to balance the retain above.
+            if let clientInfo = callbacks.clientInfo { Unmanaged<HeardSound>.fromOpaque(clientInfo).release() }
+            return nil
+        }
+        return tap
     }
 }
 

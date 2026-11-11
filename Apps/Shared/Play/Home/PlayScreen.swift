@@ -131,8 +131,7 @@ struct PlayScreen: View {
         case .suggestedSongs:
             if blocker == nil {
                 // Tracks Radio leads the crate; with the crate hidden, it leads these instead.
-                // Not while the crate is still coming, or Radio would show here and then leave.
-                SuggestedSongsSection(includesRadio: !layout.isVisible(.forYou) || crateCards.isEmpty && !isCrateLoading)
+                SuggestedSongsSection(includesRadio: !layout.isVisible(.forYou))
             }
         case .suggestedArtists:
             if blocker == nil {
@@ -234,30 +233,20 @@ struct PlayScreen: View {
         let cards = crateCards
         if blocker != nil {
             // Nothing to offer until it can play.
-        } else if !cards.isEmpty {
-            // Tracks Radio in front when there's enough history for it, this hour's mix beside it.
-            ForYouCrate(cards: cards, leadID: cards.contains { $0.id == "station" } ? "station" : leadMix?.id)
-        } else if let station = feed.liveStations.first {
-            StationHero(item: station)
-                .padding(.horizontal, PlayMetrics.margin)
-        } else if feed.hasBuilt, model.library.isLoaded, feed.appleMusicState != .loading {
-            PlayStateCard(
-                symbol: "play.circle",
-                title: String(localized: "Play Something"),
-                message: String(localized: "Search for a song, or open your library. Tracks keeps every song you play here, and makes mixes from them as you listen.")
-            ) {
-                Button("Search Apple Music") { model.beginSearch(in: .appleMusic) }
-                    .buttonStyle(.glassProminent)
-            }
-            .padding(.horizontal, PlayMetrics.margin)
-        } else {
+        } else if isCrateLoading {
+            // The crate's shape until the history is read, so it opens with all its records
+            // rather than Tracks Radio alone and then the mixes arriving around it.
             CratePlaceholder()
+        } else if !cards.isEmpty {
+            // Tracks Radio in front, this hour's mix beside it. With no history yet, Tracks
+            // Radio alone: the same page, with the mixes joining it as you listen.
+            ForYouCrate(cards: cards, leadID: cards.contains { $0.id == "station" } ? "station" : leadMix?.id)
         }
     }
 
-    /// Whether For You is still waiting on the history or Apple Music to show its crate.
+    /// Whether For You is still waiting on the history to show its crate.
     private var isCrateLoading: Bool {
-        feed.liveStations.isEmpty && !(feed.hasBuilt && model.library.isLoaded && feed.appleMusicState != .loading)
+        !(feed.hasBuilt && model.library.isLoaded)
     }
 
     /// The crate: Tracks Radio in the middle, starting in front, with this hour's mix, Discover
@@ -267,18 +256,13 @@ struct PlayScreen: View {
         if let lead = leadMix { cards.append(.mix(lead)) }
         if !feed.discover.isEmpty { cards.append(.discover(feed.discover)) }
         cards += feed.mixes.otherTimes.map(ForYouCard.mix)
-        if isRadioOn, hasHistoryForRadio { cards.insert(.station, at: cards.count / 2) }
+        if isRadioOn { cards.insert(.station, at: cards.count / 2) }
         return cards
     }
 
     /// This hour's mix, or the first mix there is when this hour has no habit yet.
     private var leadMix: Mix? {
         feed.mixes.rightNow ?? feed.mixes.mixes.first
-    }
-
-    /// Whether there's enough history for Tracks Radio to be worth playing.
-    private var hasHistoryForRadio: Bool {
-        !feed.mixes.all.isEmpty && model.library.history.captures.count >= 20
     }
 
     // MARK: - Mixes
@@ -292,17 +276,6 @@ struct PlayScreen: View {
             Shelf(title: String(localized: "Made from Your Listening"), items: shelf) { mix in
                 MixTile(mix: mix)
             }
-        } else if feed.hasBuilt, model.library.isLoaded, !model.library.history.isEmpty, leadMix == nil {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Made from Your Listening")
-                    .font(.title3.bold())
-                    .accessibilityAddTraits(.isHeader)
-                Text("Mixes appear as you listen: songs on repeat, radio finds, and old favorites to come back to.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.horizontal, PlayMetrics.margin)
         }
     }
 
@@ -320,57 +293,6 @@ private struct DiscoverKey: Equatable {
     let artists: Set<String>
     let authorization: MusicAuthorization.Status
     let allowsExplicit: Bool
-}
-
-/// A live station, when there's no history to make a mix from yet.
-struct StationHero: View {
-    let item: FeedItem
-    @Environment(PlayerModel.self) private var player
-    @State private var tint: Color?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            CoverImage(cover: item.cover, size: 132)
-                .shadow(color: .black.opacity(0.35), radius: 14, y: 8)
-                .frame(maxWidth: .infinity)
-                .padding(.top, 4)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Live Radio")
-                    .textCase(.uppercase)
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.8))
-                Text(item.title)
-                    .font(.title.bold())
-                    .foregroundStyle(.white)
-                Text("Start here. Every song you hear is kept, with its station.")
-                    .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.85))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Button {
-                if let (request, context) = item.stationRequest { player.play(request, from: context) }
-            } label: {
-                Label("Play", systemImage: "play.fill")
-                    .font(.headline)
-                    .foregroundStyle(tint ?? .black)
-                    .padding(.horizontal, 24)
-                    .frame(minHeight: 50)
-                    .background(.white, in: .capsule)
-            }
-            .buttonStyle(.pressable)
-        }
-        .padding(20)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous)
-                .fill((tint ?? Color(red: 0.2, green: 0.05, blue: 0.08)).gradient)
-        }
-        .onAppear {
-            if tint == nil, case .artwork(let artwork) = item.cover, let color = artwork.backgroundColor {
-                tint = CoverTint.color(from: color)
-            }
-        }
-    }
 }
 
 /// Asks for Apple Music access, in place, saying what it's for.

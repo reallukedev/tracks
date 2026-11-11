@@ -18,11 +18,21 @@ struct SaveCurrentRadioSongIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
+        .result(dialog: IntentDialog(stringLiteral: try await Self.saveNow()))
+    }
+
+    /// Saves the song, and says what happened. Shared with the Save Radio Song control.
+    @MainActor
+    static func saveNow() async throws -> String {
         // Created before capturing so the capture counts as a change.
         let widgets = WidgetRefresher.shared
         // Paused history keeps nothing, and says so rather than that nothing is playing.
         guard !CaptureService.isHistoryPaused else {
-            return .result(dialog: "History is paused. Resume it in Tracks to save songs.")
+            return String(localized: "History is paused. Resume it in Tracks to save songs.")
+        }
+        // A demo launch's sample history mustn't take in the song really playing.
+        guard !AppModel.shared.isDemoLaunch else {
+            return String(localized: "Tracks is showing sample data, so it can't save songs.")
         }
         // The app's own, when it's running, so the play is scrobbled and written once.
         let service = try CaptureService.shared()
@@ -33,12 +43,12 @@ struct SaveCurrentRadioSongIntent: AppIntent {
         switch decision {
         case .capture:
             guard let capture = service.lastCapture else {
-                return .result(dialog: "Saved.")
+                return String(localized: "Saved.")
             }
-            return .result(dialog: "Saved \(capture.title) by \(capture.artistName).")
+            return String(localized: "Saved \(capture.title) by \(capture.artistName).")
 
         case .ignore(let reason):
-            return .result(dialog: IntentDialog(stringLiteral: Self.explain(reason)))
+            return explain(reason)
         }
     }
 
@@ -100,13 +110,18 @@ struct TracksShortcuts: AppShortcutsProvider {
             shortTitle: "My Mix",
             systemImageName: "sun.max"
         )
+        // Ten is the most an app can have. Discover has no shortcut of its own: "Play
+        // Discover in Tracks" comes from Play a Mix's parameter below.
         AppShortcut(
-            intent: PlayInTracksIntent(choice: .discover),
+            intent: TopArtistIntent(),
             phrases: [
-                "Play something new in \(.applicationName)",
+                "Who's my top artist in \(.applicationName)",
+                "Who have I listened to most in \(.applicationName)",
+                "My top artist \(\.$period) in \(.applicationName)",
+                "Who's my top artist \(\.$period) in \(.applicationName)",
             ],
-            shortTitle: "Discover",
-            systemImageName: "binoculars"
+            shortTitle: "Top Artist",
+            systemImageName: "music.mic"
         )
         AppShortcut(
             intent: SearchInTracksIntent(),

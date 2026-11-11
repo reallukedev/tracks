@@ -441,8 +441,10 @@ private struct ClipGlow: View {
     }
 
     /// The average of a cover, a little more saturated than it comes out, which is greyer
-    /// than the cover looks. Nil without a cover.
-    static func color(of address: String?) async -> Color? {
+    /// than the cover looks. Nil without a cover. Off the main actor: decoding the cover and
+    /// a Core Image render would otherwise hold up the App Clip's first moments.
+    @concurrent
+    nonisolated static func color(of address: String?) async -> Color? {
         guard let address, let url = URL(string: address),
               let (data, _) = try? await URLSession.shared.data(from: url),
               let image = CIImage(data: data)
