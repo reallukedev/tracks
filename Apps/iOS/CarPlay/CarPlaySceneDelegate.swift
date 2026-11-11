@@ -27,6 +27,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     var shelfLength = 4
     let model = AppModel.shared
     private var watch: Task<Void, Never>?
+    private var connecting: [Task<Void, Never>] = []
     private var refresh: Task<Void, Never>?
     /// The source Search was last drawn for.
     private var searchBuiltFor: MusicSource?
@@ -117,22 +118,23 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         // Apple Music access, once the car has finished connecting. Held back from now even
         // when the car started Tracks and nothing has asked the player to wait yet.
         PlayerQuiet.followScenes()
-        Task { [weak self] in
+        connecting.append(Task { [weak self] in
             await PlayerQuiet.settled()
             self?.settingsMayHaveChanged()
-        }
+        })
 
         // The car can start Tracks with no phone window, so nothing else has started capture,
         // or listened for SharePlay.
         Task { await model.startCapture() }
         SharePlayController.shared.start(model: model)
-        Task {
+        connecting.append(Task { [weak self, model] in
             await model.prepareForPlaying()
-            rebuild(after: .zero)
+            self?.rebuild(after: .zero)
+            guard !Task.isCancelled else { return }
             await model.playFeed.loadAppleMusic()
             await model.playFeed.loadFromYourArtists()
-            rebuild()
-        }
+            self?.rebuild()
+        })
         shownSettings = (PlayPreferences.isTracksRadioOn, PlayPreferences.autoplay)
         showsAccessProblem = needsAppleMusicAccess
         // Only our own defaults, and never on the main queue. With `object: nil` this heard
@@ -169,6 +171,8 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     }
 
     func templateApplicationScene(_ scene: CPTemplateApplicationScene, didDisconnectInterfaceController interfaceController: CPInterfaceController) {
+        connecting.forEach { $0.cancel() }
+        connecting = []
         watch?.cancel()
         refresh?.cancel()
         isRebuildingNow = false
@@ -265,6 +269,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     private func rebuild(after delay: Duration = .milliseconds(500)) {
         // A rebuild asked for at once isn't put off by changes arriving behind it: on
         // connecting, the watch's first look would otherwise hold the tabs back half a second.
+        guard interface != nil else { return }
         if isRebuildingNow, delay > .zero { return }
         refresh?.cancel()
         isRebuildingNow = delay == .zero
@@ -336,7 +341,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     private func settingsMayHaveChanged() {
         // Once for a burst: the phone writes its own defaults several times a second while
         // music plays, and each write lands here.
-        guard settingsCheck == nil else { return }
+        guard interface != nil, settingsCheck == nil else { return }
         settingsCheck = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(300))
             guard let self, !Task.isCancelled else { return }
@@ -375,6 +380,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
 
     /// Radio's list again, on its own: its first row follows Tracks Radio starting and pausing.
     func refreshRadioList() {
+        guard interface != nil else { return }
         radioRefresh?.cancel()
         radioRefresh = Task {
             let sections = await radioSections()

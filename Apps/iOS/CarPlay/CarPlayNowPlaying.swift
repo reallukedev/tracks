@@ -135,6 +135,8 @@ extension CarPlaySceneDelegate {
     }
 
     func updateNowPlayingButtons() {
+        // The template is shared: a car that has gone mustn't set buttons for the next one.
+        guard interface != nil else { return }
         let player = model.player
         let current = player.current
         let picksAsItGoes = player.isLive || player.context?.isStation == true
