@@ -101,4 +101,4 @@ This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md). Please repo
 
 ## License
 
-Contributions are accepted under the [MIT License](LICENSE).
+Contributions are accepted under the [GNU General Public License v3.0](LICENSE).

@@ -320,7 +320,7 @@ Tracks talks to Apple Music for catalog lookups, artwork and the "Heard on Radio
 
 ## License
 
-Tracks is available under the [MIT License](LICENSE).
+Tracks is available under the [GNU General Public License v3.0](LICENSE).
 
 Apple Music, iPhone and Mac are trademarks of Apple Inc. Tracks is not affiliated with or
 endorsed by Apple or Last.fm.
