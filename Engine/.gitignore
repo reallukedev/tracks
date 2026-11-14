@@ -1,0 +1,4 @@
+target/
+/apple/TracksEngine/TracksEngineFFI.xcframework/
+/apple/TracksEngine/Sources/TracksEngine/TracksEngine.swift
+/apple/TracksEngine/.build/

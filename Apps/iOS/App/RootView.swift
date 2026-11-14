@@ -14,7 +14,7 @@ struct RootView: View {
     /// last otherwise, so the opening tab is always far left.
     @AppStorage(OpeningTab.storageKey) private var openingTab: OpeningTab = .standard
     @State private var showsNowPlaying = false
-    @Namespace private var nowPlayingTransition
+    @State private var nowPlayingReopens = 0
     @Environment(\.scenePhase) private var scenePhase
     @State private var wasInBackground = false
     /// Made once: a new one on each redraw, as a tab switch makes, would redraw every song
@@ -50,13 +50,13 @@ struct RootView: View {
                 if let device = model.controlledDevice {
                     RemoteMiniPlayer(device: device)
                 } else {
-                    MiniPlayer { showsNowPlaying = true }
-                        .matchedTransitionSource(id: "nowPlaying", in: nowPlayingTransition)
+                    MiniPlayer(open: openNowPlaying)
                 }
             }
             .fullScreenCover(isPresented: $showsNowPlaying) {
-                NowPlayingView(onNavigate: go(to:))
-                    .navigationTransition(.zoom(sourceID: "nowPlaying", in: nowPlayingTransition))
+                NowPlayingView(onNavigate: go(to:), reopenRequests: nowPlayingReopens)
+                    // Clear, so the tabs show above the player as it's pulled down.
+                    .presentationBackground(.clear)
                     .songInfoSheet(model) { route in
                         showsNowPlaying = false
                         go(to: .play(route))
@@ -70,7 +70,7 @@ struct RootView: View {
             }
             #endif
             // The song a shake finds plays in Now Playing, so you see what it is.
-            .shakeToPlay(model.player) { showsNowPlaying = true }
+            .shakeToPlay(model.player, onPlay: openNowPlaying)
             // Songs being added to a playlist, from a menu anywhere.
             .sheet(item: Bindable(model.yourMusic.playlists).picking) { PlaylistPickerSheet(pick: $0) }
             // Get Info, from any song's menu. Now Playing shows its own over itself.
@@ -109,7 +109,7 @@ struct RootView: View {
             }
             #endif
             .onChange(of: player.hasQueue) { _, hasQueue in
-                if hasQueue, LaunchScene.opensNowPlaying { showsNowPlaying = true }
+                if hasQueue, LaunchScene.opensNowPlaying { openNowPlaying() }
             }
             .modelContainer(store.container)
             .environment(model)
@@ -236,6 +236,15 @@ struct RootView: View {
             }
             .environment(\.openPlayRoute, OpenPlayRouteAction(stack: "search") { search.path.append($0) })
         }
+    }
+
+    /// Without the system's animation: Now Playing slides itself up (see PullToClose), and
+    /// takes touches while it does. Tapped while it's still sliding away, it comes back.
+    private func openNowPlaying() {
+        guard !showsNowPlaying else { return nowPlayingReopens += 1 }
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { showsNowPlaying = true }
     }
 
     /// After Now Playing closes: onto the Play tab's stack, or Summary's for your stats.

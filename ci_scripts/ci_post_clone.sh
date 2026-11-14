@@ -14,6 +14,13 @@ export HOMEBREW_NO_INSTALL_CLEANUP=1
 brew install xcodegen
 xcodegen generate
 
+# The Rust engine the apps link. Xcode Cloud images have no Rust, so install a minimal one.
+if ! command -v cargo >/dev/null; then
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
+  . "$HOME/.cargo/env"
+fi
+Engine/build-apple.sh
+
 # Last.fm credentials and SharePlay's relay come from the workflow's secret environment
 # variables. The committed xcconfig leaves them empty and includes Config/Secrets.xcconfig if
 # it exists, the same file a local release build uses. ci_pre_xcodebuild.sh stops an archive

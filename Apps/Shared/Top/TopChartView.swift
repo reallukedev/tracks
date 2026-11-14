@@ -47,9 +47,9 @@ struct TopChartView: View {
                 if shown != nil {
                     do { try await Task.sleep(for: LiveUpdate.settle) } catch { return }
                 }
-                let (kind, period, scope, history) = (kind, period, sources.scope, model.library.history)
+                let (kind, period, scope, history, engine) = (kind, period, sources.scope, model.library.history, model.library.engineSource)
                 let next = await OffMainActor.run {
-                    ChartSnapshot.make(kind: kind, period: period, scope: scope, history: history.scoped(to: scope))
+                    ChartSnapshot.make(kind: kind, period: period, scope: scope, history: history.scoped(to: scope), engine: engine?.engine)
                 }
                 guard !Task.isCancelled, next != snapshot else { return }
                 // New listening in the same chart rolls in; a different chart just appears.
