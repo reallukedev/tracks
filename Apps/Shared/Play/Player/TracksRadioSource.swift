@@ -86,12 +86,22 @@ enum TracksRadioSource {
     /// What has landed on Tracks Radio at each part of the day and on drives, kept on this
     /// device so the next listen starts from it. Genre families, decades and counts only.
     static var habits: RadioHabits {
-        RadioHabits(stored: UserDefaults.standard.string(forKey: habitsKey) ?? "")
+        let stored = UserDefaults.standard.string(forKey: habitsKey) ?? ""
+        if let decoded, decoded.stored == stored { return decoded.habits }
+        let habits = RadioHabits(stored: stored)
+        decoded = (stored, habits)
+        return habits
     }
 
     static func keep(_ habits: RadioHabits) {
-        UserDefaults.standard.set(habits.stored, forKey: habitsKey)
+        let stored = habits.stored
+        UserDefaults.standard.set(stored, forKey: habitsKey)
+        decoded = stored.isEmpty ? nil : (stored, habits)
     }
+
+    /// The habits as last decoded, and the text they came from: decoding is JSON, and the
+    /// text seldom changes between radios.
+    private static var decoded: (stored: String, habits: RadioHabits)?
 
     static let habitsKey = "tracksRadioHabits"
 

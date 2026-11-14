@@ -114,7 +114,6 @@ struct ArtistFeed: View {
 
 private struct FeedCardView: View {
     let card: ArtistFeed.Card
-    @State private var isHovered = false
 
     var body: some View {
         Group {
@@ -126,11 +125,7 @@ private struct FeedCardView: View {
             }
         }
         .clipShape(.rect(cornerRadius: 24, style: .continuous))
-        .shadow(color: .black.opacity(isHovered ? 0.22 : 0.12), radius: isHovered ? 22 : 14, y: isHovered ? 12 : 7)
-        .scaleEffect(isHovered ? 1.008 : 1)
-        .onHover { hovering in
-            withAnimation(PlayMotion.hover) { isHovered = hovering }
-        }
+        .shadow(color: .black.opacity(0.12), radius: 14, y: 7)
     }
 }
 

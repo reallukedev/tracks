@@ -18,41 +18,42 @@ struct SessionLifecycleTests {
 
     @discardableResult
     func session(startedAt: Date, lastActivity: Date, station: String? = "Apple Music 1") throws -> Session {
-        let session = try store.openSession(stationName: station, policy: policy, now: startedAt)
+        let session = try TracksStore.openSession(in: store.context, stationName: station, policy: policy, now: startedAt)
         session.lastActivityAt = lastActivity
         try store.context.save()
         return session
     }
 
     @Test("a session still within the timeout stays open")
-    func staysOpen() throws {
+    func staysOpen() async throws {
         let live = try session(startedAt: start, lastActivity: start)
-        let closed = try store.closeStaleSessions(policy: policy, now: start.addingTimeInterval(899))
-        #expect(closed.isEmpty)
+        let closed = try await store.closeStaleSessions(policy: policy, now: start.addingTimeInterval(899))
+        #expect(closed == 0)
         #expect(live.isOpen)
     }
 
     @Test("a session past the timeout is closed")
-    func closesWhenQuiet() throws {
+    func closesWhenQuiet() async throws {
         let stale = try session(startedAt: start, lastActivity: start)
-        let closed = try store.closeStaleSessions(policy: policy, now: start.addingTimeInterval(900))
-        #expect(closed.count == 1)
-        #expect(!stale.isOpen)
+        let closed = try await store.closeStaleSessions(policy: policy, now: start.addingTimeInterval(900))
+        #expect(closed == 1)
+        #expect(try !store.stored(stale).isOpen)
     }
 
     /// Closing at `now` would count the silence as listening.
     @Test("a closed session ends at its last activity, not at the moment it was noticed")
-    func endsAtLastActivity() throws {
+    func endsAtLastActivity() async throws {
         let stale = try session(startedAt: start, lastActivity: start.addingTimeInterval(120))
-        try store.closeStaleSessions(policy: policy, now: start.addingTimeInterval(3_600))
-        #expect(stale.endedAt == start.addingTimeInterval(120))
-        #expect(stale.duration == 120)
+        try await store.closeStaleSessions(policy: policy, now: start.addingTimeInterval(3_600))
+        #expect(try store.stored(stale).endedAt == start.addingTimeInterval(120))
+        #expect(try store.stored(stale).duration == 120)
     }
 
     @Test("a station change starts a new session and closes the old one")
     func stationChange() throws {
         let first = try session(startedAt: start, lastActivity: start)
-        let second = try store.openSession(
+        let second = try TracksStore.openSession(
+            in: store.context,
             stationName: "Apple Música Uno", policy: policy, now: start.addingTimeInterval(60)
         )
         try store.context.save()
@@ -65,7 +66,8 @@ struct SessionLifecycleTests {
     @Test("continuing on the same station reuses the open session")
     func sameStationContinues() throws {
         let first = try session(startedAt: start, lastActivity: start)
-        let again = try store.openSession(
+        let again = try TracksStore.openSession(
+            in: store.context,
             stationName: "Apple Music 1", policy: policy, now: start.addingTimeInterval(60)
         )
         #expect(first.persistentModelID == again.persistentModelID)
@@ -73,10 +75,11 @@ struct SessionLifecycleTests {
     }
 
     @Test("one station reuses its row rather than creating duplicates")
-    func stationDeduped() throws {
+    func stationDeduped() async throws {
         try session(startedAt: start, lastActivity: start)
-        try store.closeStaleSessions(policy: policy, now: start.addingTimeInterval(1_000))
-        _ = try store.openSession(
+        try await store.closeStaleSessions(policy: policy, now: start.addingTimeInterval(1_000))
+        _ = try TracksStore.openSession(
+            in: store.context,
             stationName: "Apple Music 1", policy: policy, now: start.addingTimeInterval(2_000)
         )
         try store.context.save()
@@ -86,10 +89,10 @@ struct SessionLifecycleTests {
     }
 
     @Test("the open session is reported while live and gone once closed")
-    func currentOpenSession() throws {
+    func currentOpenSession() async throws {
         try session(startedAt: start, lastActivity: start)
         #expect(try store.currentOpenSession() != nil)
-        try store.closeStaleSessions(policy: policy, now: start.addingTimeInterval(1_000))
+        try await store.closeStaleSessions(policy: policy, now: start.addingTimeInterval(1_000))
         #expect(try store.currentOpenSession() == nil)
     }
 }
@@ -108,11 +111,12 @@ struct LateStationNamingTests {
 
     @Test("a nameless session is named once the station becomes known")
     func namesExistingSession() throws {
-        let session = try store.openSession(stationName: nil, now: start)
+        let session = try TracksStore.openSession(in: store.context, stationName: nil, now: start)
         try store.context.save()
         #expect(session.station == nil)
 
-        let same = try store.openSession(
+        let same = try TracksStore.openSession(
+            in: store.context,
             stationName: "Apple Music 1", now: start.addingTimeInterval(30)
         )
         try store.context.save()
@@ -124,8 +128,8 @@ struct LateStationNamingTests {
     /// Learning the name isn't a station change.
     @Test("naming an open session does not start a new one")
     func doesNotFragment() throws {
-        _ = try store.openSession(stationName: nil, now: start)
-        _ = try store.openSession(stationName: "Apple Music 1", now: start.addingTimeInterval(30))
+        _ = try TracksStore.openSession(in: store.context, stationName: nil, now: start)
+        _ = try TracksStore.openSession(in: store.context, stationName: "Apple Music 1", now: start.addingTimeInterval(30))
         try store.context.save()
 
         #expect(try store.context.fetch(FetchDescriptor<Session>()).count == 1)
@@ -133,8 +137,8 @@ struct LateStationNamingTests {
 
     @Test("a different station still starts a new session")
     func realChangeStillSplits() throws {
-        _ = try store.openSession(stationName: "Apple Music 1", now: start)
-        _ = try store.openSession(stationName: "Apple Música Uno", now: start.addingTimeInterval(30))
+        _ = try TracksStore.openSession(in: store.context, stationName: "Apple Music 1", now: start)
+        _ = try TracksStore.openSession(in: store.context, stationName: "Apple Música Uno", now: start.addingTimeInterval(30))
         try store.context.save()
 
         #expect(try store.context.fetch(FetchDescriptor<Session>()).count == 2)

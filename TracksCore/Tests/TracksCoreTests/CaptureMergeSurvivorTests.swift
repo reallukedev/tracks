@@ -239,14 +239,14 @@ struct CaptureMergeSurvivorTests {
     }
 
     @Test("stations that can't be told apart are both kept")
-    func exactStationCopiesStay() throws {
+    func exactStationCopiesStay() async throws {
         store.context.insert(Station(name: "Chill", firstSeenAt: start))
         store.context.insert(Station(name: "Chill", firstSeenAt: start))
         store.context.insert(Station(name: "Rock", firstSeenAt: start))
         store.context.insert(Station(name: "rock", firstSeenAt: start.addingTimeInterval(60)))
         try store.context.save()
 
-        #expect(try store.mergeDuplicateStations() == 1)
+        #expect(try await store.mergeDuplicateStations() == 1)
         #expect(try store.context.fetch(FetchDescriptor<Station>()).count == 3)
     }
 }

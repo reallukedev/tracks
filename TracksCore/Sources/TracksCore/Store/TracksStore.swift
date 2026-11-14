@@ -208,6 +208,15 @@ public final class TracksStore {
     /// the screens and the merge share its first full read.
     public private(set) lazy var historyReader = ListeningHistoryReader(container: container)
 
+    /// Capture, the queues and reconciling write through this, off the main actor.
+    private(set) lazy var writer = HistoryWriter(container: container)
+
+    /// Saves what the main context has changed, so rows made there have the identity they'll
+    /// keep before the writer looks for them.
+    func saveMainContext() {
+        if context.hasChanges { try? context.save() }
+    }
+
     // MARK: - Capture
 
     /// Records an observation, or returns nil if the dedupe window says it's the same play.
@@ -251,7 +260,7 @@ public final class TracksStore {
     /// Don't filter this to radio: on-demand songs would never dedupe, and the 10-second poll
     /// would write a new row each time. Imports are excluded because they're dated when
     /// found, so a recent import would suppress a real play.
-    public func lastCaptureDate(songKey: String) throws -> Date? {
+    nonisolated static func lastCaptureDate(songKey: String, in context: ModelContext) throws -> Date? {
         let imported = CaptureKind.imported.rawValue
         var descriptor = FetchDescriptor<Capture>(
             predicate: #Predicate { $0.songKey == songKey && $0.kindRawValue != imported },
@@ -266,23 +275,26 @@ public final class TracksStore {
     /// Only this device's sessions are considered (see ``Session/deviceID``). Another device
     /// listening at the same time has its own open session, which isn't a station change or
     /// a silence here.
+    ///
+    /// Doesn't save.
     @discardableResult
-    public func openSession(
+    nonisolated static func openSession(
+        in context: ModelContext,
         stationName: String?,
         policy: SessionPolicy = .default,
         now: Date = .now,
         deviceID: String = DeviceIdentity.current
     ) throws -> Session {
-        var descriptor = Self.openSessions(deviceID: deviceID)
+        var descriptor = openSessions(deviceID: deviceID)
         descriptor.fetchLimit = 1
         let open = try context.fetch(descriptor).first
 
         // Compared on the same key stations are matched on, so an open session whose station
         // row is spelled differently from what the player reports isn't a station change.
         let decision = policy.decide(
-            openSessionStation: open?.station.map { Self.stationKey($0.name) },
+            openSessionStation: open?.station.map { stationKey($0.name) },
             openSessionLastActivity: open?.lastActivityAt,
-            observedStation: stationName.map(Self.stationKey),
+            observedStation: stationName.map(stationKey),
             now: now
         )
 
@@ -294,7 +306,7 @@ public final class TracksStore {
             // Name a session that started before we knew the station, or whose station was
             // merged away on another device before this session's link to it had synced.
             if open.station == nil, stationName != nil {
-                open.station = try station(named: stationName, now: now)
+                open.station = try station(named: stationName, now: now, in: context)
             }
             return open
         }
@@ -304,7 +316,7 @@ public final class TracksStore {
 
         let session = Session(
             startedAt: now,
-            station: try station(named: stationName, now: now),
+            station: try station(named: stationName, now: now, in: context),
             deviceID: deviceID
         )
         context.insert(session)
@@ -317,15 +329,15 @@ public final class TracksStore {
     /// oldest match wins, as it does there. An exact-name match made a new row whenever the
     /// player's spelling differed from the stored one, which the next merge deleted again,
     /// every session.
-    private func station(named name: String?, now: Date) throws -> Station? {
+    private nonisolated static func station(named name: String?, now: Date, in context: ModelContext) throws -> Station? {
         guard let name else { return nil }
-        let key = Self.stationKey(name)
+        let key = stationKey(name)
         // Station names can't be folded in a predicate. There are only as many rows as
         // stations the user has listened to, so matching in memory is cheap.
         let descriptor = FetchDescriptor<Station>(
             sortBy: [SortDescriptor(\.firstSeenAt), SortDescriptor(\.name)]
         )
-        if let existing = try context.fetch(descriptor).first(where: { Self.stationKey($0.name) == key }) {
+        if let existing = try context.fetch(descriptor).first(where: { stationKey($0.name) == key }) {
             existing.lastSeenAt = max(existing.lastSeenAt, now)
             return existing
         }
@@ -351,17 +363,28 @@ public final class TracksStore {
     ///
     /// Another device's session is left alone: its lack of activity *here* says nothing,
     /// since that device extends it, not this one.
+    ///
+    /// Done by ``writer``, off the main actor.
+    /// - Returns: how many were closed.
     @discardableResult
     public func closeStaleSessions(
         policy: SessionPolicy = .default,
         now: Date = .now,
         deviceID: String = DeviceIdentity.current
+    ) async throws -> Int {
+        try await writer.closeStaleSessions(policy: policy, now: now, deviceID: deviceID)
+    }
+
+    /// ``closeStaleSessions(policy:now:deviceID:)`` on any context. Doesn't save.
+    nonisolated static func closeStaleSessions(
+        in context: ModelContext,
+        policy: SessionPolicy,
+        now: Date,
+        deviceID: String
     ) throws -> [Session] {
-        let open = try context.fetch(Self.openSessions(deviceID: deviceID))
+        let open = try context.fetch(openSessions(deviceID: deviceID))
         let stale = open.filter { now.timeIntervalSince($0.lastActivityAt) >= policy.silenceTimeout }
-        guard !stale.isEmpty else { return [] }
         for session in stale { session.endedAt = session.lastActivityAt }
-        try context.save()
         return stale
     }
 
@@ -381,16 +404,17 @@ public final class TracksStore {
         )
     }
 
-    /// Inserts a capture. Called inside the synchronous decide-and-insert transaction.
+    /// Inserts a capture. Called inside the decide-and-insert transaction. Doesn't save.
     @discardableResult
-    public func insertCapture(
+    nonisolated static func insertCapture(
+        in context: ModelContext,
         songKey: String,
         catalogSongID: String?,
         observation: NowPlayingObservation,
         kind: CaptureKind = .radio,
         session: Session?,
         now: Date = .now
-    ) throws -> Capture {
+    ) -> Capture {
         let capture = Capture(
             songID: catalogSongID ?? "",
             songKey: songKey,
@@ -406,7 +430,6 @@ public final class TracksStore {
         )
         context.insert(capture)
         session?.lastActivityAt = now
-        try context.save()
         return capture
     }
 
@@ -429,7 +452,7 @@ public final class TracksStore {
     ///
     /// One batch, oldest first, so a backlog is searched a drain at a time rather than all at
     /// once, which held up every playlist write behind it.
-    public static func awaitingCatalogID(limit: Int = catalogSearchBatch) -> FetchDescriptor<Capture> {
+    public nonisolated static func awaitingCatalogID(limit: Int = catalogSearchBatch) -> FetchDescriptor<Capture> {
         let maxAttempts = maxCatalogLookupAttempts
         let lastFM = CaptureKind.lastFM.rawValue
         var descriptor = FetchDescriptor<Capture>(
@@ -444,7 +467,7 @@ public final class TracksStore {
     }
 
     /// How many rows one drain searches the catalog for.
-    public static let catalogSearchBatch = 25
+    public nonisolated static let catalogSearchBatch = 25
 
     private func mostRecentCaptureDate(songID: String, kind: CaptureKind) throws -> Date? {
         let raw = kind.rawValue
@@ -517,7 +540,7 @@ public final class TracksStore {
     ///
     /// Only this device's rows. A row synced from the iPhone may still have
     /// `needsPlaylistWrite` set, and writing it here too would add the song twice.
-    public static func pendingPlaylistWrites(
+    public nonisolated static func pendingPlaylistWrites(
         deviceID: String = DeviceIdentity.current
     ) -> FetchDescriptor<Capture> {
         let maxAttempts = maxPlaylistWriteAttempts
@@ -758,13 +781,18 @@ public final class TracksStore {
     ///
     /// Each device creates its own `Station` row, and CloudKit has no unique constraints to
     /// prevent it. Matched on a normalised name, keeping the oldest row, so every device
-    /// reaches the same result on its own copy.
+    /// reaches the same result on its own copy. Done by ``writer``, off the main actor.
     @discardableResult
-    public func mergeDuplicateStations() throws -> Int {
+    public func mergeDuplicateStations() async throws -> Int {
+        try await writer.mergeDuplicateStations()
+    }
+
+    /// ``mergeDuplicateStations()`` on any context. Doesn't save.
+    nonisolated static func mergeDuplicateStations(in context: ModelContext) throws -> Int {
         let stations = try context.fetch(FetchDescriptor<Station>())
         var groups: [String: [Station]] = [:]
-        for station in stations where !Self.stationKey(station.name).isEmpty {
-            groups[Self.stationKey(station.name), default: []].append(station)
+        for station in stations where !stationKey(station.name).isEmpty {
+            groups[stationKey(station.name), default: []].append(station)
         }
 
         var merged = 0
@@ -793,8 +821,6 @@ public final class TracksStore {
                 merged += 1
             }
         }
-
-        if merged > 0 { try context.save() }
         return merged
     }
 
@@ -821,22 +847,31 @@ public final class TracksStore {
             let identity = HistoryImport.key(title: capture.title, artistName: capture.artistName)
             groups[identity, default: []].append(capture)
         }
-        let merged = mergePlays(in: groups.values, policy: policy)
+        let merged = Self.mergePlays(in: groups.values, policy: policy, context: context)
         if merged > 0 { try context.save() }
         return merged
     }
 
-    /// ``mergeDuplicateCaptures(policy:)`` without reading every capture on the main actor.
+    /// ``mergeDuplicateCaptures(policy:)`` without reading every capture, and off the main
+    /// actor.
     ///
     /// ``historyReader`` finds, in the background, the songs with plays close enough to
-    /// merge, and only those songs' plays are fetched and merged here, by the same rules. In a
-    /// long history the full merge took seconds, and it runs after every batch from iCloud.
+    /// merge, and only those songs' plays are fetched and merged, by the same rules, in
+    /// ``writer``. In a long history the full merge took seconds, and it runs after every
+    /// batch from iCloud.
     @discardableResult
     public func mergeDuplicatePlays(policy: DedupePolicy = CaptureSettings().dedupePolicy) async throws -> Int {
-        let groups = try await historyReader.duplicatePlayGroups(policy: policy)
-        guard !groups.isEmpty else { return 0 }
+        try await writer.mergeDuplicatePlays(reader: historyReader, policy: policy)
+    }
 
-        let rows = existingCaptures(groups.flatMap { $0 })
+    /// Merges the plays of the songs in `groups`, each every play of one song as a reader
+    /// found them. Doesn't save.
+    nonisolated static func mergeDuplicatePlays(
+        _ groups: [[PersistentIdentifier]],
+        in context: ModelContext,
+        policy: DedupePolicy
+    ) throws -> Int {
+        let rows = existingCaptures(groups.flatMap { $0 }, in: context)
         var songs: [[Capture]] = []
         for ids in groups {
             let plays = ids.compactMap { rows[$0] }
@@ -850,13 +885,15 @@ public final class TracksStore {
             else { continue }
             songs.append(plays)
         }
-        let merged = mergePlays(in: songs, policy: policy)
-        if merged > 0 { try context.save() }
-        return merged
+        return mergePlays(in: songs, policy: policy, context: context)
     }
 
     /// Merges the plays of each song, given every play of the song. Doesn't save.
-    private func mergePlays(in groups: some Sequence<[Capture]>, policy: DedupePolicy) -> Int {
+    private nonisolated static func mergePlays(
+        in groups: some Sequence<[Capture]>,
+        policy: DedupePolicy,
+        context: ModelContext
+    ) -> Int {
         var merged = 0
         for group in groups where group.count > 1 {
             var remaining = group
@@ -867,18 +904,18 @@ public final class TracksStore {
             while true {
                 var kept: [Capture] = []
                 var mergedThisPass = 0
-                for cluster in Self.playClusters(remaining, policy: policy) {
-                    let ranked = cluster.sorted(by: Self.isPreferredSurvivor)
+                for cluster in playClusters(remaining, policy: policy) {
+                    let ranked = cluster.sorted(by: isPreferredSurvivor)
                     let survivor = ranked[0]
                     // Exact copies, such as Motif's history brought over on two devices at
                     // once, tie, and each device would keep its own and delete the other's.
                     // Leaving a duplicate is better than losing the play everywhere.
-                    if ranked.count > 1, !Self.isPreferredSurvivor(survivor, over: ranked[1]) {
+                    if ranked.count > 1, !isPreferredSurvivor(survivor, over: ranked[1]) {
                         kept.append(contentsOf: ranked)
                         continue
                     }
                     for duplicate in ranked.dropFirst() {
-                        Self.absorb(duplicate, into: survivor)
+                        absorb(duplicate, into: survivor)
                         context.delete(duplicate)
                         mergedThisPass += 1
                     }
@@ -903,7 +940,7 @@ public final class TracksStore {
     ///
     /// `DedupePolicy.mergeWindow(earlier:later:)` depends only on the later row's kind, so
     /// rows that tie on time give the same plays in any order.
-    static func playClusters(_ rows: [Capture], policy: DedupePolicy) -> [[Capture]] {
+    nonisolated static func playClusters(_ rows: [Capture], policy: DedupePolicy) -> [[Capture]] {
         // Each read of a model's property goes through SwiftData, and a sort reads them over
         // and over: sorting a much-played song's rows took most of a merge's main-actor time.
         let keyed = rows.map { (row: $0, capturedAt: $0.capturedAt, kind: $0.kind) }
@@ -950,7 +987,7 @@ public final class TracksStore {
     /// belong to a session, so it's the row with more to lose.
     ///
     /// Among rows of the same kind the oldest wins, then fields that only break exact ties.
-    static func isPreferredSurvivor(_ lhs: Capture, over rhs: Capture) -> Bool {
+    nonisolated static func isPreferredSurvivor(_ lhs: Capture, over rhs: Capture) -> Bool {
         let lhsRank = survivorRank(lhs.kind), rhsRank = survivorRank(rhs.kind)
         if lhsRank != rhsRank { return lhsRank < rhsRank }
         if lhs.capturedAt != rhs.capturedAt { return lhs.capturedAt < rhs.capturedAt }
@@ -964,7 +1001,7 @@ public final class TracksStore {
             < (rhs.addedToPlaylistAt != nil ? 0 : 1, rhs.scrobbledAt != nil ? 0 : 1)
     }
 
-    private static func survivorRank(_ kind: CaptureKind) -> Int {
+    private nonisolated static func survivorRank(_ kind: CaptureKind) -> Int {
         switch kind {
         case .radio: 0
         case .onDemand: 1
@@ -975,7 +1012,7 @@ public final class TracksStore {
     }
 
     /// Moves what a duplicate knew onto the row that stays, so deleting it loses nothing.
-    private static func absorb(_ duplicate: Capture, into survivor: Capture) {
+    private nonisolated static func absorb(_ duplicate: Capture, into survivor: Capture) {
         // Check artwork is loadable, not just present: it may be a `musicKit://` URL (see
         // `ArtworkURL`).
         if !isLoadableArtwork(survivor.artworkURL) {
@@ -996,7 +1033,7 @@ public final class TracksStore {
     }
 
     /// See ``ArtworkURL``.
-    public static func isLoadableArtwork(_ urlString: String?) -> Bool {
+    public nonisolated static func isLoadableArtwork(_ urlString: String?) -> Bool {
         ArtworkURL.isLoadable(urlString)
     }
 
@@ -1026,19 +1063,12 @@ public final class TracksStore {
         return rows.count
     }
 
-    /// ``clearUnloadableArtwork()``, finding the rows through ``historyReader`` in the
-    /// background. The store can't index the narrowing, so even that scanned every row on the
-    /// main actor, after every synced change.
+    /// ``clearUnloadableArtwork()``, finding the rows through ``historyReader`` and clearing
+    /// them in ``writer``. The store can't index the narrowing, so even that scanned every row
+    /// on the main actor, after every synced change.
     @discardableResult
     public func clearUnloadableArtworkFoundInBackground() async throws -> Int {
-        let ids = try await historyReader.captureIDsWithUnloadableArtwork()
-        guard !ids.isEmpty else { return 0 }
-        // Checked again, in case a cover was found since the reader looked.
-        let rows = existingCaptures(ids).values.filter { $0.artworkURL != nil && !Self.isLoadableArtwork($0.artworkURL) }
-        guard !rows.isEmpty else { return 0 }
-        for row in rows { row.artworkURL = nil }
-        try context.save()
-        return rows.count
+        try await writer.clearUnloadableArtwork(reader: historyReader)
     }
 
     /// Rows whose cover address doesn't start with a lowercase `http://` or `https://`: a
@@ -1099,14 +1129,14 @@ public final class TracksStore {
 
     // MARK: - Scrobbling
 
-    public static let maxScrobbleAttempts = 3
+    public nonisolated static let maxScrobbleAttempts = 3
 
     /// Songs owed a scrobble, oldest first.
     ///
     /// Only this device's rows, or every device would scrobble every synced row. Imports are
     /// left out unless `includingImported`, since they're dated when found (see
     /// ``HistoryImport``).
-    public static func pendingScrobbles(
+    public nonisolated static func pendingScrobbles(
         deviceID: String = DeviceIdentity.current,
         includingImported: Bool,
         limit: Int = 50

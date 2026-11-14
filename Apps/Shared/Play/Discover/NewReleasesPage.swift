@@ -424,7 +424,7 @@ struct ReleaseTile: View {
                     }
             }
         }
-        .shadow(color: .black.opacity(isHovered ? 0.25 : 0.12), radius: isHovered ? 12 : 6, y: isHovered ? 6 : 3)
+        .shadow(color: .black.opacity(0.12), radius: 6, y: 3)
         .overlay(alignment: .bottomTrailing) {
             if isHovered, !release.isUpcoming {
                 Button(action: playAlbum) {

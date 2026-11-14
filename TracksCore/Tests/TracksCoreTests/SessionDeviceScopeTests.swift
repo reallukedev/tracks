@@ -18,7 +18,7 @@ struct SessionDeviceScopeTests {
 
     @Test("a new session records the device that opened it")
     func stampsDevice() throws {
-        let session = try store.openSession(stationName: "Chill", policy: policy, now: start, deviceID: "mac")
+        let session = try TracksStore.openSession(in: store.context, stationName: "Chill", policy: policy, now: start, deviceID: "mac")
         #expect(session.deviceID == "mac")
     }
 
@@ -26,11 +26,13 @@ struct SessionDeviceScopeTests {
     /// on every observation, as if the station had changed.
     @Test("two devices on different stations keep their own sessions open")
     func concurrentDevicesDoNotSplitEachOther() throws {
-        let mac = try store.openSession(stationName: "Chill", policy: policy, now: start, deviceID: "mac")
-        let phone = try store.openSession(
+        let mac = try TracksStore.openSession(in: store.context, stationName: "Chill", policy: policy, now: start, deviceID: "mac")
+        let phone = try TracksStore.openSession(
+            in: store.context,
             stationName: "Hits", policy: policy, now: start.addingTimeInterval(10), deviceID: "phone"
         )
-        let macAgain = try store.openSession(
+        let macAgain = try TracksStore.openSession(
+            in: store.context,
             stationName: "Chill", policy: policy, now: start.addingTimeInterval(20), deviceID: "mac"
         )
         try store.context.save()
@@ -45,37 +47,37 @@ struct SessionDeviceScopeTests {
 
     /// The other device's session looks quiet here only because this device doesn't extend it.
     @Test("closing stale sessions leaves another device's session alone")
-    func closeIsScopedToDevice() throws {
-        let phone = try store.openSession(stationName: "Hits", policy: policy, now: start, deviceID: "phone")
+    func closeIsScopedToDevice() async throws {
+        let phone = try TracksStore.openSession(in: store.context, stationName: "Hits", policy: policy, now: start, deviceID: "phone")
         try store.context.save()
 
-        let closed = try store.closeStaleSessions(
+        let closed = try await store.closeStaleSessions(
             policy: policy, now: start.addingTimeInterval(3_600), deviceID: "mac"
         )
-        #expect(closed.isEmpty)
-        #expect(phone.isOpen)
+        #expect(closed == 0)
+        #expect(try store.stored(phone).isOpen)
 
-        let closedByOwner = try store.closeStaleSessions(
+        let closedByOwner = try await store.closeStaleSessions(
             policy: policy, now: start.addingTimeInterval(3_600), deviceID: "phone"
         )
-        #expect(closedByOwner.count == 1)
-        #expect(!phone.isOpen)
+        #expect(closedByOwner == 1)
+        #expect(try !store.stored(phone).isOpen)
     }
 
     /// Sessions from before the field have no device. Left out of every device's lookups,
     /// one left open by an older build would stay open for good.
     @Test("a session from before sessions had a device still closes")
-    func legacySessionCloses() throws {
+    func legacySessionCloses() async throws {
         let legacy = Session(startedAt: start, deviceID: nil)
         store.context.insert(legacy)
         try store.context.save()
 
         #expect(try store.currentOpenSession(deviceID: "mac") === legacy)
-        let closed = try store.closeStaleSessions(
+        let closed = try await store.closeStaleSessions(
             policy: policy, now: start.addingTimeInterval(3_600), deviceID: "mac"
         )
-        #expect(closed.count == 1)
-        #expect(!legacy.isOpen)
+        #expect(closed == 1)
+        #expect(try !store.stored(legacy).isOpen)
     }
 
     @Test("a legacy session extended here becomes this device's")
@@ -84,7 +86,8 @@ struct SessionDeviceScopeTests {
         store.context.insert(legacy)
         try store.context.save()
 
-        let continued = try store.openSession(
+        let continued = try TracksStore.openSession(
+            in: store.context,
             stationName: nil, policy: policy, now: start.addingTimeInterval(60), deviceID: "mac"
         )
         #expect(continued === legacy)
@@ -108,10 +111,12 @@ struct StationMatchingTests {
     /// An exact-name lookup made a new row for every spelling, which the next merge deleted
     /// again, once per session.
     @Test("a differently cased or spaced name reuses the existing station")
-    func matchesOnNormalisedName() throws {
-        _ = try store.openSession(stationName: "Café Radio", policy: policy, now: start, deviceID: "mac")
-        try store.closeStaleSessions(policy: policy, now: start.addingTimeInterval(1_000), deviceID: "mac")
-        let next = try store.openSession(
+    func matchesOnNormalisedName() async throws {
+        _ = try TracksStore.openSession(in: store.context, stationName: "Café Radio", policy: policy, now: start, deviceID: "mac")
+        try store.context.save()
+        try await store.closeStaleSessions(policy: policy, now: start.addingTimeInterval(1_000), deviceID: "mac")
+        let next = try TracksStore.openSession(
+            in: store.context,
             stationName: "  cafe radio ", policy: policy, now: start.addingTimeInterval(2_000), deviceID: "mac"
         )
         try store.context.save()
@@ -122,8 +127,9 @@ struct StationMatchingTests {
 
     @Test("a respelling of the open session's station continues the session")
     func respellingIsNotAStationChange() throws {
-        let first = try store.openSession(stationName: "Chill", policy: policy, now: start, deviceID: "mac")
-        let again = try store.openSession(
+        let first = try TracksStore.openSession(in: store.context, stationName: "Chill", policy: policy, now: start, deviceID: "mac")
+        let again = try TracksStore.openSession(
+            in: store.context,
             stationName: "CHILL", policy: policy, now: start.addingTimeInterval(30), deviceID: "mac"
         )
         #expect(again === first)
@@ -138,7 +144,8 @@ struct StationMatchingTests {
         store.context.insert(older)
         try store.context.save()
 
-        let session = try store.openSession(
+        let session = try TracksStore.openSession(
+            in: store.context,
             stationName: "CHILL", policy: policy, now: start.addingTimeInterval(120), deviceID: "mac"
         )
         #expect(session.station === older)
@@ -168,14 +175,15 @@ struct StationMatchingTests {
 
     @Test("an open session that lost its station is named again on its next observation")
     func reattachesOpenSession() throws {
-        let session = try store.openSession(stationName: "Chill", policy: policy, now: start, deviceID: "mac")
+        let session = try TracksStore.openSession(in: store.context, stationName: "Chill", policy: policy, now: start, deviceID: "mac")
         try store.context.save()
         let station = try #require(session.station)
         store.context.delete(station)
         try store.context.save()
         #expect(session.station == nil)
 
-        let again = try store.openSession(
+        let again = try TracksStore.openSession(
+            in: store.context,
             stationName: "Chill", policy: policy, now: start.addingTimeInterval(30), deviceID: "mac"
         )
         #expect(again === session)

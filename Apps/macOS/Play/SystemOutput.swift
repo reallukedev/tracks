@@ -10,8 +10,14 @@ enum SystemOutput {
     /// The output now, nil for the Mac's own speakers.
     static var current: NearbySpeakers? { read()?.speakers }
 
+    /// Starts Core Audio away from the main thread. Its first read starts the whole audio
+    /// system, which on the main thread stalled the first Play for 40 ms or more.
+    static func warmUp() {
+        Task.detached(priority: .utility) { _ = read() }
+    }
+
     /// The output's own name, "MacBook Pro Speakers" or "A Home's Pod", and what it is.
-    static func read() -> (name: String, speakers: NearbySpeakers?)? {
+    nonisolated static func read() -> (name: String, speakers: NearbySpeakers?)? {
         var address = defaultOutputAddress
         var device = AudioObjectID(kAudioObjectUnknown)
         var size = UInt32(MemoryLayout<AudioObjectID>.size)
@@ -33,7 +39,7 @@ enum SystemOutput {
         return (name, NearbySpeakers(outputName: name, transport: transport))
     }
 
-    fileprivate static let defaultOutputAddress = AudioObjectPropertyAddress(
+    fileprivate nonisolated static let defaultOutputAddress = AudioObjectPropertyAddress(
         mSelector: kAudioHardwarePropertyDefaultOutputDevice,
         mScope: kAudioObjectPropertyScopeGlobal,
         mElement: kAudioObjectPropertyElementMain

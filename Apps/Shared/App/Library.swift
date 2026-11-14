@@ -455,7 +455,9 @@ private struct StoreChanges: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .onReceive(NotificationCenter.default.publisher(for: ModelContext.didSave, object: context).receive(on: DispatchQueue.main)) { _ in
+            // Any context on the store, since capture and the queues save in the store's writer.
+            .onReceive(NotificationCenter.default.publisher(for: ModelContext.didSave).receive(on: DispatchQueue.main)) { note in
+                guard let saver = note.object as? ModelContext, saver.container === context.container else { return }
                 seen &+= 1
             }
             .onReceive(NotificationCenter.default.publisher(for: SyncReconciler.didReconcileNotification).receive(on: DispatchQueue.main)) { _ in

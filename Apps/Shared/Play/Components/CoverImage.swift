@@ -8,6 +8,7 @@ struct CoverImage: View {
     var isCircle = false
     /// No rounding or edge of its own, for a tile inside a mosaic that rounds as a whole.
     var isBare = false
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
         switch cover {
@@ -18,12 +19,13 @@ struct CoverImage: View {
                 // ArtworkImage can drop its picture when its size or place changes (the mini
                 // player collapsing as you scroll) and not bring it back. Library covers, and
                 // the player's own songs, only MusicKit can load, so those keep ArtworkImage.
-                if let url = Self.loadableURL(of: artwork, pixels: Self.pixels(for: size)) {
+                let pixels = Self.pixels(for: size, scale: displayScale)
+                if let url = Self.loadableURL(of: artwork, pixels: pixels) {
                     LoadedCover(
                         url: url,
-                        otherSize: Self.otherSize(of: artwork, size: size),
-                        placeholder: artwork.backgroundColor.map { Color(cgColor: $0) },
-                        size: size
+                        pixels: pixels,
+                        otherSizes: Self.otherSizes(of: artwork, pixels: pixels),
+                        placeholder: artwork.backgroundColor.map { Color(cgColor: $0) }
                     )
                 } else {
                     // Never asked for a new size in place: Now Playing is laid out once at no
@@ -61,15 +63,22 @@ struct CoverImage: View {
         [48, 96, 200, 420, 640].first { $0 >= size } ?? size
     }
 
-    /// One of two sizes, so the cache holds one copy of each cover rather than one per place
-    /// it's drawn.
-    static func pixels(for size: CGFloat) -> Int { size > 200 ? 1_200 : 600 }
+    /// The first of a few steps at least as many pixels as the cover is drawn, so the cache
+    /// holds a copy per step rather than per place. A row's cover at 600 pixels cost 20 times
+    /// the memory and decoding it needs, and filled the cache in a few screens of scrolling.
+    static func pixels(for size: CGFloat, scale: CGFloat = 2) -> Int {
+        let needed = Int((size * scale).rounded(.up))
+        return pixelSteps.first { $0 >= needed } ?? pixelSteps[pixelSteps.count - 1]
+    }
 
-    /// The same cover at the size not chosen, to show while the chosen one loads when a cover
-    /// grows or shrinks across the line.
-    static func otherSize(of artwork: Artwork, size: CGFloat) -> ArtworkImages.Key? {
-        let pixels = pixels(for: size) == 600 ? 1_200 : 600
-        return loadableURL(of: artwork, pixels: pixels).map { ArtworkImages.Key(url: $0, pixels: pixels) }
+    static let pixelSteps = [160, 400, 600, 1_200]
+
+    /// The same cover at the other steps, largest first, to show while the chosen one loads
+    /// when a cover grows or shrinks across a step.
+    static func otherSizes(of artwork: Artwork, pixels: Int) -> [ArtworkImages.Key] {
+        pixelSteps.reversed().filter { $0 != pixels }.compactMap { other in
+            loadableURL(of: artwork, pixels: other).map { ArtworkImages.Key(url: $0, pixels: other) }
+        }
     }
 
     /// A web address for the cover, or nil for a library cover only MusicKit can load.
@@ -85,9 +94,9 @@ struct CoverImage: View {
 /// time it's drawn: the cover's own colour first, then the picture.
 private struct LoadedCover: View {
     let url: URL
-    let otherSize: ArtworkImages.Key?
+    let pixels: Int
+    let otherSizes: [ArtworkImages.Key]
     let placeholder: Color?
-    let size: CGFloat
     @Environment(\.displayScale) private var displayScale
     @State private var loaded: (url: URL, image: CGImage)?
 
@@ -123,12 +132,16 @@ private struct LoadedCover: View {
 
     private var key: ArtworkImages.Key {
         // The address already fixes the size; the pixel count only tells the cache apart.
-        ArtworkImages.Key(url: url, pixels: CoverImage.pixels(for: size))
+        ArtworkImages.Key(url: url, pixels: pixels)
     }
 
     private var image: CGImage? {
         if let loaded, loaded.url == url { return loaded.image }
-        return ArtworkImages.shared.cached(key) ?? otherSize.flatMap { ArtworkImages.shared.cached($0) }
+        if let cached = ArtworkImages.shared.cached(key) { return cached }
+        for other in otherSizes {
+            if let cached = ArtworkImages.shared.cached(other) { return cached }
+        }
+        return nil
     }
 }
 

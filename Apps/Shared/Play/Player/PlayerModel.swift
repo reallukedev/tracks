@@ -30,7 +30,7 @@ final class PlayerModel {
             // Its cover too, decoded at the sizes the player and the mini player draw it, so
             // the next song's picture is there the moment it starts rather than fading in.
             if case .artwork(let artwork)? = upNext.first?.cover {
-                let keys = [1_200, 600].compactMap { pixels in
+                let keys = [1_200, 600, 160].compactMap { pixels in
                     CoverImage.loadableURL(of: artwork, pixels: pixels).map { ArtworkImages.Key(url: $0, pixels: pixels) }
                 }
                 Task(priority: .utility) {

@@ -237,7 +237,7 @@ public final class CaptureService {
     /// Ends sessions that have gone quiet. Silence produces no observations, so this runs on
     /// a timer as well as at launch.
     private func closeStaleSessions() async {
-        _ = try? store.closeStaleSessions()
+        _ = try? await store.closeStaleSessions()
         showOpenSession(await reads.read(latest: false, song: nil, deviceID: DeviceIdentity.current).openSession)
     }
 
@@ -448,7 +448,7 @@ public final class CaptureService {
         }
         // A newer observation's read is on its way, and what it shows wins.
         guard generation == displayGeneration else { return }
-        showOpenSession(read.openSession)
+        showOpenSession(read.openSession, refresh: isCapture)
         if let shows {
             pendingNowPlayingKey = nil
             updateNowPlaying(shows, existing: read.song)
@@ -462,9 +462,25 @@ public final class CaptureService {
     }
 
     /// The session read in the background, as the main context's own object.
-    private func showOpenSession(_ id: PersistentIdentifier?) {
-        guard id != openSession?.persistentModelID else { return }
-        openSession = id.flatMap { store.context.model(for: $0) as? Session }
+    ///
+    /// - Parameter refresh: fetch it again even if it's the one shown. A capture extends the
+    ///   session in the store's writer, and the main context's copy keeps its old song count
+    ///   and station until it's fetched.
+    private func showOpenSession(_ id: PersistentIdentifier?, refresh: Bool = false) {
+        guard let id else {
+            if openSession != nil { openSession = nil }
+            return
+        }
+        guard refresh || id != openSession?.persistentModelID else { return }
+        var descriptor = FetchDescriptor<Session>(predicate: #Predicate { $0.persistentModelID == id })
+        descriptor.fetchLimit = 1
+        let session = (try? store.context.fetch(descriptor))?.first
+        if session !== openSession {
+            openSession = session
+        } else {
+            // The same object with new values, which observation doesn't see on its own.
+            withMutation(keyPath: \.openSession) {}
+        }
     }
 
     /// What ``nowPlaying`` does for an observation with no song to show.
@@ -595,15 +611,16 @@ public final class CaptureService {
             return PushedNowPlayingSource.yourMusic.current
         }
         if ApplicationMusicPlayerSource.isPlaying {
-            return ApplicationMusicPlayerSource.currentObservation()
+            return await ApplicationMusicPlayerSource.readObservation()
         }
         #if os(iOS)
-        let other = SystemMusicPlayerSource.currentObservation()
+        let other = await SystemMusicPlayerSource.readObservation()
         #else
         // Off the main actor: an Apple event blocks its thread until Music answers or times out.
         let other = await ScriptingQueue.run { PlayerInfoSource.currentObservation() }
         #endif
-        return other ?? ApplicationMusicPlayerSource.currentObservation()
+        if let other { return other }
+        return await ApplicationMusicPlayerSource.readObservation()
     }
 }
 

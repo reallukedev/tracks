@@ -20,10 +20,15 @@ struct RootView: View {
     /// Made once: a new one on each redraw, as a tab switch makes, would redraw every song
     /// menu that reads it, since it can't be compared.
     @State private var showSongInfo: ShowSongInfoAction
+    /// The tab bar's selection, kept in step with `model.selectedTab` by `TabMemory`. Bound to
+    /// the model directly, every tab switch redrew this view and with it every tab's stack.
+    @State private var selection: AppTab
 
     init(model: AppModel) {
         self.model = model
         _showSongInfo = State(initialValue: ShowSongInfoAction { [model] in model.songInfo.show($0) })
+        // Not `model.selectedTab`: read here, in the parent's update, it would redraw the parent.
+        _selection = State(initialValue: AppModel.launchTab)
     }
 
     var body: some View {
@@ -32,7 +37,7 @@ struct RootView: View {
             let navigator = model.playNavigator
             // A stable identity per tab, so moving Play between the ends keeps each tab's
             // state, and any sheet open on it, rather than rebuilding it.
-            TabView(selection: $model.selectedTab) {
+            TabView(selection: $selection) {
                 ForEach(tabOrder, id: \.self) { tab in
                     Tab(tab.title, systemImage: tab.symbol, value: tab) {
                         stack(for: tab, navigator: navigator)
@@ -80,7 +85,7 @@ struct RootView: View {
             // Someone else's SharePlay, joined from Messages.
             .sharePlayGuestPage(closing: $showsNowPlaying)
             .opensDeepLinks(in: model)
-            .modifier(TabMemory(model: model))
+            .modifier(TabMemory(model: model, selection: $selection))
             // A song from a widget. Summary is the tab whose stack can be pushed from here.
             // Initial too, for a link that launched the app.
             .onChange(of: model.pendingRoute, initial: true) { _, route in
@@ -260,10 +265,12 @@ struct RootView: View {
     }
 }
 
-/// Keeps the open tab for the scene. Its own view, so a tab switch (read here, and written to
-/// scene storage) redraws only this, not the root and with it every tab's stack.
+/// Keeps the open tab for the scene, and the tab bar's selection in step with the model's.
+/// Its own view, so a tab switch (read here, and written to scene storage) redraws only this,
+/// not the root and with it every tab's stack.
 private struct TabMemory: ViewModifier {
     let model: AppModel
+    @Binding var selection: AppTab
     /// The tab open when iOS last saved the scene. iOS keeps it when it ends Tracks in the
     /// background and drops it when someone swipes Tracks away, so a quiet relaunch comes
     /// back where you were and a fresh start opens where Settings says.
@@ -272,7 +279,13 @@ private struct TabMemory: ViewModifier {
     func body(content: Content) -> some View {
         content
             .onAppear(perform: restoreTab)
-            .onChange(of: model.selectedTab) { _, tab in savedTab = tab.rawValue }
+            .onChange(of: model.selectedTab, initial: true) { old, tab in
+                if old != tab { savedTab = tab.rawValue }
+                if selection != tab { selection = tab }
+            }
+            .onChange(of: selection) { _, tab in
+                if model.selectedTab != tab { model.selectedTab = tab }
+            }
     }
 
     /// Back on the saved tab, unless the launch itself asked for a place.

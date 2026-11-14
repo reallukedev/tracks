@@ -45,8 +45,8 @@ struct SourceScopeTests {
         )
         let music = NowPlayingObservation(title: "Streamed", artistName: "Artist", playbackState: .playing)
 
-        let own = try store.insertCapture(songKey: "own", catalogSongID: nil, observation: local, kind: .onDemand, session: nil)
-        let streamed = try store.insertCapture(songKey: "streamed", catalogSongID: nil, observation: music, kind: .onDemand, session: nil)
+        let own = TracksStore.insertCapture(in: store.context, songKey: "own", catalogSongID: nil, observation: local, kind: .onDemand, session: nil)
+        let streamed = TracksStore.insertCapture(in: store.context, songKey: "streamed", catalogSongID: nil, observation: music, kind: .onDemand, session: nil)
 
         #expect(own.source == .yourMusic)
         #expect(streamed.sourceRawValue == PlaySource.appleMusic.rawValue)

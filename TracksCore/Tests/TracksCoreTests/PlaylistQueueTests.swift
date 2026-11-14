@@ -54,10 +54,11 @@ struct PlaylistQueueTests {
     /// An outage used to cost every row an attempt on every drain, and five drains lost them.
     @Test("an outage costs no attempts and stops after the second failure")
     func outageCostsNothing() async throws {
-        let rows = try owed("1", "2", "3")
+        var rows = try owed("1", "2", "3")
         writer.failAll(with: PlaylistWriteError.transient(statusCode: 503, message: "down"))
 
         await coordinator().drainPendingWrites()
+        rows = try store.stored(rows)
 
         #expect(writer.attempted == ["1", "2"])
         #expect(rows.allSatisfy { $0.needsPlaylistWrite && $0.playlistWriteAttempts == 0 })
@@ -65,17 +66,18 @@ struct PlaylistQueueTests {
 
     @Test("a network error is treated as an outage")
     func networkErrorIsAnOutage() async throws {
-        let rows = try owed("1", "2")
+        var rows = try owed("1", "2")
         writer.failAll(with: URLError(.notConnectedToInternet))
 
         await coordinator().drainPendingWrites()
+        rows = try store.stored(rows)
 
         #expect(rows.allSatisfy { $0.needsPlaylistWrite && $0.playlistWriteAttempts == 0 })
     }
 
     @Test("after an outage the queue waits before writing again")
     func backsOff() async throws {
-        let rows = try owed("1", "2")
+        var rows = try owed("1", "2")
         writer.failAll(with: PlaylistWriteError.transient(statusCode: 503, message: "down"))
         let subject = coordinator()
 
@@ -86,6 +88,7 @@ struct PlaylistQueueTests {
         writer.succeed()
         clock.advance(by: 31)
         await subject.drainPendingWrites()
+        rows = try store.stored(rows)
         #expect(writer.written == ["1", "2"])
         #expect(rows.allSatisfy { !$0.needsPlaylistWrite && $0.addedToPlaylistAt != nil })
     }
@@ -94,10 +97,11 @@ struct PlaylistQueueTests {
     /// hold up the whole queue for good.
     @Test("a transient failure is charged to its song when the next write goes through")
     func poisonSongIsCharged() async throws {
-        let rows = try owed("bad", "good")
+        var rows = try owed("bad", "good")
         writer.fail("bad", with: PlaylistWriteError.transient(statusCode: 500, message: "oops"))
 
         await coordinator().drainPendingWrites()
+        rows = try store.stored(rows)
 
         #expect(rows[0].playlistWriteAttempts == 1)
         #expect(rows[0].needsPlaylistWrite)
@@ -108,10 +112,11 @@ struct PlaylistQueueTests {
     /// its first try, so they never reached the playlist once it was fixed.
     @Test("a setup failure keeps the song owed and stops the queue")
     func setupFailureKeepsTheSong() async throws {
-        let rows = try owed("1", "2")
+        var rows = try owed("1", "2")
         writer.failAll(with: PlaylistWriteError.notConfigured(reason: "no token", guidance: "Enable MusicKit."))
 
         await coordinator().drainPendingWrites()
+        rows = try store.stored(rows)
 
         #expect(writer.attempted == ["1"])
         #expect(rows.allSatisfy { $0.needsPlaylistWrite && $0.playlistWriteAttempts == 0 })
@@ -122,18 +127,20 @@ struct PlaylistQueueTests {
     /// was charged and dropped one after another.
     @Test("a deleted playlist is made again, and no song is dropped for it")
     func deletedPlaylistIsRecreated() async throws {
-        let rows = try owed("1", "2", "3")
+        var rows = try owed("1", "2", "3")
         settings.playlistID = "p.gone"
         writer.delete("p.gone")
         let subject = coordinator()
 
         await subject.drainPendingWrites()
+        rows = try store.stored(rows)
 
         #expect(writer.attempted == ["1"])
         #expect(settings.playlistID == nil)
         #expect(rows.allSatisfy { $0.needsPlaylistWrite && $0.playlistWriteAttempts == 0 })
 
         await subject.drainPendingWrites()
+        rows = try store.stored(rows)
 
         #expect(settings.playlistID == "p.fake")
         #expect(writer.written == ["1", "2", "3"])
@@ -142,10 +149,11 @@ struct PlaylistQueueTests {
 
     @Test("a 404 for a song in a playlist that still exists is the song's fault")
     func notFoundSongIsCharged() async throws {
-        let rows = try owed("bad", "good")
+        var rows = try owed("bad", "good")
         writer.fail("bad", with: PlaylistWriteError.permanent(statusCode: 404, message: "no such song"))
 
         await coordinator().drainPendingWrites()
+        rows = try store.stored(rows)
 
         #expect(rows[0].playlistWriteAttempts == 1)
         #expect(!rows[0].needsPlaylistWrite)
@@ -193,7 +201,7 @@ struct PlaylistQueueTests {
         _ = await (first.value, joined)
 
         #expect(writer.written == ["1", "2"])
-        #expect(late.addedToPlaylistAt != nil)
+        #expect(try store.stored(late).addedToPlaylistAt != nil)
     }
 
     /// A new device drained before iCloud brought the playlist's ID down, and made a second
@@ -263,7 +271,7 @@ struct PlaylistQueueTests {
         await drain.value
 
         #expect(writer.written == ["1", "3"])
-        #expect(rows[2].addedToPlaylistAt != nil)
+        #expect(try store.stored(rows[2]).addedToPlaylistAt != nil)
     }
 }
 
@@ -318,7 +326,7 @@ struct ArtworkBackfillTests {
         await subject.drainPendingWrites()
         await subject.drainPendingWrites()
 
-        #expect(older.allSatisfy { $0.artworkURL != nil })
+        #expect(try store.stored(older).allSatisfy { $0.artworkURL != nil })
         #expect(settings.artworkMisses.count == 50)
 
         // And the misses aren't asked about again.
@@ -341,7 +349,7 @@ struct ArtworkBackfillTests {
         resolver.covers = ["new0": "https://example.test/new0.jpg"]
         clock.advance(by: CaptureCoordinator.artworkMissRetryAfter + 1)
         await subject.drainPendingWrites()
-        #expect(newer[0].artworkURL != nil)
+        #expect(try store.stored(newer[0]).artworkURL != nil)
     }
 
     /// It used to stop at the first pass that found nothing.
@@ -355,7 +363,7 @@ struct ArtworkBackfillTests {
         let found = await coordinator(resolver).backfillAllArtwork()
 
         #expect(found == 30)
-        #expect(older.allSatisfy { $0.artworkURL != nil })
+        #expect(try store.stored(older).allSatisfy { $0.artworkURL != nil })
     }
 
     /// Repair is asked for, so it tries the songs given up on too.
@@ -368,7 +376,7 @@ struct ArtworkBackfillTests {
 
         resolver.covers = ["new0": "https://example.test/new0.jpg"]
         #expect(await subject.backfillAllArtwork() == 1)
-        #expect(newer[0].artworkURL != nil)
+        #expect(try store.stored(newer[0]).artworkURL != nil)
     }
 }
 

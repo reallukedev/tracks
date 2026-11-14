@@ -45,8 +45,7 @@ private struct ArtistChartTile: View, Equatable {
             VStack(spacing: 10) {
                 ArtworkView(url: entry.artworkURL, seed: entry.artworkSeed, isCircle: true)
                     .aspectRatio(1, contentMode: .fit)
-                    .shadow(color: .black.opacity(isHovered ? 0.28 : 0.16), radius: isHovered ? 14 : 8, y: isHovered ? 8 : 4)
-                    .scaleEffect(isHovered ? 1.03 : 1)
+                    .shadow(color: .black.opacity(0.16), radius: 8, y: 4)
                     .overlay(alignment: .bottomTrailing) {
                         if isHovered, let play {
                             ChartTilePlayButton(title: entry.title, play: play)
@@ -149,7 +148,7 @@ private struct AlbumChartTile: View, Equatable {
             VStack(alignment: .leading, spacing: 9) {
                 ArtworkView(url: entry.artworkURL, seed: entry.artworkSeed, maximumCornerRadius: 8)
                     .aspectRatio(1, contentMode: .fit)
-                    .shadow(color: .black.opacity(isHovered ? 0.28 : 0.16), radius: isHovered ? 14 : 8, y: isHovered ? 8 : 4)
+                    .shadow(color: .black.opacity(0.16), radius: 8, y: 4)
                     .overlay(alignment: .bottomTrailing) {
                         if isHovered, let play {
                             ChartTilePlayButton(title: entry.title, play: play)

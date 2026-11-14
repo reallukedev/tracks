@@ -507,7 +507,7 @@ struct Crate: View {
                 .compositingGroup()
                 .shadow(color: .black.opacity(0.26), radius: Self.shadowRadius, y: Self.shadowDrop)
         }
-        .buttonStyle(CrateCoverStyle(isFront: isFront))
+        .buttonStyle(CrateCoverStyle())
         .frame(width: side, height: side)
         .contextMenu { CrateMenu(record: record, showsTuner: $showsTuner) }
         .padding(.vertical, Self.shadowRoom)
@@ -732,7 +732,7 @@ struct Crate: View {
                 .compositingGroup()
                 .shadow(color: .black.opacity(0.26), radius: Self.shadowRadius, y: Self.shadowDrop)
         }
-        .buttonStyle(CrateCoverStyle(isFront: isFront))
+        .buttonStyle(CrateCoverStyle())
         .frame(width: side, height: side)
         #if os(iOS)
         // Lifted on a long press as the cover itself, square and upright, not the room
@@ -920,21 +920,12 @@ private extension VisualEffect {
     }
 }
 
-/// A record in the crate answers the pointer and a press: the front one lifts toward you.
+/// A record in the crate gives a little under a press.
 private struct CrateCoverStyle: ButtonStyle {
-    let isFront: Bool
-    @State private var isHovering = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? 0.97 : (isFront && isHovering && !reduceMotion ? 1.02 : 1))
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
             .animation(PlayMotion.press, value: configuration.isPressed)
-            .animation(PlayMotion.hover, value: isHovering)
-            .onHover { isHovering = $0 }
-            // A record clicked to the front slides out from under the pointer, which hasn't
-            // moved to say so: it comes to the front unlifted, until the pointer is over it.
-            .onChange(of: isFront) { isHovering = false }
     }
 }
 

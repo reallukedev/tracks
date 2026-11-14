@@ -362,8 +362,7 @@ private struct BarSong: View {
         Button(action: action) {
             HStack(spacing: 10) {
                 CoverImage(cover: track.cover, size: coverSize)
-                    .shadow(color: .black.opacity(isHovering ? 0.3 : 0.15), radius: isHovering ? 6 : 2, y: isHovering ? 3 : 1)
-                    .scaleEffect(isHovering && !reduceMotion ? 1.05 : 1)
+                    .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 4) {
                         Text(track.title)
@@ -805,14 +804,29 @@ struct BarIconButtonStyle: ButtonStyle {
 }
 
 /// AirPlay: the system's own picker, so every speaker the Mac knows is there.
+///
+/// Making one reads preferences and asks the system's routing service, all on the main thread,
+/// and the bar makes a new one each time it changes tier or a song starts from nothing. So
+/// pickers that leave the screen are kept and handed out again.
 struct RoutePickerButton: NSViewRepresentable {
+    private static var spare: [AVRoutePickerView] = []
+    /// Enough for the bar, the full player and Your Devices coming and going.
+    private static let sparesKept = 3
+
     func makeNSView(context: Context) -> AVRoutePickerView {
+        if let view = Self.spare.popLast() { return view }
         let view = AVRoutePickerView()
         view.isRoutePickerButtonBordered = false
         return view
     }
 
     func updateNSView(_ view: AVRoutePickerView, context: Context) {}
+
+    static func dismantleNSView(_ view: AVRoutePickerView, coordinator: ()) {
+        view.removeFromSuperview()
+        guard spare.count < sparesKept else { return }
+        spare.append(view)
+    }
 }
 
 /// Opens Stage, the song full screen with a visualizer, for a second display or a TV.

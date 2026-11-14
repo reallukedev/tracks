@@ -140,7 +140,6 @@ extension Capture {
 
     /// Keeps the play out of the scrobble queue, which skips rows that have used up their
     /// attempts. No new field, which CloudKit would need deploying again for.
-    @MainActor
     func holdFromScrobbling(reason: String) {
         scrobbleAttempts = TracksStore.maxScrobbleAttempts
         lastScrobbleError = reason

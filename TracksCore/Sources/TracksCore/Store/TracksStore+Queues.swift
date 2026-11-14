@@ -15,6 +15,14 @@ extension TracksStore {
     /// Only saved rows have a lasting identity (an unsaved one's changes when it's saved), so
     /// save before collecting the identities.
     func existingCaptures(_ ids: [PersistentIdentifier]) -> [PersistentIdentifier: Capture] {
+        Self.existingCaptures(ids, in: context)
+    }
+
+    /// ``existingCaptures(_:)`` on any context.
+    nonisolated static func existingCaptures(
+        _ ids: [PersistentIdentifier],
+        in context: ModelContext
+    ) -> [PersistentIdentifier: Capture] {
         guard !ids.isEmpty else { return [:] }
         let descriptor = FetchDescriptor<Capture>(
             predicate: #Predicate { ids.contains($0.persistentModelID) }
@@ -30,7 +38,7 @@ extension TracksStore {
     ///
     /// Without the exclusion those rows stay at the top for good: every pass asks about the
     /// same fifty songs, gets nothing, and never reaches the older rows beneath them.
-    static func missingArtwork(
+    nonisolated static func missingArtwork(
         excludingSongIDs excluded: [String],
         limit: Int = 50
     ) -> FetchDescriptor<Capture> {

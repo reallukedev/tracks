@@ -40,13 +40,18 @@ final class WidgetRefresher {
             guard let self, let faces = await backgroundFaces(), self.faces == nil else { return }
             self.faces = faces
         }
-        // Lives as long as the process, so the observer is never removed.
+        // Lives as long as the process, so the observer is never removed. Any context on the
+        // store, since capture and the queues save in the store's writer. Not on the main
+        // queue: the writer posts from its own thread, and a `.main` observer would make it
+        // wait for the main thread.
+        let container = store.container
         NotificationCenter.default.addObserver(
             forName: ModelContext.didSave,
-            object: store.context,
-            queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.saved() }
+            object: nil,
+            queue: nil
+        ) { [weak self] note in
+            guard let saver = note.object as? ModelContext, saver.container === container else { return }
+            Task { @MainActor in self?.saved() }
         }
     }
 

@@ -32,6 +32,7 @@ final class MacAppDelegate: NSObject, NSApplicationDelegate {
         behaviour.applyActivationPolicy()
         trackCaptureActivity()
         Task { await model.startCapture() }
+        SystemOutput.warmUp()
         NearbyMac.start(model)
         followTracksPlayer()
         watchSpaceBar()

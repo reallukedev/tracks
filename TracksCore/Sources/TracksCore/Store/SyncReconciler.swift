@@ -117,11 +117,11 @@ public final class SyncReconciler {
     }
 
     /// Everything a reconcile folds in. Also used by the capture service's timer.
+    ///
+    /// All of it happens in the store's ``TracksStore/writer``: on the main actor, the station
+    /// merge and the merge of each song's plays cost a dropped frame or more each time.
     public static func merge(_ store: TracksStore) async -> Int {
-        var merged = (try? store.mergeDuplicateStations()) ?? 0
-        merged += (try? await store.mergeDuplicatePlays()) ?? 0
-        _ = try? await store.clearUnloadableArtworkFoundInBackground()
-        return merged
+        await store.writer.reconcile(reader: store.historyReader, policy: CaptureSettings().dedupePolicy)
     }
 }
 

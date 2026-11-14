@@ -182,7 +182,7 @@ struct ScrobbleDrainTests {
 
         #expect(await service.drain() == 0)
 
-        for row in rows {
+        for row in try store.stored(rows) {
             #expect(row.scrobbledAt == nil)
             #expect(row.scrobbleAttempts == 0)
             #expect(row.lastScrobbleError == nil)
@@ -193,10 +193,11 @@ struct ScrobbleDrainTests {
 
     @Test("a request Last.fm rejects outright charges the rows an attempt")
     func permanentFailureCharges() async throws {
-        let rows = try owed("One", "Two")
+        var rows = try owed("One", "Two")
         lastFM.fail(with: .status(400, body: #"{"error":6,"message":"Invalid parameters"}"#))
 
         await service().drain()
+        rows = try store.stored(rows)
 
         #expect(rows.map(\.scrobbleAttempts) == [1, 1])
         // In Tracks' words, without Last.fm's code and message.
@@ -230,7 +231,7 @@ struct ScrobbleDrainTests {
         lastFM.acceptEverything()
         clock.advance(by: 0.5)
         #expect(await service.drain() == 1)
-        #expect(rows[0].scrobbledAt != nil)
+        #expect(try store.stored(rows[0]).scrobbledAt != nil)
         #expect(service.lastError == nil)
 
         // A success clears the wait, so the next failure waits 30 seconds again.
@@ -246,10 +247,11 @@ struct ScrobbleDrainTests {
     /// Too old (3) is about the scrobble and will never pass. It used to be marked scrobbled.
     @Test("an ignored scrobble is given up on with the reason, and the rest are marked sent")
     func ignoredEntries() async throws {
-        let rows = try owed("One", "Two", "Three")
+        var rows = try owed("One", "Two", "Three")
         lastFM.answer { count in FakeLastFM.outcomes([0, 3, 0].prefix(count).map { $0 }) }
 
         #expect(await service().drain() == 2)
+        rows = try store.stored(rows)
 
         #expect(rows[0].scrobbledAt != nil)
         #expect(rows[2].scrobbledAt != nil)
@@ -261,11 +263,12 @@ struct ScrobbleDrainTests {
 
     @Test("a scrobble held back by the daily limit stays owed without an attempt")
     func dailyLimit() async throws {
-        let rows = try owed("One", "Two")
+        var rows = try owed("One", "Two")
         lastFM.answer { _ in FakeLastFM.outcomes([0, 5]) }
         let service = service()
 
         await service.drain()
+        rows = try store.stored(rows)
 
         #expect(rows[0].scrobbledAt != nil)
         #expect(rows[1].scrobbledAt == nil)
@@ -294,7 +297,7 @@ struct ScrobbleDrainTests {
             fields.filter { $0.key.hasPrefix("track[") }.map(\.value)
         }
         #expect(sentTitles.sorted() == ["One", "Two"])
-        #expect(rows.allSatisfy { $0.scrobbledAt != nil })
+        #expect(try store.stored(rows).allSatisfy { $0.scrobbledAt != nil })
     }
 
     @Test("a row added while a drain is out is sent by the drain that was joined")
@@ -318,7 +321,7 @@ struct ScrobbleDrainTests {
         gate.open()
         _ = await (first.value, joined)
 
-        #expect(late.scrobbledAt != nil)
+        #expect(try store.stored(late).scrobbledAt != nil)
     }
 
     /// Apple's recently-played list covers the whole account, so the iPhone imported songs
@@ -346,8 +349,8 @@ struct ScrobbleDrainTests {
             fields.filter { $0.key.hasPrefix("track[") }.map(\.value)
         }
         #expect(sentTitles == ["You"])
-        #expect(imported.scrobbledAt != nil)
-        #expect(fresh.scrobbledAt != nil)
+        #expect(try store.stored(imported).scrobbledAt != nil)
+        #expect(try store.stored(fresh).scrobbledAt != nil)
     }
 
     @Test("an import is held when Last.fm's history can't be read")
@@ -363,8 +366,8 @@ struct ScrobbleDrainTests {
         await service().drain()
 
         #expect(lastFM.scrobbleRequests.isEmpty)
-        #expect(imported.scrobbledAt == nil)
-        #expect(imported.scrobbleAttempts == 0)
+        #expect(try store.stored(imported).scrobbledAt == nil)
+        #expect(try store.stored(imported).scrobbleAttempts == 0)
     }
 
     @Test("a scrobble only accounts for one import of the same song")
@@ -408,7 +411,7 @@ struct ScrobbleDrainTests {
         gate.open()
         _ = await drain.value
 
-        #expect(rows[0].scrobbledAt != nil)
+        #expect(try store.stored(rows[0]).scrobbledAt != nil)
         #expect(try store.context.fetch(FetchDescriptor<Capture>()).count == 1)
     }
 }

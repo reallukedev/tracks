@@ -64,8 +64,9 @@ public final class SystemMusicPlayerSource: NowPlayingSource {
             for await _ in changes {
                 if Task.isCancelled { return }
                 try? await Task.sleep(for: MusicPlayerReading.settleDelay)
+                let observation = await Self.readObservation()
                 guard let self else { return }
-                guard let observation = Self.observation(from: player) else { continue }
+                guard let observation else { continue }
                 self.continuation.withLock { $0 }?.yield(observation)
             }
         }
@@ -75,6 +76,16 @@ public final class SystemMusicPlayerSource: NowPlayingSource {
     /// isn't running, so it can't wait for the next queue change.
     public static func currentObservation() -> NowPlayingObservation? {
         observation(from: SystemMusicPlayer.shared)
+    }
+
+    /// ``currentObservation()``, with the position read off the main thread, since it waits on
+    /// Apple's player service.
+    public static func readObservation() async -> NowPlayingObservation? {
+        let player = SystemMusicPlayer.shared
+        let entry = player.queue.currentEntry
+        let status = player.state.playbackStatus
+        let playbackTime = await PlayerReads.run { SystemMusicPlayer.shared.playbackTime }
+        return MusicPlayerReading.observation(from: entry, status: status, playbackTime: playbackTime)
     }
 
     static func observation(from player: SystemMusicPlayer) -> NowPlayingObservation? {

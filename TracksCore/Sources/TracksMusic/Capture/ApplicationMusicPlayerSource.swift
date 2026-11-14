@@ -131,8 +131,9 @@ public final class ApplicationMusicPlayerSource: NowPlayingSource {
                 if Task.isCancelled { return }
                 try? await Task.sleep(for: MusicPlayerReading.settleDelay)
                 await PlayerQuiet.settled()
+                let observation = await Self.readObservation()
                 guard let self else { return }
-                guard let observation = Self.currentObservation() else { continue }
+                guard let observation else { continue }
                 self.continuation.withLock { $0 }?.yield(observation)
             }
         }
@@ -153,6 +154,26 @@ public final class ApplicationMusicPlayerSource: NowPlayingSource {
             playbackTime: player.playbackTime,
             isStation: TracksPlayerContext.isStation,
             stationName: TracksPlayerContext.stationName
+        )
+    }
+
+    /// ``currentObservation()``, with the position read off the main thread. The position asks
+    /// Apple's player service and waits for the answer, which takes tens of milliseconds just
+    /// after a song changes; the entry and status are already on hand.
+    public static func readObservation() async -> NowPlayingObservation? {
+        guard TracksPlayerContext.isInUse else { return nil }
+        let player = ApplicationMusicPlayer.shared
+        let entry = player.queue.currentEntry
+        let status = player.state.playbackStatus
+        let isStation = TracksPlayerContext.isStation
+        let stationName = TracksPlayerContext.stationName
+        let playbackTime = await PlayerReads.run { ApplicationMusicPlayer.shared.playbackTime }
+        return observation(
+            from: entry,
+            status: status,
+            playbackTime: playbackTime,
+            isStation: isStation,
+            stationName: stationName
         )
     }
 

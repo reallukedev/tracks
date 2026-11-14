@@ -64,7 +64,7 @@ private struct TracksRadioStage: View {
             } label: {
                 TracksRadioArt(side: 200, isLive: isOn && player.isPlaying, isDriving: player.isRadioDriving)
             }
-            .buttonStyle(CoverLiftButtonStyle())
+            .buttonStyle(CoverPressButtonStyle())
             .help(isOn && player.isPlaying ? "Pause Tracks Radio" : isOn ? "Resume Tracks Radio" : "Play Tracks Radio")
             .accessibilityLabel("Tracks Radio")
 
@@ -155,19 +155,14 @@ private struct TracksRadioStage: View {
     }
 }
 
-/// The station's cover as a button: it lifts toward the pointer, and gives a little under a
-/// click, as Music's covers do.
-private struct CoverLiftButtonStyle: ButtonStyle {
+/// The station's cover as a button: it gives a little under a click, as Music's covers do.
+private struct CoverPressButtonStyle: ButtonStyle {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var isHovering = false
 
     func makeBody(configuration: Configuration) -> some View {
-        let isLifted = isHovering && !reduceMotion
         configuration.label
-            .shadow(color: .black.opacity(isLifted ? 0.38 : 0.3), radius: isLifted ? 24 : 18, y: isLifted ? 14 : 10)
-            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : isLifted ? 1.02 : 1)
-            .onHover { isHovering = $0 }
-            .animation(.easeOut(duration: 0.13), value: isHovering)
+            .shadow(color: .black.opacity(0.3), radius: 18, y: 10)
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1)
             .animation(.snappy(duration: 0.14), value: configuration.isPressed)
     }
 }

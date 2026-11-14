@@ -1,8 +1,8 @@
 import SwiftUI
 import TracksCore
 
-/// A mix on the shelf: its covers, its name and why. On the Mac it lifts under the pointer
-/// with Play and More over its cover, as a library cover does, and drags out as its songs.
+/// A mix on the shelf: its covers, its name and why. On the Mac the pointer brings up
+/// Play and More over its cover, as a library cover does, and it drags out as its songs.
 struct MixTile: View {
     let mix: Mix
     @Environment(PlayerModel.self) private var player
@@ -12,7 +12,6 @@ struct MixTile: View {
         NavigationLink(value: PlayRoute.mix(mix.id)) {
             TileLabel(title: mix.kind.title, subtitle: mix.kind.tileLine) { side in
                 MixCover(mix: mix, size: side)
-                    .tileLift(isHovered)
             }
         }
         .buttonStyle(.pressable)
@@ -41,7 +40,7 @@ struct MixTile: View {
 }
 
 /// A station, album or playlist on a shelf. Stations start playing; the rest open. On the Mac
-/// it lifts under the pointer with Play and More over its cover, as a library cover does, and
+/// the pointer brings up Play and More over its cover, as a library cover does, and it
 /// drags out as its Apple Music link.
 struct FeedTile: View {
     let item: FeedItem
@@ -95,7 +94,6 @@ struct FeedTile: View {
     private var label: some View {
         TileLabel(title: item.title, subtitle: item.subtitle) { side in
             CoverImage(cover: item.cover, size: side)
-                .tileLift(isHovered)
                 .overlay(alignment: .topLeading) {
                     if item.isLive {
                         LiveBadge().padding(8)
@@ -176,16 +174,6 @@ struct NowPlayingBadge: View {
 }
 
 extension View {
-    /// A shelf tile's cover rising a little under the pointer, as Music's do. Mac only.
-    func tileLift(_ isHovered: Bool) -> some View {
-        #if os(macOS)
-        scaleEffect(isHovered ? 1.02 : 1)
-            .shadow(color: .black.opacity(isHovered ? 0.18 : 0), radius: 10, y: 5)
-        #else
-        self
-        #endif
-    }
-
     /// Music's hover on a shelf tile: Play on the left of the cover's foot and More on the
     /// right, as ``LibraryCoverTile`` has. Nothing on iPhone, or on a tile that's disabled.
     func tileHover<Menu: View>(_ isHovered: Binding<Bool>, play: (() -> Void)?, @ViewBuilder menu: () -> Menu) -> some View {
@@ -211,7 +199,6 @@ private struct TileHover<Menu: View>: ViewModifier {
                 if isHovered {
                     Color.clear
                         .aspectRatio(1, contentMode: .fit)
-                        .scaleEffect(1.02)
                         .overlay(alignment: .bottom) {
                             HStack {
                                 if let play {

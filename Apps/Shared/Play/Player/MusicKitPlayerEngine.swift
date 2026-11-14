@@ -102,6 +102,8 @@ final class MusicKitPlayerEngine: PlayerEngine {
     // player service and hold the main thread for seconds, and inside a scene update iOS ends
     // the app for it (0x8BADF00D). So each read is kept, and while ``PlayerQuiet`` holds work
     // back the kept one answers instead, the time carried on by the clock if it was playing.
+    // The time is only ever read off the main thread (see ``readTime()``): asking for it waits
+    // on the service every time a song changes.
 
     /// The player as last read.
     private struct Reading {
@@ -120,7 +122,7 @@ final class MusicKitPlayerEngine: PlayerEngine {
     var status: PlayerStatus {
         if starting > 0 { return .loading }
         guard TracksPlayerContext.isInUse else { return .stopped }
-        if canRead { reading.playbackStatus = player.state.playbackStatus }
+        if canRead { note(player.state.playbackStatus) }
         switch reading.playbackStatus {
         case .playing, .seekingForward, .seekingBackward: return .playing
         case .paused, .interrupted: return current == nil ? .stopped : .paused
@@ -131,11 +133,58 @@ final class MusicKitPlayerEngine: PlayerEngine {
 
     var playbackTime: TimeInterval {
         guard TracksPlayerContext.isInUse else { return 0 }
-        guard canRead else { return lastKnownPlaybackTime }
-        let time = player.playbackTime
-        reading.time = time.isFinite ? max(0, time) : 0
+        if canRead, ContinuousClock.now - reading.timeReadAt >= Self.timeReadInterval { readTime() }
+        return lastKnownPlaybackTime
+    }
+
+    /// How long the clock carries the time on before the player is asked again. Playing, the
+    /// two agree; this only bounds how late a seek from elsewhere, such as Control Center,
+    /// shows.
+    private static let timeReadInterval: Duration = .seconds(1)
+
+    private var timeRead: Task<Void, Never>?
+    /// Moves on whenever the time is set here, so a read that started before doesn't undo it.
+    private var timeGeneration = 0
+    /// Whether the time was set, while a read was under way, by a change the player made
+    /// itself, and so wants reading again once that one is back.
+    private var readsAgain = false
+
+    /// Asks the player for the time off the main thread, and keeps the answer.
+    private func readTime() {
+        guard timeRead == nil else { return }
+        readsAgain = false
+        let generation = timeGeneration
+        timeRead = Task { [weak self] in
+            let time = await PlayerReads.run { ApplicationMusicPlayer.shared.playbackTime }
+            guard let self else { return }
+            self.timeRead = nil
+            guard generation == self.timeGeneration else {
+                if self.readsAgain, self.canRead { self.readTime() }
+                return
+            }
+            self.reading.time = time.isFinite ? max(0, time) : 0
+            self.reading.timeReadAt = .now
+        }
+    }
+
+    /// Sets the time without asking the player, as a seek or a new song moves it. `check` asks
+    /// the player straight away, for changes the player made itself: one Tracks just asked for
+    /// may not have reached it yet, so it waits for the next read.
+    private func setTime(_ time: TimeInterval, check: Bool) {
+        timeGeneration &+= 1
+        reading.time = time
         reading.timeReadAt = .now
-        return reading.time
+        readsAgain = check && timeRead != nil
+        if check, canRead { readTime() }
+    }
+
+    /// Keeps a new status, carrying the time on by the clock up to the change so it doesn't
+    /// jump back while the player is asked.
+    private func note(_ status: MusicPlayer.PlaybackStatus) {
+        guard status != reading.playbackStatus else { return }
+        let time = lastKnownPlaybackTime
+        reading.playbackStatus = status
+        setTime(time, check: true)
     }
 
     /// The time as last read, moved on by the clock while playing, without touching the
@@ -173,11 +222,14 @@ final class MusicKitPlayerEngine: PlayerEngine {
         let currentEntry = player.queue.currentEntry
         var kept: [String: MadeTrack] = [:]
         func track(_ entry: MusicPlayer.Queue.Entry) -> PlayerTrack {
-            let made = self.track(from: entry)
+            let made = self.track(from: entry, isCurrent: entry.id == currentEntry?.id)
             kept[entry.id] = made
             return made.track
         }
+        let previousID = current?.id
         current = currentEntry.map(track)
+        // A new song starts from its beginning; the player is asked for the exact time.
+        if current?.id != previousID { setTime(0, check: true) }
         if TracksPlayerContext.isStation {
             upNext = []
             // A station can play for days, a song every few minutes, and nothing replaces its
@@ -204,7 +256,14 @@ final class MusicKitPlayerEngine: PlayerEngine {
         let track: PlayerTrack
     }
 
-    private func track(from entry: MusicPlayer.Queue.Entry) -> MadeTrack {
+    private func track(from entry: MusicPlayer.Queue.Entry, isCurrent: Bool) -> MadeTrack {
+        // Reading `item` asks Apple's player service on the main thread, once per entry. Only
+        // the current entry's song can change under it (a live station's), so a resolved one
+        // further down the queue is taken as made.
+        if !isCurrent, let cached = made[entry.id], cached.songID != nil,
+           cached.title == entry.title, cached.isLive == TracksPlayerContext.isLiveStation {
+            return cached
+        }
         var song: Song?
         if case .song(let resolved) = entry.item { song = resolved }
         let isLive = TracksPlayerContext.isLiveStation
@@ -454,14 +513,14 @@ final class MusicKitPlayerEngine: PlayerEngine {
         await PlayerQuiet.settled()
         if playbackTime > 3 || upNext.isEmpty && TracksPlayerContext.isStation {
             player.restartCurrentEntry()
+            setTime(0, check: false)
         } else {
             try await ApplicationPlayerCommands.skipToPrevious()
         }
     }
 
     func seek(to time: TimeInterval) {
-        reading.time = max(0, time)
-        reading.timeReadAt = .now
+        setTime(max(0, time), check: false)
         PlayerQuiet.run { [player] in player.playbackTime = max(0, time) }
     }
 

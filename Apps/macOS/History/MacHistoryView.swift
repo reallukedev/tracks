@@ -123,6 +123,7 @@ private struct MacHistoryTable: View {
                     .draggable(drag(from: row))
             }
         }
+        .fixedTableRowHeight(34)
         // The columns are fixed once the table is made: AppKit's header falls out of step with
         // the rows when they change under it. Connecting Last.fm makes the table afresh.
         .id(isScrobbling)
@@ -276,7 +277,7 @@ private struct MacHistoryTable: View {
             storeChanges += 1
         }
         .onChange(of: lastFMUsername, initial: true) {
-            isScrobbling = LastFMSessionStore.current != nil
+            isScrobbling = LastFMKeyCheck.isConnected(as: lastFMUsername)
         }
     }
 
@@ -519,5 +520,19 @@ extension MixSong {
             lastHeard: row.capturedAt,
             genre: nil
         )
+    }
+}
+
+/// Whether Last.fm is connected, read from the keychain once per account rather than each time
+/// History opens: a keychain read waits on another process, on the main thread.
+@MainActor
+private enum LastFMKeyCheck {
+    private static var last: (username: String?, isConnected: Bool)?
+
+    static func isConnected(as username: String?) -> Bool {
+        if let last, last.username == username { return last.isConnected }
+        let isConnected = LastFMSessionStore.current != nil
+        last = (username, isConnected)
+        return isConnected
     }
 }

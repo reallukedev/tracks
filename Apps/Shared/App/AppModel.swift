@@ -109,7 +109,10 @@ final class AppModel {
     /// The iPhone's tab. Lives here so Summary's "See All" can move to Charts, which owns the
     /// full lists, instead of pushing a second copy inside Summary.
     /// A launch link opens on Summary, whose stack it's pushed onto (see `RootView`).
-    var selectedTab: AppTab = AppTab(launchName: LaunchScene.tab)
+    var selectedTab: AppTab = AppModel.launchTab
+
+    /// The tab Tracks opens on, for the tab bar to start from without reading `selectedTab`.
+    static let launchTab: AppTab = AppTab(launchName: LaunchScene.tab)
         ?? (LaunchScene.opensSearch || LaunchScene.searchText != nil ? .search : LaunchScene.route != nil ? .summary : AppTab.opening)
 
     /// Apple Music access, as last read. Summary and Settings explain what it's for and offer

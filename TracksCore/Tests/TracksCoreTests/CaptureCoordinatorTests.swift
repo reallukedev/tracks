@@ -237,9 +237,10 @@ struct CaptureCoordinatorTests {
         )
         await working.handle(observation)
         await working.drainPendingWrites()
-        #expect(capture.songID == "9999")
-        #expect(capture.artworkURL == "https://example.test/art.jpg")
-        #expect(capture.lastPlaylistWriteError == nil)
+        let resolved = try store.stored(capture)
+        #expect(resolved.songID == "9999")
+        #expect(resolved.artworkURL == "https://example.test/art.jpg")
+        #expect(resolved.lastPlaylistWriteError == nil)
     }
 
     @Test("a transient write failure leaves the capture pending")
@@ -552,7 +553,8 @@ struct CaptureDrainTests {
         let subject = CaptureCoordinator(store: store, settings: settings, playlistWriter: writer, catalogResolver: resolver)
         let start = Date(timeIntervalSince1970: 1_700_000_000)
         for index in 0..<(TracksStore.catalogSearchBatch * 2 + 5) {
-            _ = try store.insertCapture(
+            _ = TracksStore.insertCapture(
+                in: store.context,
                 songKey: "song \(index)",
                 catalogSongID: nil,
                 observation: unresolved("Song \(index)"),

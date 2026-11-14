@@ -44,11 +44,6 @@ struct Shelf<Items: RandomAccessCollection, Tile: View, Trailing: View>: View wh
     let items: Items
     @ViewBuilder var trailing: Trailing
     @ViewBuilder var tile: (Items.Element) -> Tile
-    #if os(macOS)
-    /// The tiles wholly in view, in order, for the arrows to page from.
-    @State private var visible: [Items.Element.ID] = []
-    @State private var isHovering = false
-    #endif
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -76,24 +71,38 @@ struct Shelf<Items: RandomAccessCollection, Tile: View, Trailing: View>: View wh
                 .scrollTargetBehavior(.viewAligned)
                 .scrollIndicators(.hidden)
                 #if os(macOS)
-                .onScrollTargetVisibilityChange(idType: Items.Element.ID.self, threshold: 0.95) { visible = $0 }
-                .overlay {
-                    if isHovering {
-                        pageArrows(proxy)
-                    }
-                }
-                // After the arrows, so moving onto one doesn't count as leaving the shelf.
-                .onHover { hovering in
-                    withAnimation(PlayMotion.hover) { isHovering = hovering }
-                }
+                .modifier(ShelfPaging(ids: items.map(\.id), proxy: proxy))
                 #endif
             }
         }
     }
+}
 
-    #if os(macOS)
-    private func pageArrows(_ proxy: ScrollViewProxy) -> some View {
-        let ids = items.map(\.id)
+#if os(macOS)
+/// The shelf's arrows, with the hover and the tiles in view kept here: on the shelf itself,
+/// every tile scrolled into view and every pass of the pointer drew all its tiles again.
+private struct ShelfPaging<ID: Hashable>: ViewModifier {
+    let ids: [ID]
+    let proxy: ScrollViewProxy
+    /// The tiles wholly in view, in order, for the arrows to page from.
+    @State private var visible: [ID] = []
+    @State private var isHovering = false
+
+    func body(content: Content) -> some View {
+        content
+            .onScrollTargetVisibilityChange(idType: ID.self, threshold: 0.95) { visible = $0 }
+            .overlay {
+                if isHovering {
+                    pageArrows
+                }
+            }
+            // After the arrows, so moving onto one doesn't count as leaving the shelf.
+            .onHover { hovering in
+                withAnimation(PlayMotion.hover) { isHovering = hovering }
+            }
+    }
+
+    private var pageArrows: some View {
         let first = visible.first.flatMap { ids.firstIndex(of: $0) }
         let last = visible.last.flatMap { ids.firstIndex(of: $0) }
         return HStack {
@@ -113,8 +122,8 @@ struct Shelf<Items: RandomAccessCollection, Tile: View, Trailing: View>: View wh
         .padding(.horizontal, 8)
         .transition(.opacity)
     }
-    #endif
 }
+#endif
 
 #if os(macOS)
 /// A round glass arrow at the end of a shelf.

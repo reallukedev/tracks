@@ -268,7 +268,6 @@ struct ArtistLatestRelease<Menu: View>: View {
                 .frame(maxWidth: Self.maximumWidth, alignment: .leading)
                 .background(Color.cardFill, in: .rect(cornerRadius: Metrics.cardRadius, style: .continuous))
                 .contentShape(.rect(cornerRadius: Metrics.cardRadius, style: .continuous))
-                .hoverLift()
                 .accessibilityElement(children: .combine)
             }
             .buttonStyle(.pressable)
@@ -296,7 +295,6 @@ struct ArtistCircleTile: View {
     var body: some View {
         VStack(spacing: 8) {
             ArtistPicture(cover: picture, name: name, size: side)
-                .hoverLift()
             VStack(spacing: 1) {
                 Text(name)
                     .foregroundStyle(.primary)

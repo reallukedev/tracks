@@ -8,6 +8,8 @@ import SwiftData
 @MainActor
 public final class ScrobbleService {
     private let store: TracksStore
+    /// Where the queue is read and written, off the main actor.
+    private let writer: HistoryWriter
     private let settings: CaptureSettings
     private let makeClient: @Sendable () -> LastFMClient?
     /// The connected account. The Keychain in the app; injected in tests, which mustn't
@@ -38,6 +40,7 @@ public final class ScrobbleService {
         currentSession: @escaping @Sendable () -> LastFMSession? = { LastFMSessionStore.current }
     ) {
         self.store = store
+        self.writer = store.writer
         self.settings = settings
         self.makeClient = makeClient
         self.currentSession = currentSession
@@ -84,21 +87,23 @@ public final class ScrobbleService {
         // Up to fifty scrobbles per request.
         while true {
             // Saved first, so every row has the identity it will keep.
-            try? store.context.save()
-            let descriptor = TracksStore.pendingScrobbles(
-                includingImported: settings.scrobblesImported,
-                limit: LastFMClient.batchLimit
-            )
-            guard let owed = try? store.context.fetch(descriptor), !owed.isEmpty else { break }
+            store.saveMainContext()
+            let includingImported = settings.scrobblesImported
+            guard let owed = try? await writer.read({ context in
+                try context.fetch(TracksStore.pendingScrobbles(
+                    includingImported: includingImported,
+                    limit: LastFMClient.batchLimit
+                )).map(OwedScrobble.init)
+            }), !owed.isEmpty else { break }
 
             // Apple's recently-played list covers the whole account, so an import can be a
             // play another device already scrobbled. Last.fm's own history is the only thing
             // that knows, whether or not that device's rows have synced here yet.
-            let imports = owed.filter { $0.kind == .imported && !checked.contains($0.persistentModelID) }
+            let imports = owed.filter { $0.kind == .imported && !checked.contains($0.id) }
             if !imports.isEmpty {
                 let candidates = imports.map {
                     ImportedPlay(
-                        id: $0.persistentModelID,
+                        id: $0.id,
                         key: HistoryImport.key(title: $0.title, artistName: $0.artistName),
                         foundAt: $0.capturedAt
                     )
@@ -122,18 +127,21 @@ public final class ScrobbleService {
                 checked.formUnion(candidates.map(\.id).filter { !found.contains($0) })
                 if !found.isEmpty {
                     let stamp = now()
-                    for capture in store.existingCaptures(Array(found)).values {
-                        capture.scrobbledAt = stamp
-                        capture.lastScrobbleError = nil
+                    let ids = Array(found)
+                    let saved: Void? = try? await writer.write { context in
+                        for capture in TracksStore.existingCaptures(ids, in: context).values {
+                            capture.scrobbledAt = stamp
+                            capture.lastScrobbleError = nil
+                        }
                     }
-                    guard (try? store.context.save()) != nil else { return sent }
+                    guard saved != nil else { return sent }
                     // Fetched again: the batch has room for rows that were behind these.
                     continue
                 }
             }
 
             // Only identities cross the request: the rows may be merged away meanwhile.
-            let ids = owed.map(\.persistentModelID)
+            let ids = owed.map(\.id)
             let scrobbles = owed.map {
                 Scrobble(
                     artist: $0.artistName,
@@ -151,11 +159,12 @@ public final class ScrobbleService {
                 let message = Self.describe(error)
                 lastError = message
                 if Self.isTheScrobblesFault(error) {
-                    for capture in store.existingCaptures(ids).values {
-                        capture.scrobbleAttempts += 1
-                        capture.lastScrobbleError = message
+                    _ = try? await writer.write { context in
+                        for capture in TracksStore.existingCaptures(ids, in: context).values {
+                            capture.scrobbleAttempts += 1
+                            capture.lastScrobbleError = message
+                        }
                     }
-                    try? store.context.save()
                 } else {
                     // Offline, Last.fm down or rate limiting, or an account problem. Nothing
                     // to do with these rows, so they keep their attempts and wait.
@@ -165,31 +174,39 @@ public final class ScrobbleService {
                 return sent
             }
 
-            let rows = store.existingCaptures(ids)
+            // Accepted or not, a row merged away while the request was out has nothing left
+            // to record it on, so the count doesn't wait for the rows.
+            sent += zip(ids, outcomes).filter { $0.1.isAccepted }.count
             let stamp = now()
-            var heldBack: String?
-            for (id, outcome) in zip(ids, outcomes) {
-                // Accepted or not, a row merged away while the request was out has nothing
-                // left to record it on.
-                if outcome.isAccepted { sent += 1 }
-                guard let capture = rows[id] else { continue }
-                switch outcome {
-                case .accepted:
-                    capture.scrobbledAt = stamp
-                    capture.lastScrobbleError = nil
-                case .ignored(let code, let message) where outcome.isRetryable:
-                    // Left owed, untouched, for when the limit or the clock allows it.
-                    heldBack = Self.describeIgnored(code: code, message: message)
-                case .ignored(let code, let message):
-                    // Last.fm will never take this one. Give up on it now, with the reason,
-                    // which is what the history shows next to it. Marking it scrobbled would
-                    // claim a play Last.fm doesn't have.
-                    capture.scrobbleAttempts = max(capture.scrobbleAttempts, TracksStore.maxScrobbleAttempts)
-                    capture.lastScrobbleError = Self.describeIgnored(code: code, message: message)
+            let heldBack: String?
+            do {
+                heldBack = try await writer.write { context in
+                    let rows = TracksStore.existingCaptures(ids, in: context)
+                    var heldBack: String?
+                    for (id, outcome) in zip(ids, outcomes) {
+                        guard let capture = rows[id] else { continue }
+                        switch outcome {
+                        case .accepted:
+                            capture.scrobbledAt = stamp
+                            capture.lastScrobbleError = nil
+                        case .ignored(let code, let message) where outcome.isRetryable:
+                            // Left owed, untouched, for when the limit or the clock allows it.
+                            heldBack = Self.describeIgnored(code: code, message: message)
+                        case .ignored(let code, let message):
+                            // Last.fm will never take this one. Give up on it now, with the
+                            // reason, which is what the history shows next to it. Marking it
+                            // scrobbled would claim a play Last.fm doesn't have.
+                            capture.scrobbleAttempts = max(capture.scrobbleAttempts, TracksStore.maxScrobbleAttempts)
+                            capture.lastScrobbleError = Self.describeIgnored(code: code, message: message)
+                        }
+                    }
+                    return heldBack
                 }
+            } catch {
+                // A save that fails would leave these rows owed, and the loop would send them
+                // again.
+                return sent
             }
-            // A save that fails would leave these rows owed, and the loop would send them again.
-            guard (try? store.context.save()) != nil else { return sent }
 
             if let heldBack {
                 // Not reset first, so a daily limit that is still in force keeps lengthening
@@ -203,6 +220,25 @@ public final class ScrobbleService {
             if owed.count < LastFMClient.batchLimit { break }
         }
         return sent
+    }
+
+    /// A row owed a scrobble, read in the store's writer.
+    struct OwedScrobble: Sendable {
+        let id: PersistentIdentifier
+        let kind: CaptureKind
+        let title: String
+        let artistName: String
+        let albumTitle: String?
+        let capturedAt: Date
+
+        init(_ capture: Capture) {
+            id = capture.persistentModelID
+            kind = capture.kind
+            title = capture.title
+            artistName = capture.artistName
+            albumTitle = capture.albumTitle
+            capturedAt = capture.capturedAt
+        }
     }
 
     /// An import waiting to be sent, as the Last.fm history check sees it.

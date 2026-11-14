@@ -38,7 +38,8 @@ struct StoreSharingTests {
             return
         }
         let before = try store.context.fetch(TracksStore.radioCaptures()).count
-        _ = try store.insertCapture(
+        _ = TracksStore.insertCapture(
+            in: store.context,
             songKey: "test-\(UUID().uuidString)",
             catalogSongID: "1",
             observation: NowPlayingObservation(title: "T", artistName: "A"),
@@ -92,7 +93,7 @@ struct LastCaptureDateTests {
     /// It used to only look at radio, so an on-demand song was captured again on every
     /// ten-second poll.
     @Test("an on-demand row is found, so it can be deduped against")
-    func findsOnDemandRows() throws {
+    func findsOnDemandRows() async throws {
         let store = try TracksStore(inMemory: true)
         let when = Date(timeIntervalSince1970: 1_700_000_000)
         store.context.insert(Capture(
@@ -101,12 +102,12 @@ struct LastCaptureDateTests {
         ))
         try store.context.save()
 
-        #expect(try store.lastCaptureDate(songKey: "walkin") == when)
+        #expect(try await store.writer.lastCaptureDate(songKey: "walkin") == when)
     }
 
     /// Imports are dated when found, so one could hide a real play happening now.
     @Test("an imported row does not suppress a real capture")
-    func ignoresImportedRows() throws {
+    func ignoresImportedRows() async throws {
         let store = try TracksStore(inMemory: true)
         store.context.insert(Capture(
             songID: "1", songKey: "walkin", title: "Walkin", artistName: "Denzel Curry",
@@ -114,11 +115,11 @@ struct LastCaptureDateTests {
         ))
         try store.context.save()
 
-        #expect(try store.lastCaptureDate(songKey: "walkin") == nil)
+        #expect(try await store.writer.lastCaptureDate(songKey: "walkin") == nil)
     }
 
     @Test("a radio row is still found")
-    func findsRadioRows() throws {
+    func findsRadioRows() async throws {
         let store = try TracksStore(inMemory: true)
         let when = Date(timeIntervalSince1970: 1_700_000_000)
         store.context.insert(Capture(
@@ -127,6 +128,6 @@ struct LastCaptureDateTests {
         ))
         try store.context.save()
 
-        #expect(try store.lastCaptureDate(songKey: "walkin") == when)
+        #expect(try await store.writer.lastCaptureDate(songKey: "walkin") == when)
     }
 }

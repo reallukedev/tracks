@@ -92,8 +92,8 @@ struct LibraryPlayButtons: View {
 
 // MARK: - Tiles
 
-/// A cover in a library grid: the cover, its name and a line under it. On the Mac it lifts a
-/// little under the pointer and shows Music's two round buttons over its foot, Play on the left
+/// A cover in a library grid: the cover, its name and a line under it. On the Mac the pointer
+/// brings up Music's two round buttons over its foot, Play on the left
 /// and More on the right; a click anywhere else opens it.
 struct LibraryCoverTile<Cover: View, Menu: View>: View {
     let title: String
@@ -115,10 +115,6 @@ struct LibraryCoverTile<Cover: View, Menu: View>: View {
             VStack(alignment: .leading, spacing: LibraryTileMetrics.coverGap) {
                 cover(side)
                     .frame(width: side, height: side)
-                    #if os(macOS)
-                    .scaleEffect(isHovered ? 1.02 : 1)
-                    .shadow(color: .black.opacity(isHovered ? 0.18 : 0), radius: 10, y: 5)
-                    #endif
                 LibraryTileText(title: title, subtitle: subtitle)
             }
             .frame(width: side, alignment: .leading)
@@ -132,7 +128,6 @@ struct LibraryCoverTile<Cover: View, Menu: View>: View {
             if isHovered {
                 Color.clear
                     .aspectRatio(1, contentMode: .fit)
-                    .scaleEffect(1.02)
                     .overlay(alignment: .bottom) {
                         HStack {
                             if let play {
@@ -411,30 +406,6 @@ extension View {
 }
 
 // MARK: - Hover
-
-extension View {
-    /// Lifts a card or cover a little under the pointer on the Mac. Nothing on iPhone.
-    func hoverLift() -> some View {
-        #if os(macOS)
-        modifier(HoverLift())
-        #else
-        self
-        #endif
-    }
-}
-
-#if os(macOS)
-private struct HoverLift: ViewModifier {
-    @State private var isHovered = false
-
-    func body(content: Content) -> some View {
-        content
-            .scaleEffect(isHovered ? 1.02 : 1)
-            .shadow(color: .black.opacity(isHovered ? 0.16 : 0), radius: 10, y: 5)
-            .onHover { hovering in withAnimation(PlayMotion.hover) { isHovered = hovering } }
-    }
-}
-#endif
 
 // MARK: - Your plays by artist
 

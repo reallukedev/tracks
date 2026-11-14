@@ -13,7 +13,7 @@ struct CloudSyncTests {
     /// sessions deleted listening history. It nullifies now, but the sessions must still
     /// end up on the survivor rather than with no station.
     @Test("merging stations keeps the sessions that belonged to the duplicate")
-    func mergeKeepsSessions() throws {
+    func mergeKeepsSessions() async throws {
         let store = try TracksStore(inMemory: true)
         let older = Station(name: "Apple Music Chill", firstSeenAt: .now.addingTimeInterval(-3600))
         let newer = Station(name: "Apple Music Chill", firstSeenAt: .now)
@@ -23,7 +23,7 @@ struct CloudSyncTests {
         store.context.insert(Session(startedAt: .now, station: newer))
         try store.context.save()
 
-        #expect(try store.mergeDuplicateStations() == 1)
+        #expect(try await store.mergeDuplicateStations() == 1)
 
         let stations = try store.context.fetch(FetchDescriptor<Station>())
         let sessions = try store.context.fetch(FetchDescriptor<Session>())
@@ -34,7 +34,7 @@ struct CloudSyncTests {
 
     /// Each device merges on its own, so the winner has to be one they all pick: the oldest.
     @Test("the oldest station survives and absorbs what the others knew")
-    func mergePrefersTheOldest() throws {
+    func mergePrefersTheOldest() async throws {
         let store = try TracksStore(inMemory: true)
         let start = Date(timeIntervalSince1970: 1_700_000_000)
         let older = Station(name: "Chill", firstSeenAt: start)
@@ -45,7 +45,7 @@ struct CloudSyncTests {
         store.context.insert(newer)
         try store.context.save()
 
-        try store.mergeDuplicateStations()
+        try await store.mergeDuplicateStations()
 
         let survivor = try #require(try store.context.fetch(FetchDescriptor<Station>()).first)
         #expect(survivor.firstSeenAt == start)
@@ -54,24 +54,24 @@ struct CloudSyncTests {
     }
 
     @Test("case and accents do not make two stations")
-    func mergeIgnoresCaseAndAccents() throws {
+    func mergeIgnoresCaseAndAccents() async throws {
         let store = try TracksStore(inMemory: true)
         store.context.insert(Station(name: "Café Radio", firstSeenAt: .now.addingTimeInterval(-60)))
         store.context.insert(Station(name: "cafe radio", firstSeenAt: .now))
         try store.context.save()
 
-        #expect(try store.mergeDuplicateStations() == 1)
+        #expect(try await store.mergeDuplicateStations() == 1)
         #expect(try store.context.fetch(FetchDescriptor<Station>()).count == 1)
     }
 
     @Test("distinct stations are left alone")
-    func mergeLeavesDistinctStationsAlone() throws {
+    func mergeLeavesDistinctStationsAlone() async throws {
         let store = try TracksStore(inMemory: true)
         store.context.insert(Station(name: "Chill", firstSeenAt: .now))
         store.context.insert(Station(name: "Hits", firstSeenAt: .now))
         try store.context.save()
 
-        #expect(try store.mergeDuplicateStations() == 0)
+        #expect(try await store.mergeDuplicateStations() == 0)
         #expect(try store.context.fetch(FetchDescriptor<Station>()).count == 2)
     }
 
