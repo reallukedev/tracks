@@ -237,6 +237,8 @@ with the app in the background, so your history no longer depends on having Trac
 - Steadier and lighter: fixes for missed songs, settings sync, daylight saving in charts and
   streaks, playlist merging, downloads and CarPlay, and moving backgrounds that draw only
   as often as they need to
+- Faster with years of history: pages open and scroll quicker, the first song starts
+  sooner, and History's rows no longer shift as they load
 
 ## Motif 1.0
 
