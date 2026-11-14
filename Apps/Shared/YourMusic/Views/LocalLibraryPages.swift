@@ -343,7 +343,7 @@ private struct LocalSongsList: View {
                         let queue = songs.filter(music.isPlayable)
                         player.play(.local(queue, startingAt: queue.firstIndex(of: track) ?? 0), from: context)
                     } label: {
-                        LocalTrackRow(track: track, isCurrent: player.current?.local?.id == track.id)
+                        CurrentSongReader(localID: track.id) { LocalTrackRow(track: track, isCurrent: $0) }
                     }
                     .buttonStyle(.plain)
                     .disabled(!music.isPlayable(track))

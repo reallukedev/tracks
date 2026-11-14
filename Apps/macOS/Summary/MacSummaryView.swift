@@ -125,12 +125,27 @@ private struct Dashboard: View {
     /// Three albums to a row, or four once the card is wide enough to keep them a good size.
     @State private var albumColumns = 3
     /// The dashboard's width, which picks each row's arrangement. Measured rather than left to
-    /// `ViewThatFits`, which would build and measure both arrangements on every layout.
-    @State private var width: CGFloat = 1000
+    /// `ViewThatFits`, which would build and measure both arrangements on every layout. Kept as
+    /// the arrangements alone, so a resize redraws the dashboard only when one changes.
+    @State private var room = Room(width: 1000)
+
+    private nonisolated struct Room: Equatable {
+        let isWide: Bool
+        let pairsCharts: Bool
+        let pairsRhythm: Bool
+
+        init(width: CGFloat) {
+            isWide = width >= 836
+            pairsCharts = width >= 856
+            pairsRhythm = width >= 760
+        }
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Metrics.sectionSpacing) {
-            if width >= 836 {
+        // Lazy, so a click on Summary builds only the sections in the window, not every chart
+        // down to Records.
+        LazyVStack(alignment: .leading, spacing: Metrics.sectionSpacing) {
+            if room.isWide {
                 HStack(alignment: .top, spacing: 16) {
                     // The tiles set the row's height at their natural size and the chart
                     // takes up the rest, so neither side has empty space at the bottom.
@@ -174,7 +189,7 @@ private struct Dashboard: View {
                 .id("artists")
             }
 
-            if width >= 856 {
+            if room.pairsCharts {
                 HStack(alignment: .top, spacing: 16) {
                     songs.frame(minWidth: 420)
                     albums.frame(minWidth: 420)
@@ -192,12 +207,12 @@ private struct Dashboard: View {
             VStack(alignment: .leading, spacing: 10) {
                 SectionHeader("Listening Rhythm")
                 VStack(spacing: Metrics.cardSpacing) {
-                    let rhythm = width >= 760
+                    let rhythm = room.pairsRhythm
                         ? AnyLayout(HStackLayout(alignment: .top, spacing: Metrics.cardSpacing))
                         : AnyLayout(VStackLayout(spacing: Metrics.cardSpacing))
                     rhythm {
                         Card { ListeningClockCard(hourly: summary.hourly) }
-                            .frame(width: width >= 760 ? 320 : nil)
+                            .frame(width: room.pairsRhythm ? 320 : nil)
                         weekCard
                     }
                     RhythmDetailsRow(summary: summary)
@@ -214,7 +229,7 @@ private struct Dashboard: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity)
         }
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        .onGeometryChange(for: Room.self) { Room(width: $0.size.width) } action: { room = $0 }
     }
 
     private var songs: some View {
@@ -283,11 +298,11 @@ private struct Dashboard: View {
 /// The top of the dashboard as plain cards, in the same arrangement, while the summary is
 /// worked out.
 private struct DashboardSkeleton: View {
-    @State private var width: CGFloat = 1000
+    @State private var isWide = true
 
     var body: some View {
         Group {
-            if width >= 836 {
+            if isWide {
                 HStack(alignment: .top, spacing: 16) {
                     CardBackground()
                         .frame(minWidth: 560)
@@ -307,7 +322,7 @@ private struct DashboardSkeleton: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        .onGeometryChange(for: Bool.self) { $0.size.width >= 836 } action: { isWide = $0 }
         .accessibilityHidden(true)
     }
 }

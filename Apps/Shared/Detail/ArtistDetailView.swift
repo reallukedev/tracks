@@ -34,6 +34,11 @@ struct ArtistDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .task(id: "\(artistID)|\(revision)") {
+            // New listening on the page already shown: a play bumps the revision, and its
+            // lookups again a moment later, so let the burst settle and work it out once.
+            if profile?.artist.id == artistID {
+                do { try await Task.sleep(for: LiveUpdate.settle) } catch { return }
+            }
             let (id, history, isLoaded) = (artistID, model.library.history, model.library.isLoaded)
             let next = await OffMainActor.run { StatsCalculator.artistProfile(id: id, history: history) }
             guard !Task.isCancelled else { return }

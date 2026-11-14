@@ -274,7 +274,7 @@ struct MusicSearchResults: View {
             return
         }
         // A short pause so typing doesn't search on every letter.
-        try? await Task.sleep(for: .milliseconds(280))
+        try? await Task.sleep(for: .milliseconds(300))
         guard !Task.isCancelled else { return }
         state = .loading
         do {

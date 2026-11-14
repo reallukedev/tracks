@@ -1,6 +1,12 @@
 import Foundation
 import Observation
+import Synchronization
 import TracksCore
+#if os(iOS)
+import UIKit
+#else
+import AppKit
+#endif
 
 /// The playlists you make in Tracks, kept on this iPhone beside the rest of your music's records.
 @MainActor
@@ -16,12 +22,23 @@ final class Playlists {
     private(set) var unmerged: Set<String> = Set(UserDefaults.standard.stringArray(forKey: Playlists.unmergedKey) ?? [])
 
     @ObservationIgnored private let isDemo: Bool
+    @ObservationIgnored private let record = PlaylistRecord(url: Playlists.recordURL)
+    @ObservationIgnored private var flushOnExit: (any NSObjectProtocol)?
     private static let unmergedKey = "unmergedPlaylists"
 
     init(isDemo: Bool) {
         self.isDemo = isDemo
-        guard !isDemo,
-              let data = try? Data(contentsOf: Self.recordURL),
+        guard !isDemo else { return }
+        // Writes happen in the background, so the last change is written before the app can end.
+        #if os(iOS)
+        let exit = UIApplication.didEnterBackgroundNotification
+        #else
+        let exit = NSApplication.willTerminateNotification
+        #endif
+        flushOnExit = NotificationCenter.default.addObserver(forName: exit, object: nil, queue: nil) { [record] _ in
+            record.flush()
+        }
+        guard let data = try? Data(contentsOf: Self.recordURL),
               let saved = try? JSONDecoder().decode([TracksPlaylist].self, from: data)
         else { return }
         all = saved
@@ -93,8 +110,33 @@ final class Playlists {
     private static var recordURL: URL { LibraryFolders.index.appending(path: "playlists.json") }
 
     private func save() {
-        guard !isDemo, let data = try? JSONEncoder().encode(all) else { return }
-        try? data.write(to: Self.recordURL, options: .atomic)
+        guard !isDemo else { return }
+        record.keep(all)
+        Task.detached(priority: .utility) { [record] in record.flush() }
+    }
+}
+
+/// The playlists file, written one change at a time and always with the newest playlists.
+nonisolated private final class PlaylistRecord: Sendable {
+    private let url: URL
+    private let pending = Mutex<[TracksPlaylist]?>(nil)
+    private let writing = Mutex(())
+
+    init(url: URL) { self.url = url }
+
+    func keep(_ playlists: [TracksPlaylist]) {
+        pending.withLock { $0 = playlists }
+    }
+
+    /// Writes the newest change not yet written, if any. Taken under the write lock, so an
+    /// older change can never be written after a newer one.
+    func flush() {
+        writing.withLock { _ in
+            guard let playlists = pending.withLock({ $0.take() }),
+                  let data = try? JSONEncoder().encode(playlists)
+            else { return }
+            try? data.write(to: url, options: .atomic)
+        }
     }
 }
 

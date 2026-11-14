@@ -63,20 +63,16 @@ private struct MixBar: View {
     private static let gap: CGFloat = 2
 
     var body: some View {
-        GeometryReader { geometry in
-            let segments = shares.count + (otherShare > 0 ? 1 : 0)
-            let width = max(0, geometry.size.width - Self.gap * CGFloat(max(0, segments - 1)))
-            HStack(spacing: Self.gap) {
-                ForEach(shares.indices, id: \.self) { index in
-                    Rectangle()
-                        .fill(Color.accentColor.opacity(shades[index]))
-                        .frame(width: width * shares[index])
-                }
-                if otherShare > 0 {
-                    Rectangle()
-                        .fill(.quaternary)
-                        .frame(width: width * otherShare)
-                }
+        ShareRow(gap: Self.gap) {
+            ForEach(shares.indices, id: \.self) { index in
+                Rectangle()
+                    .fill(Color.accentColor.opacity(shades[index]))
+                    .share(shares[index])
+            }
+            if otherShare > 0 {
+                Rectangle()
+                    .fill(.quaternary)
+                    .share(otherShare)
             }
         }
         .frame(height: 14)

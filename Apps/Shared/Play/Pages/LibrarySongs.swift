@@ -195,20 +195,21 @@ struct LibrarySongsList: View {
             .listRowInsets(EdgeInsets(top: 4, leading: PlayMetrics.margin, bottom: 12, trailing: PlayMetrics.margin))
         }
         ForEach(songs) { song in
-            let identity = HistoryImport.key(title: song.title, artistName: song.artistName)
             Button {
                 player.play(.songs(songs, startingAt: songs.firstIndex(of: song) ?? 0), from: context)
             } label: {
-                TrackRow(
-                    title: song.title,
-                    subtitle: song.artistName,
-                    cover: song.artwork.map(CoverArt.artwork) ?? .url(nil, seed: song.albumTitle ?? song.title),
-                    // The title needs the width at the largest sizes; the plays can go.
-                    plays: nil,
-                    isExplicit: song.isExplicit,
-                    isCurrent: player.current?.songIdentity == identity,
-                    artist: song.artistName
-                )
+                CurrentSongReader(identity: HistoryImport.key(title: song.title, artistName: song.artistName)) { isCurrent in
+                    TrackRow(
+                        title: song.title,
+                        subtitle: song.artistName,
+                        cover: song.artwork.map(CoverArt.artwork) ?? .url(nil, seed: song.albumTitle ?? song.title),
+                        // The title needs the width at the largest sizes; the plays can go.
+                        plays: nil,
+                        isExplicit: song.isExplicit,
+                        isCurrent: isCurrent,
+                        artist: song.artistName
+                    )
+                }
             }
             .buttonStyle(.plain)
             .libraryRowInsets()

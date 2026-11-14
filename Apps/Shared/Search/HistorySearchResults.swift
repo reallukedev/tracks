@@ -66,6 +66,7 @@ struct HistorySearchResults: View {
                 return (index, index.recallSuggestions())
             }
             guard !Task.isCancelled else { return }
+            Self.retire(index)
             index = next
             indexGeneration += 1
             topArtists = next.topArtists(limit: 10)
@@ -75,9 +76,11 @@ struct HistorySearchResults: View {
         .task(id: SearchKey(query: query, indexGeneration: indexGeneration)) {
             guard let index else { return }
             let query = query
-            if !isBlank {
-                // A short pause so typing doesn't search on every letter.
-                try? await Task.sleep(for: .milliseconds(100))
+            // A short pause so typing on doesn't search on every letter. The first letter, and
+            // a new index for what's already typed, answer at once.
+            let typingOn = !(answeredQuery ?? "").trimmingCharacters(in: .whitespaces).isEmpty
+            if !isBlank, typingOn, query != answeredQuery {
+                try? await Task.sleep(for: .milliseconds(130))
                 guard !Task.isCancelled else { return }
             }
             let found = await OffMainActor.run { Self.search(query, in: index) }
@@ -89,6 +92,17 @@ struct HistorySearchResults: View {
             answeredQuery = query
         }
         .onChange(of: query) { showsAllSongs = false }
+    }
+
+    /// Lets a replaced index go in the background: it's as big as the history, and freeing it
+    /// on the main actor cost a frame.
+    private static func retire(_ old: SearchIndex?) {
+        guard let old else { return }
+        Task.detached(priority: .background) {
+            // Long enough for the view to have let go of its own reference first.
+            try? await Task.sleep(for: .seconds(1))
+            withExtendedLifetime(old) {}
+        }
     }
 
     /// The plain search, and what's remembered when the words say a time, a station, an era or

@@ -129,7 +129,7 @@ struct SharePlayGuestPage: View {
         // SharePlay has ended the page closes any way it likes.
         .interactiveDismissDisabled(sharePlay.guest.phase != .ended)
         .sensoryFeedback(.impact(weight: .light), trigger: addedCount)
-        .task(id: SearchKey(query: query, authorization: authorization, allowsExplicit: snapshot?.allowsExplicit ?? true)) {
+        .task(id: SearchKey(query: query.trimmingCharacters(in: .whitespaces), authorization: authorization, allowsExplicit: snapshot?.allowsExplicit ?? true)) {
             await runSearch()
         }
         .onAppear(perform: model.refreshMusicAuthorization)
@@ -659,7 +659,7 @@ private struct SharePlayUpNextPage: View {
     var body: some View {
         let snapshot = sharePlay.guest.snapshot
         ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
+            LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(snapshot?.upNext ?? []) { track in
                     SharePlayQueueRow(track: track)
                 }

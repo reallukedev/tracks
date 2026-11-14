@@ -336,7 +336,7 @@ public final class TracksStore {
 
     /// Open sessions belonging to this device, newest first. Sessions with no device predate
     /// the field and count as this device's, so one left open by an older build still closes.
-    static func openSessions(deviceID: String) -> FetchDescriptor<Session> {
+    public nonisolated static func openSessions(deviceID: String) -> FetchDescriptor<Session> {
         let device: String? = deviceID
         return FetchDescriptor<Session>(
             predicate: #Predicate {
@@ -474,7 +474,7 @@ public final class TracksStore {
     }
 
     /// Radio rows only, for the playlist and play-back.
-    public static func radioCaptures(
+    public nonisolated static func radioCaptures(
         since: Date? = nil,
         limit: Int? = nil
     ) -> FetchDescriptor<Capture> {
@@ -494,12 +494,17 @@ public final class TracksStore {
     /// Both the Today widget's Up Next and ``PlaybackController`` use this, so they always
     /// agree.
     public func playBackQueue(now: Date = .now, calendar: Calendar = .current) throws -> [Capture] {
-        let captures = try context.fetch(Self.radioCaptures(since: calendar.startOfDay(for: now)))
+        try Self.playBackQueue(in: context, now: now, calendar: calendar)
+    }
+
+    /// ``playBackQueue(now:calendar:)`` on any context, for reads off the main actor.
+    nonisolated static func playBackQueue(in context: ModelContext, now: Date, calendar: Calendar) throws -> [Capture] {
+        let captures = try context.fetch(radioCaptures(since: calendar.startOfDay(for: now)))
         return PlaybackSelection.todaysUnplayed(from: captures, now: now, calendar: calendar)
     }
 
     /// The most recent row for one song, so a display can show what's playing.
-    public static func mostRecentCapture(title: String, artistName: String) -> FetchDescriptor<Capture> {
+    public nonisolated static func mostRecentCapture(title: String, artistName: String) -> FetchDescriptor<Capture> {
         var descriptor = FetchDescriptor<Capture>(
             predicate: #Predicate { $0.title == title && $0.artistName == artistName },
             sortBy: [SortDescriptor(\.capturedAt, order: .reverse)]
@@ -899,15 +904,19 @@ public final class TracksStore {
     /// `DedupePolicy.mergeWindow(earlier:later:)` depends only on the later row's kind, so
     /// rows that tie on time give the same plays in any order.
     static func playClusters(_ rows: [Capture], policy: DedupePolicy) -> [[Capture]] {
-        let ordered = rows.sorted {
+        // Each read of a model's property goes through SwiftData, and a sort reads them over
+        // and over: sorting a much-played song's rows took most of a merge's main-actor time.
+        let keyed = rows.map { (row: $0, capturedAt: $0.capturedAt, kind: $0.kind) }
+        let sorted = keyed.sorted {
             $0.capturedAt != $1.capturedAt
                 ? $0.capturedAt < $1.capturedAt
-                : isPreferredSurvivor($0, over: $1)
+                : isPreferredSurvivor($0.row, over: $1.row)
         }
         var clusters: [[Capture]] = []
         var current: [Capture] = []
-        for row in ordered {
-            // `ordered` is oldest first, so the anchor is always the earlier of the two. An
+        var anchor: (capturedAt: Date, kind: CaptureKind)?
+        for (row, capturedAt, kind) in sorted {
+            // `sorted` is oldest first, so the anchor is always the earlier of the two. An
             // import following a play gets a wide window, because it is dated when it was
             // found rather than when it played. Everything else gets the ordinary one.
             //
@@ -915,15 +924,16 @@ public final class TracksStore {
             // which merged plays any distance apart: four plays of one song a month apart
             // collapsed into one, and an old import swallowed a real play recorded weeks
             // later. The deletions synced, so both devices lost them.
-            if let anchor = current.first {
-                let window = policy.mergeWindow(earlier: anchor.kind, later: row.kind)
-                if row.capturedAt.timeIntervalSince(anchor.capturedAt) < window {
+            if let anchor {
+                let window = policy.mergeWindow(earlier: anchor.kind, later: kind)
+                if capturedAt.timeIntervalSince(anchor.capturedAt) < window {
                     current.append(row)
                     continue
                 }
                 clusters.append(current)
             }
             current = [row]
+            anchor = (capturedAt, kind)
         }
         if !current.isEmpty { clusters.append(current) }
         return clusters
@@ -1010,6 +1020,21 @@ public final class TracksStore {
     public func clearUnloadableArtwork() throws -> Int {
         let rows = try context.fetch(Self.possiblyUnloadableArtwork())
             .filter { !Self.isLoadableArtwork($0.artworkURL) }
+        guard !rows.isEmpty else { return 0 }
+        for row in rows { row.artworkURL = nil }
+        try context.save()
+        return rows.count
+    }
+
+    /// ``clearUnloadableArtwork()``, finding the rows through ``historyReader`` in the
+    /// background. The store can't index the narrowing, so even that scanned every row on the
+    /// main actor, after every synced change.
+    @discardableResult
+    public func clearUnloadableArtworkFoundInBackground() async throws -> Int {
+        let ids = try await historyReader.captureIDsWithUnloadableArtwork()
+        guard !ids.isEmpty else { return 0 }
+        // Checked again, in case a cover was found since the reader looked.
+        let rows = existingCaptures(ids).values.filter { $0.artworkURL != nil && !Self.isLoadableArtwork($0.artworkURL) }
         guard !rows.isEmpty else { return 0 }
         for row in rows { row.artworkURL = nil }
         try context.save()

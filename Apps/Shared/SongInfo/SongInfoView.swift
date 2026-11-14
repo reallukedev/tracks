@@ -121,6 +121,10 @@ struct SongInfoPage: View {
         .navigationTitle(subject.title)
         #endif
         .task(id: revision) {
+            // Already shown: let a burst of revisions settle (see ``LiveUpdate/settle``).
+            if !info.history.isLoading {
+                do { try await Task.sleep(for: LiveUpdate.settle) } catch { return }
+            }
             await info.loadHistory(of: subject, library: model.library)
         }
         .task(id: retries) {

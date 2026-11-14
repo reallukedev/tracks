@@ -152,7 +152,7 @@ final class MusicServers {
         setReportsPlays(true, to: serverID)
         ServerKeychain.removePassword(for: serverID)
         try? FileManager.default.removeItem(at: Self.catalogURL(serverID))
-        try? FileManager.default.removeItem(at: Self.artistsURL(serverID))
+        writeArtists(nil, serverID)
         artists[serverID] = nil
         save()
     }
@@ -466,15 +466,42 @@ final class MusicServers {
     /// Asks a server for its artists, for their pictures and ids. One request, however many.
     private func syncArtists(_ serverID: String) async {
         guard let client = clients[serverID], let found = try? await client.artists() else { return }
+        // A big server has thousands of artists to fold and write: not on the main actor.
+        let refs = await Self.artistRefs(found)
+        guard clients[serverID] != nil else { return }
+        artists[serverID] = refs
+        writeArtists(refs, serverID)
+    }
+
+    /// The artist files' writes, one after another in the order they were asked for, so an
+    /// older result can't land over a newer one.
+    @ObservationIgnored private var artistWrites: Task<Void, Never>?
+
+    /// Writes a server's artists in the background, or removes them for nil.
+    private func writeArtists(_ refs: [String: ServerArtistRef]?, _ serverID: String) {
+        let previous = artistWrites
+        artistWrites = Task.detached(priority: .utility) {
+            await previous?.value
+            if let refs {
+                Self.saveArtists(refs, serverID)
+            } else {
+                try? FileManager.default.removeItem(at: Self.artistsURL(serverID))
+            }
+        }
+    }
+
+    @concurrent
+    nonisolated private static func artistRefs(_ found: [SubsonicArtist]) async -> [String: ServerArtistRef] {
         var refs: [String: ServerArtistRef] = [:]
         for artist in found {
             refs[StatsCalculator.folded(artist.name)] = ServerArtistRef(id: artist.id, cover: artist.coverArt.flatMap { $0.isEmpty ? nil : $0 })
         }
-        guard clients[serverID] != nil else { return }
-        artists[serverID] = refs
-        if let data = try? JSONEncoder().encode(refs) {
-            try? data.write(to: Self.artistsURL(serverID), options: .atomic)
-        }
+        return refs
+    }
+
+    nonisolated private static func saveArtists(_ refs: [String: ServerArtistRef], _ serverID: String) {
+        guard let data = try? JSONEncoder().encode(refs) else { return }
+        try? data.write(to: artistsURL(serverID), options: .atomic)
     }
 
     nonisolated private static func artistsURL(_ serverID: String) -> URL {

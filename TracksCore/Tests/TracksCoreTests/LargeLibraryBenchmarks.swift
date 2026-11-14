@@ -57,6 +57,9 @@ struct LargeLibraryBenchmarks {
         let index = measure("build search index") { SearchIndex(history: history) }
         _ = measure("search \"lo\" with the index") { index.search("lo") }
         _ = measure("search \"song 12 love\" with the index") { index.search("song 12 love") }
+        _ = measure("recall suggestions") { index.recallSuggestions(now: now) }
+        _ = measure("recall \"radio last month\"") { index.recall(HistoryRecall.parse("radio last month", stations: index.stations, now: now)) }
+        _ = measure("recall \"love in 2023\"") { index.recall(HistoryRecall.parse("love in 2023", stations: index.stations, now: now)) }
         let song = history.captures[history.captures.count - 1]
         _ = measure("song profile") { StatsCalculator.songProfile(id: song.songIdentity, history: history, now: now) }
         _ = measure("artist profile") { StatsCalculator.artistProfile(id: song.artistIdentity, history: history, now: now) }
@@ -64,7 +67,11 @@ struct LargeLibraryBenchmarks {
         do {
             let clock = ContinuousClock()
             var merged = 0
-            var elapsed = try await clock.measure { merged = try await store.mergeDuplicatePlays() }
+            // The store's own reader, read once at launch in the app, so the merge below is its
+            // main-actor part.
+            var elapsed = try await clock.measure { try await store.historyReader.update() }
+            print("⏱ [merge] the store's reader, first read in the background: \(elapsed)")
+            elapsed = try await clock.measure { merged = try await store.mergeDuplicatePlays() }
             print("⏱ [merge] targeted merge, first run: \(elapsed), merged \(merged)")
             elapsed = try await clock.measure { merged = try await store.mergeDuplicatePlays() }
             print("⏱ [merge] targeted merge, nothing new: \(elapsed), merged \(merged)")
@@ -74,6 +81,17 @@ struct LargeLibraryBenchmarks {
         }
         _ = try measure("full merge, after the targeted one") { try store.mergeDuplicateCaptures() }
         _ = try measure("clear unloadable artwork") { try store.clearUnloadableArtwork() }
+        do {
+            let clock = ContinuousClock()
+            let elapsed = try await clock.measure { _ = try await store.clearUnloadableArtworkFoundInBackground() }
+            print("⏱ [main actor free] clear unloadable artwork found in the background: \(elapsed)")
+        }
+        _ = try measure("widget faces on the main actor") { try store.widgetFaces(showsUpNext: true, now: now) }
+        do {
+            let clock = ContinuousClock()
+            let elapsed = try await clock.measure { _ = try await store.widgetFacesInBackground(showsUpNext: true, now: now) }
+            print("⏱ [main actor free] widget faces in the background: \(elapsed)")
+        }
         _ = try measure("count captures") { try store.context.fetchCount(FetchDescriptor<Capture>()) }
     }
 

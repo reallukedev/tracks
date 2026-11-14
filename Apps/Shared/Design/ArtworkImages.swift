@@ -127,7 +127,11 @@ nonisolated final class ArtworkImages: Sendable {
         if await misses.isRecent(name) { return nil }
         if let data = try? Data(contentsOf: saved) {
             // Kept before stand-ins were told apart: let it go, and look again.
-            guard await standIns.isStandIn(data, from: url) else { return data }
+            guard await standIns.isStandIn(data, from: url) else {
+                // Marked as used, so it's among the last let go.
+                try? FileManager.default.setAttributes([.modificationDate: Date.now], ofItemAtPath: saved.path(percentEncoded: false))
+                return data
+            }
             try? FileManager.default.removeItem(at: saved)
         }
         // Fetched ahead and asked for by a row at once: one download.
@@ -141,11 +145,42 @@ nonisolated final class ArtworkImages: Sendable {
             }
             try? FileManager.default.createDirectory(at: serverCovers, withIntermediateDirectories: true)
             try? data.write(to: saved, options: .atomic)
+            await savedCovers.wrote()
             return data
         }
     }
 
     private static let downloads = InFlight<URL, Data?>()
+    private static let savedCovers = SavedCovers()
+
+    /// Keeps the server covers folder to a budget. Caches is never emptied on a Mac, and a
+    /// large server's covers would otherwise all stay.
+    private actor SavedCovers {
+        private var writes = 0
+        /// About a thousand full-size covers.
+        static let budget = 256 * 1024 * 1024
+
+        func wrote() {
+            defer { writes += 1 }
+            // Once early in each launch, then every so often.
+            guard writes % 50 == 0 else { return }
+            let manager = FileManager.default
+            let keys: Set<URLResourceKey> = [.contentModificationDateKey, .totalFileAllocatedSizeKey]
+            guard let files = try? manager.contentsOfDirectory(at: ArtworkImages.serverCovers, includingPropertiesForKeys: Array(keys)) else { return }
+            let sized = files.map { file in
+                let values = try? file.resourceValues(forKeys: keys)
+                return (file: file, used: values?.contentModificationDate ?? .distantPast, size: values?.totalFileAllocatedSize ?? 0)
+            }
+            var total = sized.reduce(0) { $0 + $1.size }
+            guard total > Self.budget else { return }
+            // The least lately used go first, down to most of the budget, so it isn't trimmed
+            // again on the next write.
+            for cover in sized.sorted(by: { $0.used < $1.used }) where total > Self.budget * 3 / 4 {
+                try? manager.removeItem(at: cover.file)
+                total -= cover.size
+            }
+        }
+    }
     private static let serverDownloads = AsyncLimiter(limit: 1)
     private static let standIns = StandIns()
     private static let misses = Misses()
@@ -237,16 +272,49 @@ nonisolated final class ArtworkImages: Sendable {
     }
 
     /// Loads in progress, so a cover on screen in ten rows is fetched once.
+    ///
+    /// A load nobody waits for any more is cancelled: rows flicked past during a fast scroll
+    /// let go of their covers, so the ones on screen aren't queued behind them (a server's
+    /// covers come one at a time).
     private actor InFlight<Key: Hashable & Sendable, Value: Sendable> {
-        private var tasks: [Key: Task<Value, Never>] = [:]
+        private struct Entry {
+            let id: UUID
+            let task: Task<Value, Never>
+            var waiters: Int
+        }
+
+        private var entries: [Key: Entry] = [:]
 
         func load(_ key: Key, _ work: @escaping @Sendable () async -> Value) async -> Value {
-            if let task = tasks[key] { return await task.value }
-            let task = Task { await work() }
-            tasks[key] = task
-            let image = await task.value
-            tasks[key] = nil
-            return image
+            let entry: Entry
+            if var existing = entries[key] {
+                existing.waiters += 1
+                entries[key] = existing
+                entry = existing
+            } else {
+                entry = Entry(id: UUID(), task: Task { await work() }, waiters: 1)
+                entries[key] = entry
+            }
+            let value = await withTaskCancellationHandler {
+                await entry.task.value
+            } onCancel: {
+                Task { await self.leave(key, id: entry.id) }
+            }
+            // Finished, so the next ask starts afresh. Only this load's own entry: a newer one
+            // may have replaced it after it was cancelled.
+            if entries[key]?.id == entry.id { entries[key] = nil }
+            return value
+        }
+
+        private func leave(_ key: Key, id: UUID) {
+            guard var entry = entries[key], entry.id == id else { return }
+            entry.waiters -= 1
+            if entry.waiters > 0 {
+                entries[key] = entry
+            } else {
+                entry.task.cancel()
+                entries[key] = nil
+            }
         }
     }
 

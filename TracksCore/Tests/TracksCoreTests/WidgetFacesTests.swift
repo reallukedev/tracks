@@ -40,6 +40,16 @@ struct WidgetFacesTests {
         try store.widgetFaces(showsUpNext: showsUpNext, now: now, calendar: calendar)
     }
 
+    @Test("the background read sees what the main context saved")
+    func backgroundMatchesMain() async throws {
+        capture("First", minutesAgo: 10, artworkURL: "https://example.test/a.jpg")
+        capture("Second", minutesAgo: 1)
+        try store.context.save()
+
+        let background = try await store.widgetFacesInBackground(showsUpNext: true, now: now, calendar: calendar)
+        #expect(background == (try faces()))
+    }
+
     @Test("a new capture changes every widget")
     func newCaptureChangesAll() throws {
         capture("First", minutesAgo: 10)

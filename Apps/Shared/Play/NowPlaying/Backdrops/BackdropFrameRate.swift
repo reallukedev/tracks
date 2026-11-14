@@ -1,11 +1,9 @@
 import Foundation
 import Observation
 
-/// How often a moving background draws. On the Mac a background whose motion is decoration
-/// draws at 30 frames a second; at these speeds the eye can't tell, and each frame there is
-/// drawn by Metal (see ``BackdropCanvas``), which keeps its own count. Reduce Motion's calmer
-/// movement needs fewer still, and so does Low Power Mode, which keeps the motion at fewer
-/// frames.
+/// How often a moving background draws: every frame the display shows, so slow motion glides
+/// at 120 Hz on ProMotion as it does at 60 elsewhere. Reduce Motion's calmer movement needs
+/// fewer, and so does Low Power Mode, which keeps the motion at fewer frames.
 enum BackdropFrameRate {
     /// For what moves with the music, Living Cover and Stage: every frame the display shows,
     /// as often as it refreshes, up to 120 times a second on ProMotion. Low Power Mode keeps
@@ -14,13 +12,8 @@ enum BackdropFrameRate {
         LowPowerMode.shared.isOn ? 1 / 20 : nil
     }
 
-    static func interval(reduceMotion: Bool) -> Double {
-        if reduceMotion || LowPowerMode.shared.isOn { return 1 / 20 }
-        #if os(macOS)
-        return 1 / 30
-        #else
-        return 1 / 60
-        #endif
+    static func interval(reduceMotion: Bool) -> Double? {
+        reduceMotion ? 1 / 20 : everyFrame
     }
 }
 

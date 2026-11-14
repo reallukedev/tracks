@@ -10,7 +10,7 @@ struct BackdropTimeline<Content: View>: View {
     /// Where the time starts, in seconds.
     var start: Double = 0
     /// Frames a second, or nil for every frame the display shows.
-    var frameRate: Double? = 30
+    var frameRate: Double?
     @ViewBuilder let content: (Double) -> Content
     @State private var clock: BackdropClock?
     @State private var isAtRest = false
@@ -33,7 +33,7 @@ struct BackdropCanvasTimeline: View {
     let isMoving: Bool
     var rate: Double = 1
     var start: Double = 0
-    var frameRate: Double? = 30
+    var frameRate: Double?
     /// Drawn at this fraction of its size and stretched.
     var factor: CGFloat = 1
     let draw: @MainActor (_ time: Double, _ frame: BackdropFrame) -> BackdropDrawing?
@@ -137,7 +137,7 @@ struct ArtworkBackdrop: View {
     #else
     private var moving: some View {
         GeometryReader { proxy in
-            BackdropTimeline(isMoving: isMoving, start: art.start, frameRate: 30) { time in
+            BackdropTimeline(isMoving: isMoving, start: art.start) { time in
                 let (breath, sway) = Self.motion(at: time)
                 Image(decorative: art.soft, scale: 1)
                     .resizable()

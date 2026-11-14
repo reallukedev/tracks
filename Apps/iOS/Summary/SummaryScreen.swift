@@ -10,12 +10,18 @@ struct SummaryScreen: View {
     /// 0 for this week, month or year; -1 for the one before. Back to 0 when the range changes.
     @State private var periodOffset = LaunchScene.periodOffset
     @State private var showsSettings = LaunchScene.opensSettings
+    /// The paging last handed down, kept while what it allows is the same: it can't be
+    /// compared, so a new one each redraw (a song starting, say) redrew every card reading it.
+    @State private var pagingMemo = Memo<PagingKey?, StatsPeriodPaging?>()
     private var sources = SourceScopeSetting()
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: Metrics.sectionSpacing) {
+                // Lazy, with each of the summary's sections a row of its own (see
+                // `SummaryContent`): built eagerly, a long history's charts and shelves were all
+                // laid out before the tab could show.
+                LazyVStack(alignment: .leading, spacing: Metrics.sectionSpacing) {
                     if model.hasBanner || model.capture?.nowPlaying != nil {
                         VStack(spacing: 12) {
                             StoreWarningBanner()
@@ -97,25 +103,38 @@ struct SummaryScreen: View {
     /// Steps through periods from the one on show. A step waits for the summary it asked for,
     /// so a quick double tap can't run past the first period.
     private var paging: StatsPeriodPaging? {
-        guard let summary, summary.range != .allTime else { return nil }
-        let isSettled = summary.periodOffset == periodOffset
-        let offset = $periodOffset
-        return StatsPeriodPaging(
-            canGoBack: isSettled && summary.hasEarlierPeriod,
-            canGoForward: isSettled && !summary.isCurrentPeriod
-        ) { step in
-            offset.wrappedValue = min(0, offset.wrappedValue + step)
+        let key: PagingKey? = summary.flatMap { summary in
+            guard summary.range != .allTime else { return nil }
+            let isSettled = summary.periodOffset == periodOffset
+            return PagingKey(
+                canGoBack: isSettled && summary.hasEarlierPeriod,
+                canGoForward: isSettled && !summary.isCurrentPeriod
+            )
         }
+        let offset = $periodOffset
+        return pagingMemo.value(for: key) {
+            key.map { key in
+                StatsPeriodPaging(canGoBack: key.canGoBack, canGoForward: key.canGoForward) { step in
+                    offset.wrappedValue = min(0, offset.wrappedValue + step)
+                }
+            }
+        }
+    }
+
+    private struct PagingKey: Equatable {
+        let canGoBack: Bool
+        let canGoForward: Bool
     }
 }
 
-/// Everything below the range picker.
+/// Everything below the range picker. Its sections join the screen's lazy stack one by one,
+/// with the same spacing and alignment a stack of their own had.
 struct SummaryContent: View {
     let summary: StatsSummary
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Metrics.sectionSpacing) {
+        Group {
             // Hides itself once access is granted.
             MusicAccessCard()
 

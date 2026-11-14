@@ -33,9 +33,14 @@ public actor SongInfoCache {
 
     private let directory: URL
     private let now: @Sendable () -> Date
+    /// The most answers kept. Caches is never emptied on a Mac, and one answer a song grew
+    /// with every song opened.
+    private let limit: Int
+    private var writesSinceTrim: Int?
 
-    public init(directory: URL, now: @escaping @Sendable () -> Date = { .now }) {
+    public init(directory: URL, limit: Int = 2_000, now: @escaping @Sendable () -> Date = { .now }) {
         self.directory = directory
+        self.limit = max(1, limit)
         self.now = now
     }
 
@@ -50,6 +55,8 @@ public actor SongInfoCache {
         else { return .miss }
         let age = now().timeIntervalSince(entry.savedAt)
         guard age >= 0, age < (entry.value == nil ? lifetime.missing : lifetime.found) else { return .miss }
+        // Marked as used, so it's among the last let go.
+        try? FileManager.default.setAttributes([.modificationDate: Date.now], ofItemAtPath: file(for: key).path(percentEncoded: false))
         return .hit(entry.value)
     }
 
@@ -57,6 +64,28 @@ public actor SongInfoCache {
         guard let data = try? JSONEncoder().encode(Entry(savedAt: now(), value: value)) else { return }
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try? data.write(to: file(for: key), options: .atomic)
+        // Once early in each launch, then every so often, rather than listing the folder on
+        // every write.
+        let writes = (writesSinceTrim ?? Int.max - 1) + 1
+        if writes >= max(1, limit / 20) {
+            trim()
+            writesSinceTrim = 0
+        } else {
+            writesSinceTrim = writes
+        }
+    }
+
+    /// Lets the least lately used answers go, past ``limit``.
+    private func trim() {
+        let manager = FileManager.default
+        let keys: Set<URLResourceKey> = [.contentModificationDateKey]
+        guard let files = try? manager.contentsOfDirectory(at: directory, includingPropertiesForKeys: Array(keys)),
+              files.count > limit
+        else { return }
+        let dated = files.map { ($0, (try? $0.resourceValues(forKeys: keys).contentModificationDate) ?? .distantPast) }
+        for (old, _) in dated.sorted(by: { $0.1 < $1.1 }).prefix(files.count - limit) {
+            try? manager.removeItem(at: old)
+        }
     }
 
     /// Hashed, so any title makes a safe file name.

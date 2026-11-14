@@ -17,6 +17,11 @@ struct PlaylistPage: View {
     @State private var isLoadingMore = false
     @State private var loadMoreFailed = false
     @State private var loadFailed = false
+    /// Bumped whenever ``tracks`` changes, for the arrangement made from them.
+    @State private var tracksRevision = 0
+    /// The tracks as the list shows them, and what they were arranged from.
+    @State private var arranged = PlaylistArrangement.Result()
+    @State private var arrangedKey: PlaylistArrangement.Key?
     @AppStorage(PlayPreferences.allowsExplicitKey) private var allowsExplicit = true
 
     init(playlist: Playlist) {
@@ -40,18 +45,21 @@ struct PlaylistPage: View {
                 } else if loaded != nil, tracks.isEmpty {
                     CollectionMessage(text: String(localized: "This playlist is empty."), systemImage: "music.note.list")
                 }
-                ForEach(shownTracks, id: \.index) { index, track in
+                ForEach(arranged.rows) { row in
+                    let track = row.track
                     Button {
-                        playTrack(at: index, context: context)
+                        playTrack(at: row.index, context: context)
                     } label: {
-                        TrackRow(
-                            title: track.title,
-                            subtitle: track.artistName,
-                            cover: track.artwork.map(CoverArt.artwork) ?? .url(nil, seed: track.albumTitle ?? track.title),
-                            isExplicit: track.contentRating == .explicit,
-                            isCurrent: isCurrent(track),
-                            artist: track.artistName
-                        )
+                        CurrentSongReader(identity: row.identity) { isCurrent in
+                            TrackRow(
+                                title: track.title,
+                                subtitle: track.artistName,
+                                cover: track.artwork.map(CoverArt.artwork) ?? .url(nil, seed: track.albumTitle ?? track.title),
+                                isExplicit: track.contentRating == .explicit,
+                                isCurrent: isCurrent,
+                                artist: track.artistName
+                            )
+                        }
                     }
                     .buttonStyle(.plain)
                     .trackMenu { songMenu(track) }
@@ -93,6 +101,7 @@ struct PlaylistPage: View {
         }
         .task(id: playlist.id) { await loadOnce() }
         .task(id: EveryPage(order: order, playlist: loaded?.id)) { await loadEverySongIfNeeded() }
+        .task(id: arrangementKey) { await arrange() }
         #else
         CollectionMacLayout(hasNote: note(playlist) != nil) {
             header(playlist, context: context)
@@ -105,6 +114,7 @@ struct PlaylistPage: View {
         }
         .task(id: playlist.id) { await loadOnce() }
         .task(id: EveryPage(order: order, playlist: loaded?.id)) { await loadEverySongIfNeeded() }
+        .task(id: arrangementKey) { await arrange() }
         #endif
     }
 
@@ -151,7 +161,8 @@ struct PlaylistPage: View {
     /// Whether the songs can show yet: any order but the playlist's own waits for all of them,
     /// so the list doesn't reshuffle as pages arrive.
     private var isOrderReady: Bool {
-        !order.needsEverySong || (loaded != nil && nextBatch == nil)
+        guard arrangedKey?.order == order, arrangedKey?.allowsExplicit == allowsExplicit else { return false }
+        return !order.needsEverySong || (loaded != nil && nextBatch == nil && arrangedKey?.tracks == tracksRevision)
     }
 
     /// Fetches every page for an order that needs them all. Stops at a playlist's worth Music
@@ -237,8 +248,8 @@ struct PlaylistPage: View {
         } else {
             VStack(spacing: 0) {
                 CollectionTable(
-                    tracks: shownTracks.enumerated().map { place, shown in
-                        let (index, track) = shown
+                    tracks: arranged.rows.enumerated().map { place, row in
+                        let (index, track, identity) = (row.index, row.track, row.identity)
                         return CollectionTrack(
                             id: String(index),
                             position: place + 1,
@@ -246,10 +257,10 @@ struct PlaylistPage: View {
                             title: track.title,
                             artist: track.artistName,
                             album: track.albumTitle ?? "",
-                            plays: plays(of: track) ?? 0,
+                            plays: feed.facts[identity]?.plays ?? 0,
                             duration: track.duration ?? 0,
                             isExplicit: track.contentRating == .explicit,
-                            isCurrent: isCurrent(track),
+                            songIdentity: identity,
                             artwork: track.artwork.map(CoverArt.artwork),
                             drag: SongDrag.Song(appleMusicID: track.id.rawValue, title: track.title, artistName: track.artistName, albumTitle: track.albumTitle)
                         )
@@ -293,16 +304,6 @@ struct PlaylistPage: View {
         )
     }
 
-    #if os(macOS)
-    /// Your plays, for the Mac table's Plays column.
-    private func plays(of track: Track) -> Int? {
-        feed.facts[HistoryImport.key(title: track.title, artistName: track.artistName)]?.plays
-    }
-    #endif
-
-    private func isCurrent(_ track: Track) -> Bool {
-        player.current?.songIdentity == HistoryImport.key(title: track.title, artistName: track.artistName)
-    }
 
     /// "12 songs, 48 minutes" once they've all loaded, and any songs hidden.
     private var footerLines: [String] {
@@ -314,37 +315,34 @@ struct PlaylistPage: View {
         return lines
     }
 
-    /// Every track in the order chosen, with its place in the playlist.
-    private var orderedTracks: [(index: Int, track: Track)] {
-        let all = tracks.enumerated().map { (index: $0.offset, track: $0.element) }
-        return order.sorted(all, listedNewestFirst: isListedNewestFirst) { entry in
-            LibrarySortKeys(
-                title: entry.track.title,
-                artist: entry.track.artistName,
-                album: entry.track.albumTitle ?? "",
-                plays: feed.facts[HistoryImport.key(title: entry.track.title, artistName: entry.track.artistName)]?.plays ?? 0
-            )
-        }
+    /// What the list's arrangement is made from: the tracks, the order, the explicit setting
+    /// and, for an order by them, your plays.
+    private var arrangementKey: PlaylistArrangement.Key {
+        var sortsByPlays = false
+        if case .library(let order) = order, order.field == .plays { sortsByPlays = true }
+        return PlaylistArrangement.Key(
+            tracks: tracksRevision,
+            order: order,
+            allowsExplicit: allowsExplicit,
+            plays: sortsByPlays ? feed.builtRevision : nil
+        )
     }
 
-    /// Whether the playlist already lists its newest songs first, by when they joined your
-    /// library: Favorite Songs comes newest first on iPhone and oldest first on the Mac.
-    private var isListedNewestFirst: Bool {
-        guard order == .newestFirst else { return false }
-        return PlaylistOrder.isNewestFirst(added: tracks.map { track in
-            if case .song(let song) = track { song.libraryAddedDate } else { nil }
-        })
+    /// Sorts and folds off the main actor, which only takes the finished rows.
+    private func arrange() async {
+        let key = arrangementKey
+        let (tracks, facts) = (tracks, key.plays == nil ? [:] : feed.facts)
+        let result = await PlaylistArrangement.make(tracks: tracks, order: key.order, allowsExplicit: key.allowsExplicit, facts: facts)
+        guard !Task.isCancelled else { return }
+        arranged = result
+        arrangedKey = key
     }
 
-    /// The tracks as listed, less the explicit ones when they're off. Each keeps its place in
-    /// the playlist, which is what plays it, so the queue lines up with the list either way.
-    private var shownTracks: [(index: Int, track: Track)] {
-        orderedTracks.filter { allowsExplicit || $0.track.contentRating != .explicit }
-    }
+    private var orderedTracks: [(index: Int, track: Track)] { arranged.ordered }
 
     /// "2 explicit songs hidden", when the setting hides some.
     private var hiddenNote: String? {
-        let hidden = tracks.count - shownTracks.count
+        let hidden = tracks.count - arranged.rows.count
         guard hidden > 0 else { return nil }
         return String(AttributedString(localized: "^[\(hidden) explicit song](inflect: true) hidden. Turn on Explicit Songs in Settings to see them.").characters)
     }
@@ -358,12 +356,16 @@ struct PlaylistPage: View {
 
     private func load() async {
         loadFailed = false
-        if tracks.isEmpty, let known = playlist.tracks { tracks = Array(known) }
+        if tracks.isEmpty, let known = playlist.tracks {
+            tracks = Array(known)
+            tracksRevision += 1
+        }
         do {
             let detailed = try await playlist.with([.tracks])
             loaded = detailed
             let first = detailed.tracks
             tracks = Array(first ?? [])
+            tracksRevision += 1
             nextBatch = first?.hasNextBatch == true ? first : nil
         } catch {
             // Left before it loaded: it loads again on the way back.
@@ -383,6 +385,7 @@ struct PlaylistPage: View {
         }
         loadMoreFailed = false
         tracks += more
+        tracksRevision += 1
         nextBatch = more.hasNextBatch ? more : nil
     }
 
@@ -460,5 +463,51 @@ struct PlaylistPage: View {
         } else {
             player.play(.playlist(playlist), from: context, shuffled: true)
         }
+    }
+}
+
+/// A playlist's tracks as the list shows them, arranged off the main actor.
+nonisolated enum PlaylistArrangement {
+    struct Key: Hashable {
+        let tracks: Int
+        let order: PlaylistOrder
+        let allowsExplicit: Bool
+        let plays: Int?
+    }
+
+    /// A track shown, less the explicit ones when they're off. Each keeps its place in the
+    /// playlist, which is what plays it, so the queue lines up with the list either way.
+    struct Row: Identifiable, Sendable {
+        let index: Int
+        let track: Track
+        /// Its history key, to know it's the one playing and its plays.
+        let identity: String
+        var id: Int { index }
+    }
+
+    struct Result: Sendable {
+        var ordered: [(index: Int, track: Track)] = []
+        var rows: [Row] = []
+    }
+
+    @concurrent
+    static func make(tracks: [Track], order: PlaylistOrder, allowsExplicit: Bool, facts: [String: SongFacts]) async -> Result {
+        let all = tracks.enumerated().map { (index: $0.offset, track: $0.element) }
+        // Favorite Songs comes newest first on iPhone and oldest first on the Mac.
+        let listedNewestFirst = order == .newestFirst && PlaylistOrder.isNewestFirst(added: tracks.map { track in
+            if case .song(let song) = track { song.libraryAddedDate } else { nil }
+        })
+        let ordered = order.sorted(all, listedNewestFirst: listedNewestFirst) { entry in
+            LibrarySortKeys(
+                title: entry.track.title,
+                artist: entry.track.artistName,
+                album: entry.track.albumTitle ?? "",
+                plays: facts[HistoryImport.key(title: entry.track.title, artistName: entry.track.artistName)]?.plays ?? 0
+            )
+        }
+        let rows = ordered
+            .filter { allowsExplicit || $0.track.contentRating != .explicit }
+            .map { Row(index: $0.index, track: $0.track, identity: HistoryImport.key(title: $0.track.title, artistName: $0.track.artistName)) }
+        return Result(ordered: ordered, rows: rows)
     }
 }

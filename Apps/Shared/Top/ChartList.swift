@@ -30,6 +30,7 @@ struct ChartList: View {
             selection = entry.id
             open(entry)
         }
+        .equatable()
         .macDraggable(SongDrag(entry.song.map { [HistorySong($0)] } ?? []), if: entry.song != nil)
         #if os(macOS)
         .focusable()
@@ -59,12 +60,18 @@ struct ChartList: View {
     }
 }
 
-private struct ChartListRow: View {
+/// Equatable on its values, so moving the selection or a redraw of the page around it only
+/// draws the rows that changed: its closure is new every time and never compares equal.
+private struct ChartListRow: View, Equatable {
     let position: Int
     let entry: ChartEntry
     let isLast: Bool
     var isSelected = false
     let open: () -> Void
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.position == rhs.position && lhs.isLast == rhs.isLast && lhs.isSelected == rhs.isSelected && lhs.entry == rhs.entry
+    }
 
     @State private var isHovered = false
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -90,7 +97,7 @@ private struct ChartListRow: View {
     #endif
 
     private var playableSong: MixSong? {
-        entry.song.flatMap { playback.playable([$0]).isEmpty ? nil : $0 }
+        entry.song.flatMap { playback.canPlayAny([$0]) ? $0 : nil }
     }
 
     var body: some View {
@@ -119,7 +126,7 @@ private struct ChartListRow: View {
                     #if os(macOS)
                     ChartMovementBadge(movement: entry.movement)
                     #endif
-                    Text(PlayCountText.short(entry.count))
+                    Text(entry.countText)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
@@ -205,7 +212,7 @@ private struct ChartListRow: View {
                     .lineLimit(1)
             }
             if typeSize.isAccessibilitySize {
-                Text(PlayCountText.short(entry.count))
+                Text(entry.countText)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -222,7 +229,7 @@ private struct ChartListRow: View {
     }
 
     private var accessibilityLabel: Text {
-        Text("Number \(position), \(entry.title), \(subtitle ?? ""), \(PlayCountText.short(entry.count))")
+        Text("Number \(position), \(entry.title), \(subtitle ?? ""), \(entry.countText)")
     }
 }
 

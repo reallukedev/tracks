@@ -57,19 +57,23 @@ struct TopSongsCard: View {
     var body: some View {
         let shown = Array(songs.prefix(limit))
         Card(padding: 0) {
-            VStack(spacing: 0) {
+            // Lazy: Show All on a favourite artist's page can list hundreds of songs. Each row
+            // is one view with its separator, so the stack can tell rows apart by id alone.
+            LazyVStack(spacing: 0) {
                 ForEach(shown.enumerated(), id: \.element.id) { index, song in
-                    NavigationLink(value: Route.song(song.id)) {
-                        SongRow(song: song, rank: index + 1, widestRank: shown.count)
-                            .padding(.horizontal, Metrics.cardPadding)
-                            .padding(.vertical, 8)
-                            .contentShape(.rect)
-                    }
-                    .buttonStyle(.plain)
-                    // Where a collaboration's other artists are a press away on iPhone.
-                    .contextMenu { ChartSongMenu(song: MixSong(tally: song)) }
-                    if index < shown.count - 1 {
-                        SongRowSeparator(widestRank: shown.count)
+                    VStack(spacing: 0) {
+                        NavigationLink(value: Route.song(song.id)) {
+                            SongRow(song: song, rank: index + 1, widestRank: shown.count)
+                                .padding(.horizontal, Metrics.cardPadding)
+                                .padding(.vertical, 8)
+                                .contentShape(.rect)
+                        }
+                        .buttonStyle(.plain)
+                        // Where a collaboration's other artists are a press away on iPhone.
+                        .contextMenu { ChartSongMenu(song: MixSong(tally: song)) }
+                        if index < shown.count - 1 {
+                            SongRowSeparator(widestRank: shown.count)
+                        }
                     }
                 }
             }

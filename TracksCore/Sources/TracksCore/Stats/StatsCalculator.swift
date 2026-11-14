@@ -441,29 +441,36 @@ public enum StatsCalculator {
         var groups: [String: [Int]] = [:]
         for index in indices { groups[history.captures[index].songIdentity, default: []].append(index) }
 
+        // Read through indices rather than copying each song's plays out, and sorted without
+        // building tuples of strings for every comparison: both showed in long histories.
+        let captures = history.captures
         return groups.map { identity, members in
-            let captures = members.map { history.captures[$0] }
             // Members are in history order.
-            let first = captures[0]
-            let latest = captures[captures.count - 1]
+            let first = captures[members[0]]
+            let latest = captures[members[members.count - 1]]
             // Use a resolved row if there is one, so the song can be played.
-            let resolved = captures.last { !$0.songID.isEmpty } ?? latest
+            let resolved = members.last { !captures[$0].songID.isEmpty }.map { captures[$0] } ?? latest
             return SongTally(
                 id: identity,
                 songKey: resolved.songKey,
                 songID: resolved.songID,
                 title: resolved.title,
                 artistName: resolved.artistName,
-                albumTitle: captures.last { $0.albumTitle?.isEmpty == false }?.albumTitle,
-                artworkURL: bestArtwork(in: captures),
-                count: captures.count,
+                albumTitle: members.last { captures[$0].albumTitle?.isEmpty == false }.flatMap { captures[$0].albumTitle },
+                artworkURL: bestArtwork(members, in: captures),
+                count: members.count,
                 firstHeard: first.capturedAt,
                 lastHeard: latest.capturedAt,
                 listeningSeconds: members.reduce(0) { $0 + history.seconds[$1] },
                 credits: resolved.credits
             )
         }
-        .sorted { ($0.count, $0.lastHeard, $1.title, $1.id) > ($1.count, $1.lastHeard, $0.title, $0.id) }
+        .sorted { lhs, rhs in
+            if lhs.count != rhs.count { return lhs.count > rhs.count }
+            if lhs.lastHeard != rhs.lastHeard { return lhs.lastHeard > rhs.lastHeard }
+            if lhs.title != rhs.title { return lhs.title < rhs.title }
+            return lhs.id < rhs.id
+        }
     }
 
     /// Artists, most played first. Blank names are skipped.
@@ -505,7 +512,12 @@ public enum StatsCalculator {
                 lastHeard: captures[captures.count - 1].capturedAt
             )
         }
-        .sorted { ($0.count, $0.listeningSeconds, $1.name, $1.id) > ($1.count, $1.listeningSeconds, $0.name, $0.id) }
+        .sorted { lhs, rhs in
+            if lhs.count != rhs.count { return lhs.count > rhs.count }
+            if lhs.listeningSeconds != rhs.listeningSeconds { return lhs.listeningSeconds > rhs.listeningSeconds }
+            if lhs.name != rhs.name { return lhs.name < rhs.name }
+            return lhs.id < rhs.id
+        }
     }
 
     /// Albums, most played first. Captures without an album are skipped.
@@ -516,26 +528,36 @@ public enum StatsCalculator {
             groups[identity, default: []].append(index)
         }
 
+        let captures = history.captures
         return groups.map { identity, members in
-            let captures = members.map { history.captures[$0] }
-            let latest = captures[captures.count - 1]
+            let latest = captures[members[members.count - 1]]
             return AlbumTally(
                 id: identity,
                 title: latest.albumTitle ?? "",
                 artistName: LocalTrack.leadArtist(of: latest.artistName),
-                count: captures.count,
-                songCount: Set(captures.map(\.songIdentity)).count,
-                artworkURL: bestArtwork(in: captures),
+                count: members.count,
+                songCount: Set(members.lazy.map { captures[$0].songIdentity }).count,
+                artworkURL: bestArtwork(members, in: captures),
                 listeningSeconds: members.reduce(0) { $0 + history.seconds[$1] }
             )
         }
-        .sorted { ($0.count, $0.listeningSeconds, $1.title, $1.id) > ($1.count, $1.listeningSeconds, $0.title, $0.id) }
+        .sorted { lhs, rhs in
+            if lhs.count != rhs.count { return lhs.count > rhs.count }
+            if lhs.listeningSeconds != rhs.listeningSeconds { return lhs.listeningSeconds > rhs.listeningSeconds }
+            if lhs.title != rhs.title { return lhs.title < rhs.title }
+            return lhs.id < rhs.id
+        }
     }
 
     /// Most recent artwork URL that will actually load (MusicKit sometimes hands out
     /// `musicKit://artwork/transient/…` URLs that don't).
     static func bestArtwork(in captures: [CaptureStat]) -> String? {
         captures.last { ArtworkURL.isLoadable($0.artworkURL) }?.artworkURL
+    }
+
+    /// ``bestArtwork(in:)`` for the plays at `indices`, in history order.
+    static func bestArtwork(_ indices: [Int], in captures: [CaptureStat]) -> String? {
+        indices.last { ArtworkURL.isLoadable(captures[$0].artworkURL) }.flatMap { captures[$0].artworkURL }
     }
 
     /// Counts names, most frequent first, ties alphabetical.

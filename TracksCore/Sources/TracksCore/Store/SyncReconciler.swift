@@ -1,5 +1,6 @@
 import CoreData
 import Foundation
+import Synchronization
 
 /// Folds in what iCloud brings down, as soon as it arrives.
 ///
@@ -49,6 +50,9 @@ public final class SyncReconciler {
     /// from anywhere else and the launch-time merge is enough.
     public func start() {
         guard observer == nil, store.backing.isSynced else { return }
+        // A CloudKit import posts hundreds of these in a burst. One hop to the main actor at a
+        // time is enough, since the first change of a burst starts the clock for all of them.
+        let hop = HopPending()
         // The notification's object is the persistent store coordinator, which SwiftData
         // doesn't expose, so this listens for any of them. There is only one in the process.
         observer = NotificationCenter.default.addObserver(
@@ -58,7 +62,11 @@ public final class SyncReconciler {
             // the main thread.
             queue: nil
         ) { [weak self] _ in
-            Task { @MainActor in self?.remoteChangeArrived() }
+            guard hop.claim() else { return }
+            Task { @MainActor in
+                hop.release()
+                self?.remoteChangeArrived()
+            }
         }
     }
 
@@ -112,7 +120,24 @@ public final class SyncReconciler {
     public static func merge(_ store: TracksStore) async -> Int {
         var merged = (try? store.mergeDuplicateStations()) ?? 0
         merged += (try? await store.mergeDuplicatePlays()) ?? 0
-        _ = try? store.clearUnloadableArtwork()
+        _ = try? await store.clearUnloadableArtworkFoundInBackground()
         return merged
+    }
+}
+
+/// Whether a hop to the main actor is already on its way.
+private final class HopPending: Sendable {
+    private let pending = Mutex(false)
+
+    /// True if this caller should hop, false if one is already going.
+    func claim() -> Bool {
+        pending.withLock { pending in
+            defer { pending = true }
+            return !pending
+        }
+    }
+
+    func release() {
+        pending.withLock { $0 = false }
     }
 }

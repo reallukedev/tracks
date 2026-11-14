@@ -19,8 +19,8 @@ struct TopChartView: View {
     @State private var anchor: Date? = LaunchScene.chartDate
     @State private var snapshot: ChartSnapshot?
     @State private var isPickingDate = false
-    /// The page's width, to choose between its column layout and its stacked one.
-    @State private var width: CGFloat = 0
+    /// Whether the page is wide enough for its column layout rather than its stacked one.
+    @State private var isWide = false
     private var sources = SourceScopeSetting()
     private var playback = ChartPlayback()
 
@@ -42,6 +42,11 @@ struct TopChartView: View {
                 // Until the first read there's nothing to chart, and an empty chart would say
                 // "No Charts Yet" to someone with years of listening.
                 guard model.library.isLoaded else { return }
+                // New listening in the chart already shown: a play bumps the revision, and its
+                // lookups again a moment later, so let the burst settle. A switch is instant.
+                if shown != nil {
+                    do { try await Task.sleep(for: LiveUpdate.settle) } catch { return }
+                }
                 let (kind, period, scope, history) = (kind, period, sources.scope, model.library.history)
                 let next = await OffMainActor.run {
                     ChartSnapshot.make(kind: kind, period: period, scope: scope, history: history.scoped(to: scope))
@@ -279,7 +284,7 @@ struct TopChartView: View {
     }
 
     private func canPlay(_ entry: ChartEntry) -> Bool {
-        !playback.playable(songs(of: entry)).isEmpty
+        playback.canPlayAny(songs(of: entry))
     }
 
     private func open(_ entry: ChartEntry) {
@@ -299,7 +304,7 @@ struct TopChartView: View {
             // A period with nothing in it says so straight under its title: a card of zeros
             // and an empty chart would push that below the fold.
             if !shown.entries.isEmpty || shown.activity.plays > 0 {
-                ChartActivityCard(kind: kind, period: period, activity: shown.activity, entries: shown.entries, open: open)
+                ChartActivityCard(kind: kind, period: period, activity: shown.activity, entries: shown.entries, entryPlays: shown.entryPlays, deepest: shown.deepest, open: open)
             }
         } else {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -391,7 +396,7 @@ struct TopChartView: View {
     /// dashboard does; narrower, one above the other.
     private var page: some View {
         Group {
-            if width >= 1_100 {
+            if isWide {
                 HStack(alignment: .top, spacing: 0) {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 20) {
@@ -433,7 +438,8 @@ struct TopChartView: View {
                 }
             }
         }
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        // Only the threshold: the width itself changed on every step of a window resize.
+        .onGeometryChange(for: Bool.self) { $0.size.width >= 1_100 } action: { isWide = $0 }
         .background(Color.pageBackground)
     }
 

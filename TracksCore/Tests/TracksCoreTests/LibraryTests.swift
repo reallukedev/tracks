@@ -369,6 +369,16 @@ struct LocalLibraryTests {
         #expect(LocalTrack.leadArtist(of: artist) == lead)
     }
 
+    @Test("a plain name is cut at its first marker, however it's cased", arguments: [
+        ("Umbra FEATURING Nova ft. Mara", "Umbra"),
+        ("Daft Punk [FEAT. Pharrell]", "Daft Punk"),
+        ("Fleetwood Mac", "Fleetwood Mac"),
+        (" feat. Someone", " feat. Someone"),
+    ])
+    func leadArtistOfPlainNames(artist: String, lead: String) {
+        #expect(LocalTrack.leadArtist(of: artist) == lead)
+    }
+
     @Test("a song credits each artist on it by their whole name")
     func credits() {
         #expect(LocalTrack.creditedArtists(of: "Umbra feat. Yuki Tanabe & Mara Solis").isSuperset(of: ["umbra", "yuki tanabe", "mara solis"]))

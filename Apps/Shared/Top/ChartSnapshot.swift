@@ -1,4 +1,5 @@
 import SwiftUI
+import Synchronization
 import TracksCore
 
 /// One chart as its page shows it: the period, its entries, and the nearest periods either
@@ -21,6 +22,10 @@ nonisolated struct ChartSnapshot: Equatable, Sendable {
     let hasHistory: Bool
     /// The period's listening bar by bar, with its totals.
     let activity: PeriodActivity
+    /// The entries' plays added up, which a collaboration counts once per artist on it.
+    var entryPlays = 0
+    /// The album with the most of its songs played, when that's more than one.
+    var deepest: ChartEntry?
 
     /// What makes two snapshots the same chart, so only new listening in it animates.
     var identity: String {
@@ -68,7 +73,7 @@ nonisolated struct ChartSnapshot: Equatable, Sendable {
                 return entry
             }
         }
-        return ChartSnapshot(
+        var snapshot = ChartSnapshot(
             kind: kind,
             period: period,
             scope: scope,
@@ -80,6 +85,14 @@ nonisolated struct ChartSnapshot: Equatable, Sendable {
             hasHistory: !history.isEmpty,
             activity: activity
         )
+        // Worked out here, off the main actor, rather than by the card as it's drawn.
+        snapshot.entryPlays = entries.reduce(0) { $0 + $1.count }
+        if kind == .albums,
+           let deepest = entries.max(by: { ($0.songCount ?? 0, -$0.rank) < ($1.songCount ?? 0, -$1.rank) }),
+           (deepest.songCount ?? 0) > 1 {
+            snapshot.deepest = deepest
+        }
+        return snapshot
     }
 
     /// The songs under each artist or album, in chart order, a hundred at most.
@@ -127,11 +140,17 @@ nonisolated struct ChartEntry: Identifiable, Equatable, Sendable {
     /// A line under the name where there's something to say: an artist's song played most.
     var detail: String?
     /// How many different songs of an artist's or album's were played.
-    var songCount: Int?
+    var songCount: Int? {
+        didSet { amounts = songCount.map { "\(countText) · \(ChartWords.songs($0))" } ?? countText }
+    }
     /// An artist heard for the first time in the period.
     var isNew = false
     /// An artist's or album's songs from the period, most played first, for Play.
     var songs: [MixSong] = []
+    /// "134 plays", worked out with the snapshot so a row doesn't inflect it as it's drawn.
+    let countText: String
+    /// "134 plays · 12 songs" for an artist or album, or the plays alone.
+    private(set) var amounts: String
 
     init(_ ranked: Ranked<SongTally>) {
         let song = ranked.item
@@ -145,6 +164,8 @@ nonisolated struct ChartEntry: Identifiable, Equatable, Sendable {
         artworkSeed = song.albumTitle ?? song.title
         isArtist = false
         count = song.count
+        countText = ChartWords.plays(song.count)
+        amounts = countText
         rank = ranked.rank
         movement = ranked.movement
         self.song = MixSong(tally: song)
@@ -161,6 +182,8 @@ nonisolated struct ChartEntry: Identifiable, Equatable, Sendable {
         artworkSeed = artist.name
         isArtist = true
         count = artist.count
+        countText = ChartWords.plays(artist.count)
+        amounts = countText
         rank = ranked.rank
         movement = ranked.movement
         song = nil
@@ -178,9 +201,38 @@ nonisolated struct ChartEntry: Identifiable, Equatable, Sendable {
         artworkSeed = album.title
         isArtist = false
         count = album.count
+        countText = ChartWords.plays(album.count)
+        amounts = countText
         rank = ranked.rank
         movement = ranked.movement
         song = nil
+    }
+}
+
+/// A chart's counts in words, inflected once per number: a long chart repeats the same
+/// small counts thousands of times.
+nonisolated enum ChartWords {
+    private static let plays = Mutex<[Int: String]>([:])
+    private static let songs = Mutex<[Int: String]>([:])
+
+    /// "12 plays", as ``PlayCountText/short(_:)`` says it.
+    static func plays(_ count: Int) -> String {
+        word(count, in: plays) { String(AttributedString(localized: "^[\($0) play](inflect: true)").characters) }
+    }
+
+    /// "12 songs".
+    static func songs(_ count: Int) -> String {
+        word(count, in: songs) { String(AttributedString(localized: "^[\($0) song](inflect: true)").characters) }
+    }
+
+    private static func word(_ count: Int, in cache: borrowing Mutex<[Int: String]>, _ make: (Int) -> String) -> String {
+        if let known = cache.withLock({ $0[count] }) { return known }
+        let made = make(count)
+        cache.withLock { words in
+            if words.count > 4_096 { words.removeAll() }
+            words[count] = made
+        }
+        return made
     }
 }
 

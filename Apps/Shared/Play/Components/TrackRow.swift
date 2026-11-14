@@ -157,6 +157,26 @@ struct TrackRow: View {
     }
 }
 
+/// Whether a row's song is the one on, read in the row rather than by the page listing it, so
+/// a song change redraws the rows on screen and not a list of thousands. Matches by history
+/// key, or by a song of yours' id.
+struct CurrentSongReader<Content: View>: View {
+    var identity: String?
+    var localID: String?
+    @ViewBuilder let content: (_ isCurrent: Bool) -> Content
+    @Environment(PlayerModel.self) private var player
+
+    var body: some View {
+        content(isCurrent)
+    }
+
+    private var isCurrent: Bool {
+        guard let current = player.current else { return false }
+        if let localID { return current.local?.id == localID }
+        return identity != nil && current.songIdentity == identity
+    }
+}
+
 /// Music's "E" for explicit songs.
 struct ExplicitBadge: View {
     var body: some View {

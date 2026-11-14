@@ -121,6 +121,8 @@ final class NearbyDevices {
     @ObservationIgnored private var redial: Task<Void, Never>?
     /// Dials in a row that came to nothing, to wait longer before each next one.
     @ObservationIgnored private var failedRedials = 0
+    /// Failed starts in a row, which ``restartSoon()`` waits longer after.
+    @ObservationIgnored private var failedRestarts = 0
     @ObservationIgnored private var links: [ObjectIdentifier: Link] = [:]
     @ObservationIgnored private var lastState: NearbyState?
     @ObservationIgnored private var keyObserver: (any NSObjectProtocol)?
@@ -255,6 +257,7 @@ final class NearbyDevices {
                 MainActor.assumeIsolated {
                     guard let self else { return }
                     switch state {
+                    case .ready: self.failedRestarts = 0
                     case .failed: self.restartSoon()
                     case .waiting(let error): self.noteWaiting(error)
                     default: break
@@ -342,9 +345,13 @@ final class NearbyDevices {
         }
     }
 
+    /// Starts again after a failure, waiting longer after each one that comes to nothing, so a
+    /// network that won't have it isn't asked every ten seconds for as long as Tracks is open.
     private func restartSoon() {
+        let wait = min(300, 10 * (1 << min(failedRestarts, 5)))
+        failedRestarts += 1
         Task { [weak self] in
-            try? await Task.sleep(for: .seconds(10))
+            try? await Task.sleep(for: .seconds(wait))
             guard let self, self.isRunning else { return }
             self.restart()
         }

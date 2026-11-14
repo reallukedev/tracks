@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import SwiftData
 import TracksCore
 import TracksMusic
 
@@ -44,6 +45,12 @@ public final class CaptureService {
     public private(set) var openSession: Session?
 
     private let store: TracksStore
+    /// The store's reads for what's shown, off the main actor.
+    private let reads: CaptureReads
+    /// Goes up with each observation recorded, so an older read can't show over a newer one.
+    private var displayGeneration = 0
+    /// The song ``nowPlaying`` is about to show once its read lands.
+    private var pendingNowPlayingKey: String?
     private let settings: CaptureSettings
     private let scrobbler: ScrobbleService
     private let coordinator: CaptureCoordinator
@@ -66,6 +73,9 @@ public final class CaptureService {
     /// How often to ask Music.app what is playing. Each poll is one Apple event.
     private static let pollInterval: TimeInterval = 10
 
+    /// How long a run of observations has to send what's owed to Last.fm once.
+    private static let scrobbleSettle: Duration = .seconds(1)
+
     /// How long a station has to be stopped before the day's captures are played back.
     /// Long enough to skip gaps between tracks, short enough that the listener is likely
     /// still there to hear it.
@@ -82,6 +92,7 @@ public final class CaptureService {
 
     public init(store: TracksStore, settings: CaptureSettings = CaptureSettings()) {
         self.store = store
+        self.reads = CaptureReads(container: store.container)
         self.settings = settings
         self.scrobbler = ScrobbleService(store: store, settings: settings)
 
@@ -125,7 +136,7 @@ public final class CaptureService {
     /// Retries whatever is outstanding: unresolved ids, missing artwork, failed playlist
     /// writes, unsent scrobbles. Called at launch.
     public func catchUp() async {
-        closeStaleSessions()
+        await closeStaleSessions()
         await mergeSyncedDuplicates()
         await importRecentlyPlayed()
         await coordinator.drainPendingWrites()
@@ -171,9 +182,8 @@ public final class CaptureService {
         }
         let imported = (try? store.importPlayedSongs(songs)) ?? 0
         if imported > 0, lastCapture == nil {
-            lastCapture = (try? store.context.fetch(TracksStore.allCaptures(limit: 1)))?
-                .first?
-                .snapshot
+            let latest = await reads.read(latest: true, song: nil, deviceID: DeviceIdentity.current).latest
+            if lastCapture == nil { lastCapture = latest }
         }
         return imported
     }
@@ -203,9 +213,15 @@ public final class CaptureService {
         ))
 
         report.cleared = (try? store.clearArtwork(urls: forget)) ?? 0
-        _ = ArtistArtworkCache().forgetMissing()
+        // Reads and writes the whole file.
+        await Self.forgetMissingArtistArtwork()
         report.restored = await coordinator.backfillAllArtwork()
         return report
+    }
+
+    @concurrent
+    private nonisolated static func forgetMissingArtistArtwork() async {
+        ArtistArtworkCache().forgetMissing()
     }
 
     /// Folds together the duplicate rows iCloud sync produces. Runs at launch and on the
@@ -220,9 +236,9 @@ public final class CaptureService {
 
     /// Ends sessions that have gone quiet. Silence produces no observations, so this runs on
     /// a timer as well as at launch.
-    private func closeStaleSessions() {
+    private func closeStaleSessions() async {
         _ = try? store.closeStaleSessions()
-        openSession = try? store.currentOpenSession()
+        showOpenSession(await reads.read(latest: false, song: nil, deviceID: DeviceIdentity.current).openSession)
     }
 
     public func start() {
@@ -230,9 +246,10 @@ public final class CaptureService {
         isRunning = true
         // Seed from the store so the menu bar has something to show before the next capture.
         if lastCapture == nil {
-            lastCapture = (try? store.context.fetch(TracksStore.allCaptures(limit: 1)))?
-                .first?
-                .snapshot
+            Task { [weak self, reads] in
+                let latest = await reads.read(latest: true, song: nil, deviceID: DeviceIdentity.current).latest
+                if let self, self.lastCapture == nil { self.lastCapture = latest }
+            }
         }
         // A new stream every time: the one before was finished by `stop()`, so resuming
         // after a pause has to iterate this one, not the old one.
@@ -241,7 +258,7 @@ public final class CaptureService {
         housekeeping = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(60))
-                self?.closeStaleSessions()
+                await self?.closeStaleSessions()
                 await self?.mergeSyncedDuplicates()
                 // Catches scrobbles queued before a Last.fm account was connected mid-session.
                 await self?.scrobbler.drain()
@@ -251,7 +268,7 @@ public final class CaptureService {
             for await observation in observations {
                 if Task.isCancelled { return }
                 let decision = await coordinator.handle(observation)
-                self.record(decision, observation: observation)
+                await self.record(decision, observation: observation)
                 self.scrobbleSoon()
             }
         }
@@ -288,20 +305,25 @@ public final class CaptureService {
                 // Tracks’ own player is music too, even before its entry resolves into a song
                 // and gives an observation. Auto-playback must never start over it.
                 guard isPlaying || TracksPlayerContext.isPlaying else {
-                    self.isSomethingPlaying = false
-                    self.nowPlaying = nil
+                    if self.isSomethingPlaying != false { self.isSomethingPlaying = false }
+                    if self.nowPlaying != nil { self.nowPlaying = nil }
+                    // Nothing plays, so a read still on its way mustn't show a song again.
+                    if self.pendingNowPlayingKey != nil {
+                        self.pendingNowPlayingKey = nil
+                        self.displayGeneration &+= 1
+                    }
                     if self.silentSince == nil { self.silentSince = .now }
                     await self.considerAutoPlayback()
                     continue
                 }
 
-                self.isSomethingPlaying = true
+                if self.isSomethingPlaying != true { self.isSomethingPlaying = true }
                 self.silentSince = nil
                 self.hasAutoPlayedThisSession = false
 
                 guard let observation, isPlaying else { continue }
                 let decision = await self.coordinator.handle(observation)
-                self.record(decision, observation: observation)
+                await self.record(decision, observation: observation)
                 self.scrobbleSoon()
             }
         }
@@ -333,6 +355,9 @@ public final class CaptureService {
         // Nothing is being watched, so don't claim to know what's playing.
         isSomethingPlaying = nil
         nowPlaying = nil
+        pendingNowPlayingKey = nil
+        // A read still on its way mustn't show a song again.
+        displayGeneration &+= 1
         pump?.cancel()
         pump = nil
         housekeeping?.cancel()
@@ -362,7 +387,7 @@ public final class CaptureService {
                   observation.playbackState == .playing
             else { return }
             let decision = await self.coordinator.handle(observation)
-            self.record(decision, observation: observation)
+            await self.record(decision, observation: observation)
             self.scrobbleSoon()
         }
     }
@@ -376,6 +401,9 @@ public final class CaptureService {
             return
         }
         scrobbling = Task { [weak self] in
+            // Observations come in runs (the notification, the poll, a recheck), and each drain
+            // saves and reads the store on the main actor: one drain answers the run.
+            try? await Task.sleep(for: Self.scrobbleSettle)
             repeat {
                 self?.scrobbleAgain = false
                 await self?.scrobbler.drain()
@@ -386,57 +414,78 @@ public final class CaptureService {
 
     /// - Parameter observation: what was playing when this was decided, so the display
     ///   follows the music rather than the writes.
-    private func record(_ decision: CaptureDecision, observation: NowPlayingObservation? = nil) {
+    private func record(_ decision: CaptureDecision, observation: NowPlayingObservation? = nil) async {
         lastDecision = decision
-        updateNowPlaying(observation)
         if case .ignore(.tooShort(let playedFor, let needs)) = decision {
             scheduleRecheck(after: needs - playedFor)
         }
-        currentStation = coordinator.currentStationName
-        openSession = try? store.currentOpenSession()
+        // Each poll and notification lands here, mostly with nothing new: setting the same
+        // values again would redraw everything that reads them.
+        let station = coordinator.currentStationName
+        if station != currentStation { currentStation = station }
 
-        if case .capture = decision {
-            lastCapture = (try? store.context.fetch(TracksStore.allCaptures(limit: 1)))?
-                .first?
-                .snapshot
-            return
+        let isCapture = if case .capture = decision { true } else { false }
+        let playing = observation.flatMap { $0.playbackState == .playing && $0.isIdentifiable ? $0 : nil }
+        let shows = playing.flatMap { $0.announcedStationName == nil ? $0 : nil }
+        // Only an observation that changes what's shown supersedes a read on its way: Tracks'
+        // player starting pauses the Music app, and that pause mustn't drop Tracks' song.
+        if let shows {
+            pendingNowPlayingKey = Self.songKey(for: shows)
+            displayGeneration &+= 1
+        } else if clearNowPlaying(for: observation) {
+            displayGeneration &+= 1
         }
-
-        guard let observation, observation.playbackState == .playing,
-              observation.isIdentifiable
-        else { return }
-
-        // Skipping back to an already captured song should still update `lastCapture`.
-        let descriptor = TracksStore.mostRecentCapture(
-            title: observation.title,
-            artistName: observation.artistName
+        let generation = displayGeneration
+        let read = await reads.read(
+            latest: isCapture,
+            song: playing.map { ($0.title, $0.artistName) },
+            deviceID: DeviceIdentity.current
         )
-        let existing = try? store.context.fetch(descriptor).first
-        if let existing { lastCapture = existing.snapshot }
+        // A capture's row is the newest whichever read lands last.
+        if isCapture, let latest = read.latest,
+           latest.capturedAt >= lastCapture?.capturedAt ?? .distantPast {
+            setLastCapture(latest)
+        }
+        // A newer observation's read is on its way, and what it shows wins.
+        guard generation == displayGeneration else { return }
+        showOpenSession(read.openSession)
+        if let shows {
+            pendingNowPlayingKey = nil
+            updateNowPlaying(shows, existing: read.song)
+        }
+        // Skipping back to an already captured song should still update `lastCapture`.
+        if !isCapture, playing != nil, let existing = read.song { setLastCapture(existing) }
+    }
+
+    private func setLastCapture(_ snapshot: CaptureSnapshot?) {
+        if snapshot != lastCapture { lastCapture = snapshot }
+    }
+
+    /// The session read in the background, as the main context's own object.
+    private func showOpenSession(_ id: PersistentIdentifier?) {
+        guard id != openSession?.persistentModelID else { return }
+        openSession = id.flatMap { store.context.model(for: $0) as? Session }
+    }
+
+    /// What ``nowPlaying`` does for an observation with no song to show.
+    /// - Returns: whether it cleared a song shown or on its way.
+    private func clearNowPlaying(for observation: NowPlayingObservation?) -> Bool {
+        let shown = pendingNowPlayingKey ?? nowPlaying.map(Self.songKey(for:))
+        guard let shown else { return false }
+        // A pause from one player is about its own song. On iPhone, Tracks’ player starting
+        // pauses the Music app, and that pause mustn't take away the song Tracks is playing.
+        if let observation, Self.songKey(for: observation) != shown { return false }
+        pendingNowPlayingKey = nil
+        if nowPlaying != nil { nowPlaying = nil }
+        return true
     }
 
     /// Updates ``nowPlaying`` from every playing observation, captured or not. Artwork comes
     /// from an earlier capture of the same song, or a catalog lookup, since the macOS
     /// notification carries none and an iOS radio song's can't be loaded.
-    private func updateNowPlaying(_ observation: NowPlayingObservation?) {
-        guard let observation, observation.playbackState == .playing,
-              observation.isIdentifiable, observation.announcedStationName == nil
-        else {
-            // A pause from one player is about its own song. On iPhone, Tracks’ player starting
-            // pauses the Music app, and that pause mustn't take away the song Tracks is playing.
-            if let observation, let nowPlaying,
-               Self.songKey(for: observation) != Self.songKey(for: nowPlaying) {
-                return
-            }
-            nowPlaying = nil
-            return
-        }
-        let existing = try? store.context.fetch(TracksStore.mostRecentCapture(
-            title: observation.title,
-            artistName: observation.artistName
-        )).first
+    private func updateNowPlaying(_ observation: NowPlayingObservation, existing: CaptureSnapshot?) {
         let key = Self.songKey(for: observation)
-        nowPlaying = NowPlaying(
+        let next = NowPlaying(
             title: observation.title,
             artistName: observation.artistName,
             albumTitle: observation.albumTitle ?? existing?.albumTitle,
@@ -444,6 +493,7 @@ public final class CaptureService {
                 ?? existing?.artworkURL
                 ?? (artworkLookupKey == key ? artworkLookupResult : nil)
         )
+        if next != nowPlaying { nowPlaying = next }
         if nowPlaying?.artworkURL == nil { lookUpArtwork(for: observation) }
     }
 
@@ -510,7 +560,7 @@ public final class CaptureService {
         }
         // The user asked for this song, so skip the minimum listening time.
         let decision = await coordinator.handle(observation, force: true)
-        record(decision, observation: observation)
+        await record(decision, observation: observation)
         // Written and sent now: from the intent, the process is suspended soon after this
         // returns, and handling no longer waits for the playlist write.
         if case .capture = decision {
@@ -554,5 +604,37 @@ public final class CaptureService {
         let other = await ScriptingQueue.run { PlayerInfoSource.currentObservation() }
         #endif
         return other ?? ApplicationMusicPlayerSource.currentObservation()
+    }
+}
+
+/// What the status display reads from the store after each observation, each in a context of
+/// its own on the concurrent pool so a poll never waits on the store on the main actor. The
+/// coordinator has saved the rows these look for before they run.
+nonisolated struct CaptureReads: Sendable {
+    let container: ModelContainer
+
+    struct Read: Sendable {
+        /// The newest capture, when asked for.
+        var latest: CaptureSnapshot?
+        /// The newest capture of the song asked about.
+        var song: CaptureSnapshot?
+        var openSession: PersistentIdentifier?
+    }
+
+    @concurrent
+    func read(latest: Bool, song: (title: String, artistName: String)?, deviceID: String) async -> Read {
+        let context = ModelContext(container)
+        var read = Read()
+        if latest {
+            read.latest = (try? context.fetch(TracksStore.allCaptures(limit: 1)))?.first?.snapshot
+        }
+        if let song {
+            let descriptor = TracksStore.mostRecentCapture(title: song.title, artistName: song.artistName)
+            read.song = (try? context.fetch(descriptor))?.first?.snapshot
+        }
+        var sessions = TracksStore.openSessions(deviceID: deviceID)
+        sessions.fetchLimit = 1
+        read.openSession = (try? context.fetch(sessions))?.first?.persistentModelID
+        return read
     }
 }

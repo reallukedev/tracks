@@ -95,7 +95,9 @@ enum CarPlayImages {
                 { image in
                     element.image = image
                     // A card's colour comes from its picture: the stand-in's would stay behind.
-                    if let card = element as? CPListImageRowItemCardElement { card.tintColor = CarPlayImages.tint(of: image) }
+                    if let card = element as? CPListImageRowItemCardElement {
+                        Task { card.tintColor = await CarPlayImages.tint(of: image) }
+                    }
                 }
             })
         }
@@ -172,7 +174,7 @@ enum CarPlayImages {
                     return image
                 }
                 if let playlist, let covers = await LibraryArtwork.playlist(named: playlist, side: side / 2), !covers.isEmpty {
-                    return drawMosaic(covers, symbol: nil, side: side, scale: scale)
+                    return await mosaic(covers, symbol: nil, side: side, scale: scale)
                 }
                 if let album, let found = await catalogCover(title: album.title, artist: album.artist, pixels: pixels),
                    let address = URL(string: found),
@@ -223,7 +225,7 @@ enum CarPlayImages {
         return await cached(key) {
             guard covers.count >= 4 else {
                 let single = await cover(url: covers.first?.url, seed: covers.first?.seed ?? mix.id, side: side, scale: scale)
-                return drawMosaic([single], symbol: symbol, side: side, scale: scale)
+                return await mosaic([single], symbol: symbol, side: side, scale: scale)
             }
             // Side by side: four fetches one after another made a mix the slowest card.
             let four = Array(covers.prefix(4))
@@ -231,7 +233,7 @@ enum CarPlayImages {
             async let second = cover(url: four[1].url, seed: four[1].seed, side: side / 2, scale: scale)
             async let third = cover(url: four[2].url, seed: four[2].seed, side: side / 2, scale: scale)
             async let fourth = cover(url: four[3].url, seed: four[3].seed, side: side / 2, scale: scale)
-            return drawMosaic(await [first, second, third, fourth], symbol: symbol, side: side, scale: scale)
+            return await mosaic(await [first, second, third, fourth], symbol: symbol, side: side, scale: scale)
         }
     }
 
@@ -251,10 +253,11 @@ enum CarPlayImages {
 
     /// A card's colour from its own picture: the picture's average, made rich and deep enough
     /// for white type, as Apple Music colours its cards. Grey pictures stay grey.
-    static func tint(of image: UIImage) -> UIColor {
+    static func tint(of image: UIImage) async -> UIColor {
         let id = ObjectIdentifier(image)
         if let known = tints[id] { return known.color }
-        let color = averageTint(of: image)
+        let color = await averageTint(of: image)
+        if let known = tints[id] { return known.color }
         // Kept with the image, so the identifier can't be taken by another picture. Stand-ins
         // aren't in the cache, so this is bounded on its own.
         if tints.count > 200 { tints.removeAll() }
@@ -263,10 +266,12 @@ enum CarPlayImages {
     }
 
     private static var tints: [ObjectIdentifier: (image: UIImage, color: UIColor)] = [:]
-    /// One for every tint: a context is costly to make.
-    private static let averaging = CIContext(options: [.workingColorSpace: NSNull()])
+    /// One for every tint: a context is costly to make. Core Image contexts are thread safe.
+    private nonisolated(unsafe) static let averaging = CIContext(options: [.workingColorSpace: NSNull()])
 
-    private static func averageTint(of image: UIImage) -> UIColor {
+    /// Off the main actor: Core Image averages the picture.
+    @concurrent
+    private nonisolated static func averageTint(of image: UIImage) async -> UIColor {
         guard let source = image.cgImage.map(CIImage.init(cgImage:)) else { return .darkGray }
         let filter = CIFilter.areaAverage()
         filter.inputImage = source
@@ -393,8 +398,9 @@ enum CarPlayImages {
         }
     }
 
-    /// A picture cut to a circle, as Music draws artists.
-    static func circle(_ image: UIImage) -> UIImage {
+    /// A picture cut to a circle, as Music draws artists. Off the main actor.
+    @concurrent
+    nonisolated static func circle(_ image: UIImage) async -> UIImage {
         let format = UIGraphicsImageRendererFormat()
         format.scale = image.scale
         let rect = CGRect(origin: .zero, size: image.size)
@@ -420,7 +426,7 @@ enum CarPlayImages {
             guard let image = await ArtworkImages.shared.image(for: ArtworkImages.Key(url: url, pixels: Int(side * scale))) else {
                 return placeholder(symbol: "music.microphone", side: side, scale: scale, round: true)
             }
-            return circle(UIImage(cgImage: image, scale: scale, orientation: .up))
+            return await circle(UIImage(cgImage: image, scale: scale, orientation: .up))
         }
     }
 
@@ -482,8 +488,14 @@ enum CarPlayImages {
 
     // MARK: - Drawing
 
+    /// Drawn off the main actor, which only hands the finished picture to the car.
+    @concurrent
+    private nonisolated static func mosaic(_ tiles: [UIImage], symbol: String?, side: CGFloat, scale: CGFloat) async -> UIImage {
+        drawMosaic(tiles, symbol: symbol, side: side, scale: scale)
+    }
+
     /// Four tiles in a square (or one filling it), and a symbol in a dark circle in the corner.
-    private static func drawMosaic(_ tiles: [UIImage], symbol: String?, side: CGFloat, scale: CGFloat) -> UIImage {
+    private nonisolated static func drawMosaic(_ tiles: [UIImage], symbol: String?, side: CGFloat, scale: CGFloat) -> UIImage {
         let format = UIGraphicsImageRendererFormat()
         format.scale = scale
         return UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format).image { context in

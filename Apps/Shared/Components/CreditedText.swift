@@ -28,27 +28,80 @@ struct CreditedText: View {
     @State private var isHovering = false
 
     var body: some View {
-        let linked = openPlayRoute.canPush ? Self.links(in: text, credits: credits) : []
-        if linked.isEmpty {
-            Text(verbatim: text)
-        } else if linkStyle == .cell {
-            cell(linked)
+        let prepared = openPlayRoute.canPush ? Self.prepared(text, credits: credits) : nil
+        let linked = prepared?.links ?? []
+        if let prepared, !linked.isEmpty {
+            if linkStyle == .cell {
+                cell(linked)
+            } else {
+                linkedText(prepared)
+            }
         } else {
-            Text(Self.attributed(text, links: linked, underlined: linkStyle == .row && isHovering))
-                .tint(linkStyle == .row ? AnyShapeStyle(.foreground) : nil)
-                .onHover { isHovering = $0 }
-                .environment(\.openURL, OpenURLAction { url in
-                    guard let index = Self.index(of: url), linked.indices.contains(index) else { return .systemAction }
-                    openPlayRoute(destination(linked[index].credit))
-                    return .handled
-                })
-                // A row combines its children, so the names are offered as its actions.
-                .accessibilityActions {
-                    ForEach(linked.map { $0.credit }) { credit in
-                        Button("Go to \(credit.name)") { openPlayRoute(destination(credit)) }
-                    }
-                }
+            Text(verbatim: text)
         }
+    }
+
+    private func linkedText(_ prepared: Prepared) -> some View {
+        let linked = prepared.links
+        return Text(prepared.attributed(underlined: linkStyle == .row && isHovering))
+            .tint(linkStyle == .row ? AnyShapeStyle(.foreground) : nil)
+            .onHover { isHovering = $0 }
+            .environment(\.openURL, OpenURLAction { url in
+                guard let index = Self.index(of: url), linked.indices.contains(index) else { return .systemAction }
+                openPlayRoute(destination(linked[index].credit))
+                return .handled
+            })
+            // A row combines its children, so the names are offered as its actions.
+            .accessibilityActions {
+                ForEach(linked.map { $0.credit }) { credit in
+                    Button("Go to \(credit.name)") { openPlayRoute(destination(credit)) }
+                }
+            }
+    }
+
+    /// A line's links and its text with them, worked out once per line and kept: every row
+    /// of a long list has one, and searching the line for each name on every redraw added up.
+    final class Prepared {
+        let links: [(credit: ArtistCredit, range: Range<String.Index>)]
+        private let text: String
+        private var plain: AttributedString?
+        private var underlined: AttributedString?
+
+        init(text: String, links: [(credit: ArtistCredit, range: Range<String.Index>)]) {
+            self.text = text
+            self.links = links
+        }
+
+        func attributed(underlined isUnderlined: Bool) -> AttributedString {
+            if isUnderlined {
+                if let underlined { return underlined }
+                let made = CreditedText.attributed(text, links: links, underlined: true)
+                underlined = made
+                return made
+            }
+            if let plain { return plain }
+            let made = CreditedText.attributed(text, links: links, underlined: false)
+            plain = made
+            return made
+        }
+    }
+
+    private struct PreparedKey: Hashable {
+        let text: String
+        let credits: [ArtistCredit]
+    }
+
+    private static var preparedLines: [PreparedKey: Prepared] = [:]
+
+    /// The links in `text`, kept: the same lines come round again as a list scrolls.
+    static func prepared(_ text: String, credits: [ArtistCredit]) -> Prepared {
+        let key = PreparedKey(text: text, credits: credits)
+        if let known = preparedLines[key] { return known }
+        let made = Prepared(text: text, links: links(in: text, credits: credits))
+        // A bound on what's kept, well over a few screens of rows.
+        if preparedLines.count >= 2_000 { preparedLines.removeAll(keepingCapacity: true) }
+        preparedLines[key] = made
+        return made
     }
 
     /// The names as buttons between the line's other words. When they don't fit, the first
@@ -112,7 +165,7 @@ struct CreditedText: View {
         return found.sorted { $0.range.lowerBound < $1.range.lowerBound }
     }
 
-    private static func attributed(_ text: String, links: [(credit: ArtistCredit, range: Range<String.Index>)], underlined: Bool) -> AttributedString {
+    fileprivate static func attributed(_ text: String, links: [(credit: ArtistCredit, range: Range<String.Index>)], underlined: Bool) -> AttributedString {
         var result = AttributedString()
         var cursor = text.startIndex
         for (index, link) in links.enumerated() {

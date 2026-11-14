@@ -235,7 +235,7 @@ private struct HaloCanvas: View, Animatable {
         let rays = colors.dropFirst().map { $0.mix(with: .white, by: 0.1).shaderComponents }
         let glowLight = (0...4).map { colors[3].mix(with: .white, by: 0.2 + 0.05 * Double($0)).shaderComponents }
         let bloomLight = colors[1].mix(with: .white, by: 0.3).shaderComponents
-        return BackdropCanvas(isMoving: isMoving, frameRate: 1 / BackdropFrameRate.interval(reduceMotion: false), factor: 3) { [light, moment] frame in
+        return BackdropCanvas(isMoving: isMoving, frameRate: nil, factor: 3) { [light, moment] frame in
             let halo = moment(Date(timeIntervalSinceReferenceDate: frame.time))
             let size = CGSize(width: frame.size.width / 3, height: frame.size.height / 3)
             let side = min(size.width, size.height)

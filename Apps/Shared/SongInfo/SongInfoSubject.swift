@@ -70,8 +70,12 @@ struct SongInfoSubject: Hashable, Identifiable {
 
 /// Opens Get Info: the Mac's Song Info window, the iPhone's sheet. Nil where neither can
 /// show, and menus leave Get Info out there.
-struct ShowSongInfoAction {
+struct ShowSongInfoAction: Equatable {
     let show: @MainActor (SongInfoSubject) -> Void
+
+    /// One per app, all opening the same window or sheet, so a root redraw doesn't redraw
+    /// every song menu that reads it.
+    static func == (lhs: Self, rhs: Self) -> Bool { true }
 
     @MainActor
     func callAsFunction(_ subject: SongInfoSubject) {
