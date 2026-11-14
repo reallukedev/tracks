@@ -37,6 +37,9 @@ final class Library {
     @ObservationIgnored private var lastLookupPublish = ContinuousClock.now
 
     @ObservationIgnored private var reader: ListeningHistoryReader?
+    /// The history as the Rust engine indexes it, kept in step with ``history``. Charts read
+    /// it when it's there and fall back to ``history`` when it isn't.
+    @ObservationIgnored private(set) var engineSource: HistoryEngine.Source?
     /// The reader's version this library last showed.
     @ObservationIgnored private var version: Int?
     @ObservationIgnored private var refreshing: Task<Void, Never>?
@@ -66,6 +69,13 @@ final class Library {
         guard reader == nil else { return }
         self.looksUpCatalog = looksUpCatalog
         if !looksUpCatalog { CatalogCredits.shared.update(from: Self.sampleMetadata) }
+        // Sample data must never reach the real index on disk.
+        // Opened off the main actor, by the first change that reaches it.
+        if looksUpCatalog {
+            engineSource = HistoryEngine.Source { HistoryEngine.shared() }
+        } else {
+            engineSource = HistoryEngine.Source { HistoryEngine.inMemory() }
+        }
         // The store's own reader, which the merge shares, so the history is read in full once.
         reader = store.historyReader
         refresh()
@@ -102,7 +112,7 @@ final class Library {
                         let base = publishedLookups == generation ? history : nil
                         let (rebuilt, sessions, reached) = try await Self.build(
                             change, version: version, onto: base, reader: reader,
-                            artwork: artwork, metadata: metadata
+                            artwork: artwork, metadata: metadata, engine: engineSource
                         )
                         self.version = reached
                         publish(rebuilt, sessions: sessions, lookups: generation)
@@ -149,8 +159,12 @@ final class Library {
         onto base: ListeningHistory?,
         reader: ListeningHistoryReader,
         artwork: [String: String],
-        metadata: [String: SongMetadata]
+        metadata: [String: SongMetadata],
+        engine source: HistoryEngine.Source?
     ) async throws -> (ListeningHistory, [SessionStat], Int) {
+        // The engine takes the same change first, so it's never behind what's published.
+        let engine = source?.engine
+        engine?.apply(change)
         if case .steps(let steps, let sessions) = change, let next = base?.applying(steps) {
             return (next, sessions.sorted { $0.startedAt < $1.startedAt }, version)
         }
@@ -162,6 +176,7 @@ final class Library {
             // Asked for from the start, which always has an answer.
             guard let (everything, latest) = try await reader.snapshot(after: nil) else { throw CancellationError() }
             (snapshot, reached) = (everything, latest)
+            engine?.sync(everything.captures)
         }
         return (
             ListeningHistory(snapshot.captures, artistArtwork: artwork, songMetadata: metadata),

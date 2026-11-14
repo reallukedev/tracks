@@ -42,9 +42,9 @@ struct TopChartView: View {
                 // Until the first read there's nothing to chart, and an empty chart would say
                 // "No Charts Yet" to someone with years of listening.
                 guard model.library.isLoaded else { return }
-                let (kind, period, scope, history) = (kind, period, sources.scope, model.library.history)
+                let (kind, period, scope, history, engine) = (kind, period, sources.scope, model.library.history, model.library.engineSource)
                 let next = await OffMainActor.run {
-                    ChartSnapshot.make(kind: kind, period: period, scope: scope, history: history.scoped(to: scope))
+                    ChartSnapshot.make(kind: kind, period: period, scope: scope, history: history.scoped(to: scope), engine: engine?.engine)
                 }
                 guard !Task.isCancelled, next != snapshot else { return }
                 // New listening in the same chart rolls in; a different chart just appears.

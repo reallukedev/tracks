@@ -28,8 +28,13 @@ struct NowPlayingView: View {
     @State private var topBarHeight: CGFloat = 0
     @State private var detailsHeight: CGFloat = 0
     @State private var controlsHeight: CGFloat = 0
+    @State private var isOpening = true
+    /// Taps on the close button, for the pull to close to slide the player away.
+    @State private var closeRequests = 0
     /// Where to go once the cover has closed: Go to Album and the like.
     let onNavigate: (NowPlayingDestination) -> Void
+    /// Taps on the mini player while this slides away, which bring it back.
+    var reopenRequests = 0
 
     var body: some View {
         ZStack {
@@ -46,6 +51,8 @@ struct NowPlayingView: View {
         }
         // Lit from the cover, wherever the layout puts it.
         .nowPlayingBackdrop(cover: player.current?.cover, tint: tint, isPlaying: player.isPlaying)
+        // Up Next's list scrolls first.
+        .pullToClose(yields: showsQueue, closeRequests: closeRequests, reopenRequests: reopenRequests)
         .sheet(isPresented: $showsTuner) { RadioTunerSheet() }
         .sheet(isPresented: $showsDevices) {
             DevicesSheet { showsDevices = false }
@@ -65,7 +72,13 @@ struct NowPlayingView: View {
         .sensoryFeedback(.selection, trigger: turns)
         .playerFeedback()
         // Under Stage nothing here can be seen, so its background and clocks rest.
-        .environment(\.isOnScreen, isOnScreen && !StagePresenter.shared.isShowing)
+        // While the player slides up, a moving background redrawn every frame kept the main
+        // thread waiting on the GPU and the opening stalled. It starts once the player is up.
+        .environment(\.isOnScreen, isOnScreen && !isOpening && !StagePresenter.shared.isShowing)
+        .task {
+            try? await Task.sleep(for: .seconds(0.6))
+            isOpening = false
+        }
         .fullScreenCover(isPresented: Bindable(StagePresenter.shared).isShowing) {
             StageView { StagePresenter.shared.isShowing = false }
                 .environment(player)
@@ -160,7 +173,7 @@ struct NowPlayingView: View {
             .accessibilityElement(children: .combine)
 
             HStack {
-                Button("Close", systemImage: "chevron.down") { dismiss() }
+                Button("Close", systemImage: "chevron.down") { closeRequests += 1 }
                     .labelStyle(.iconOnly)
                     .font(.title3.weight(.semibold))
                     .frame(width: 44, height: 44)

@@ -1,0 +1,23 @@
+[package]
+name = "tracks-ffi"
+description = "The engine's surface for Swift (and later Kotlin), generated with UniFFI."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["staticlib", "lib"]
+name = "tracks_engine"
+
+
+[dependencies]
+tracks-model.workspace = true
+tracks-store.workspace = true
+tracks-lastfm.workspace = true
+uniffi.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

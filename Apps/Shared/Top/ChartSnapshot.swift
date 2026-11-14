@@ -32,12 +32,16 @@ nonisolated struct ChartSnapshot: Equatable, Sendable {
         period: ChartPeriod,
         scope: SourceScope,
         history: ListeningHistory,
+        engine: HistoryEngine? = nil,
         now: Date = .now,
         calendar: Calendar = .current
     ) -> ChartSnapshot {
+        // The engine's index answers in a few milliseconds however long the history; the
+        // calculator over `history` is the fallback if it can't.
+        let fromEngine = engine.flatMap { try? EngineCharts(kind: kind, period: period, scope: scope, engine: $0, calendar: calendar) }
         // Every song of the period, so an artist or album whose songs each rank low still
         // has them to play.
-        let allSongs = StatsCalculator.songChart(in: period, history: history, calendar: calendar, limit: .max)
+        let allSongs = fromEngine?.songs ?? StatsCalculator.songChart(in: period, history: history, calendar: calendar, limit: .max)
         let songChart = Array(allSongs.prefix(100))
         let activity = history.activity(in: period, now: now, calendar: calendar)
         // A collaboration is under each artist on it.
@@ -50,8 +54,8 @@ nonisolated struct ChartSnapshot: Equatable, Sendable {
             songChart.map(ChartEntry.init)
         case .artists:
             // Each artist with the song of theirs played most in the period.
-            StatsCalculator.artistChart(in: period, history: history, calendar: calendar).map { ranked in
-                var entry = ChartEntry(ranked)
+            (fromEngine?.artists ?? StatsCalculator.artistChart(in: period, history: history, calendar: calendar)).map { ranked in
+                var entry = ChartEntry(ranked, artwork: history.artistArtwork[ranked.item.id])
                 entry.songs = byArtist[ranked.item.id] ?? []
                 entry.songCount = ranked.item.songCount
                 entry.isNew = activity.newArtists.contains(ranked.item.id)
@@ -61,7 +65,7 @@ nonisolated struct ChartSnapshot: Equatable, Sendable {
                 return entry
             }
         case .albums:
-            StatsCalculator.albumChart(in: period, history: history, calendar: calendar).map { ranked in
+            (fromEngine?.albums ?? StatsCalculator.albumChart(in: period, history: history, calendar: calendar)).map { ranked in
                 var entry = ChartEntry(ranked)
                 entry.songs = byAlbum[ranked.item.id] ?? []
                 entry.songCount = ranked.item.songCount
@@ -102,6 +106,23 @@ nonisolated struct ChartSnapshot: Equatable, Sendable {
         case .albums: String(AttributedString(localized: "^[\(entries.count) album](inflect: true)").characters)
         }
         return String(localized: "\(plays), \(items)")
+    }
+}
+
+/// A period's charts from the engine: the songs (every one, when an artist's or album's
+/// songs are needed to play them), and the chart on show.
+nonisolated private struct EngineCharts {
+    let songs: [Ranked<SongTally>]
+    var artists: [Ranked<ArtistTally>]?
+    var albums: [Ranked<AlbumTally>]?
+
+    init(kind: ChartKind, period: ChartPeriod, scope: SourceScope, engine: HistoryEngine, calendar: Calendar) throws {
+        songs = try engine.songChart(in: period, scope: scope, calendar: calendar, limit: kind == .songs ? 100 : .max)
+        switch kind {
+        case .songs: break
+        case .artists: artists = try engine.artistChart(in: period, scope: scope, calendar: calendar)
+        case .albums: albums = try engine.albumChart(in: period, scope: scope, calendar: calendar)
+        }
     }
 }
 
@@ -150,14 +171,16 @@ nonisolated struct ChartEntry: Identifiable, Equatable, Sendable {
         self.song = MixSong(tally: song)
     }
 
-    init(_ ranked: Ranked<ArtistTally>) {
+    /// - Parameter artwork: the artist's own picture, when one's been found, over the cover of
+    ///   their most played song.
+    init(_ ranked: Ranked<ArtistTally>, artwork: String? = nil) {
         let artist = ranked.item
         id = artist.id
         route = .artist(artist.id)
         title = artist.name
         subtitle = nil
         album = nil
-        artworkURL = artist.artworkURL
+        artworkURL = artwork ?? artist.artworkURL
         artworkSeed = artist.name
         isArtist = true
         count = artist.count

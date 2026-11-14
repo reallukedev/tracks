@@ -1,0 +1,29 @@
+[package]
+name = "tracks-store"
+description = "The play history in SQLite, and every chart, total and search read from it."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+tracks-model.workspace = true
+rusqlite.workspace = true
+rusqlite_migration.workspace = true
+thiserror.workspace = true
+jiff.workspace = true
+rustc-hash.workspace = true
+
+[dev-dependencies]
+rusqlite.workspace = true
+criterion.workspace = true
+proptest.workspace = true
+tempfile.workspace = true
+
+[[bench]]
+name = "large_history"
+harness = false
+
+[lints]
+workspace = true

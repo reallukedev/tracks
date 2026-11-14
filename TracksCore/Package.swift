@@ -10,12 +10,17 @@ let package = Package(
         .library(name: "TracksCore", targets: ["TracksCore"]),
         .library(name: "TracksMusic", targets: ["TracksMusic"]),
     ],
+    dependencies: [
+        // The shared Rust engine, built by Engine/build-apple.sh.
+        .package(path: "../Engine/apple/TracksEngine"),
+    ],
     targets: [
         // Pure logic and models. No MusicKit, so it builds and tests without an
         // Apple Music subscription or a device. Library code is `nonisolated`;
         // callers decide where it runs.
         .target(
             name: "TracksCore",
+            dependencies: [.product(name: "TracksEngine", package: "TracksEngine")],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         // Everything that touches MusicKit lives here, behind the protocols

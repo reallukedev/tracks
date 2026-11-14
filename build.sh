@@ -36,6 +36,10 @@ ios_test() {
   )
 }
 
+# Every build links the Rust engine, so bring it up to date first (a second or two when
+# nothing in Engine/ changed).
+Engine/build-apple.sh
+
 case "${1:-all}" in
   mac|all)
     echo "── macOS (signed)"
