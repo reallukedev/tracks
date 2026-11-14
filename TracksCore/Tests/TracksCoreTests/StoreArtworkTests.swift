@@ -69,4 +69,14 @@ struct StoreArtworkTests {
         #expect(try store.clearUnloadableArtwork() == 1)
         #expect(try await store.artworkURLs() == ["https://example.test/album.jpg"])
     }
+
+    @Test("addresses nothing can load are found in the background and cleared the same")
+    func clearsUnloadableFoundInBackground() async throws {
+        try add("Stream", cover: "musicKit://artwork/transient/abc")
+        try add("Good", cover: "https://example.test/album.jpg")
+
+        #expect(try await store.clearUnloadableArtworkFoundInBackground() == 1)
+        #expect(try await store.artworkURLs() == ["https://example.test/album.jpg"])
+        #expect(try await store.clearUnloadableArtworkFoundInBackground() == 0)
+    }
 }

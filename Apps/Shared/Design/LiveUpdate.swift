@@ -6,6 +6,10 @@ import SwiftUI
 /// Only for live changes. A screen's first figures, and a switch to another range, appear at
 /// once: animating a whole screen in is noise, not news.
 enum LiveUpdate {
+    /// How long a page that's already showing waits for a burst of revisions to settle
+    /// before working its figures out again. A first load or a new selection doesn't wait.
+    static let settle: Duration = .milliseconds(400)
+
     /// Nil with Reduce Motion, so the new figures simply appear.
     static func animation(reduceMotion: Bool) -> Animation? {
         reduceMotion ? nil : .smooth(duration: 0.5)

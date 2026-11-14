@@ -21,8 +21,50 @@ struct ActivityChart: View {
     @Binding var selected: TimeBucket?
 
     @State private var selection: Date?
+    /// The bars as drawn, worked out once per set of buckets rather than on every redraw: a
+    /// drag or hover across the chart redraws it every frame.
+    @State private var plotted = Memo<PlotKey, Plot>()
     @Environment(\.statsPaging) private var paging
     private let calendar = Calendar.current
+
+    private struct PlotKey: Equatable {
+        let buckets: [TimeBucket]
+        let unit: Calendar.Component
+        let measure: Measure
+        let average: Double?
+    }
+
+    /// One bar: its value, and what VoiceOver says for it.
+    private struct Bar: Identifiable {
+        let bucket: TimeBucket
+        let value: Double
+        let dateLabel: String
+        let valueLabel: String
+        var id: Date { bucket.start }
+    }
+
+    private struct Plot {
+        /// Empty buckets are left out; a zero-height bar still draws its rounded corners as a
+        /// little stub. The x scale keeps their space.
+        let bars: [Bar]
+        let ceiling: Double
+        let domain: ClosedRange<Date>
+    }
+
+    private var plot: Plot {
+        plotted.value(for: PlotKey(buckets: buckets, unit: unit, measure: measure, average: average)) {
+            let bars = buckets.filter { $0.count > 0 }.map { bucket in
+                Bar(
+                    bucket: bucket,
+                    value: value(of: bucket),
+                    dateLabel: dateLabel(bucket.start),
+                    valueLabel: valueLabel(of: bucket)
+                )
+            }
+            let peak = buckets.map(value).max() ?? 0
+            return Plot(bars: bars, ceiling: ChartCeiling.rounded(max(peak, average ?? 0) * 1.08), domain: domain)
+        }
+    }
 
     init(
         buckets: [TimeBucket],
@@ -43,19 +85,20 @@ struct ActivityChart: View {
     }
 
     var body: some View {
+        let plot = plot
+        let selectedBucket = selectedBucket
+        let yCeiling = plot.ceiling
         Chart {
-            // Empty buckets are left out; a zero-height bar still draws its rounded corners
-            // as a little stub. The x scale below keeps their space.
-            ForEach(buckets.filter { $0.count > 0 }) { bucket in
+            ForEach(plot.bars) { bar in
                 BarMark(
-                    x: .value("Date", bucket.start, unit: unit),
-                    y: .value("Amount", value(of: bucket))
+                    x: .value("Date", bar.bucket.start, unit: unit),
+                    y: .value("Amount", bar.value)
                 )
                 .foregroundStyle(Color.accentColor.gradient)
                 .cornerRadius(unit == .day ? 3 : 4)
-                .opacity(isDimmed(bucket) ? 0.3 : 1)
-                .accessibilityLabel(dateLabel(bucket.start))
-                .accessibilityValue(valueLabel(of: bucket))
+                .opacity((selectedBucket.map { $0.start != bar.bucket.start } ?? false) ? 0.3 : 1)
+                .accessibilityLabel(bar.dateLabel)
+                .accessibilityValue(bar.valueLabel)
             }
 
             if let average, average > 0, selection == nil {
@@ -75,7 +118,7 @@ struct ActivityChart: View {
                     .accessibilityHidden(true)
             }
         }
-        .chartXScale(domain: domain)
+        .chartXScale(domain: plot.domain)
         .chartYScale(domain: 0...max(yCeiling, 1))
         .periodSwipe(paging, selection: $selection)
         .chartXAxis { Self.dateAxis(unit: unit, count: buckets.count) }
@@ -95,12 +138,6 @@ struct ActivityChart: View {
         }
     }
 
-    /// Rounded, so it doesn't move with every song: see ``ChartCeiling``.
-    private var yCeiling: Double {
-        let peak = buckets.map(value).max() ?? 0
-        return ChartCeiling.rounded(max(peak, average ?? 0) * 1.08)
-    }
-
     /// Round values for the y axis: whole hours (or half hours, or minutes) for listening,
     /// whole numbers for plays. Automatic ticks landed on 1.5 h and printed "2h" twice.
     static func ticks(ceiling: Double, measure: Measure) -> [Double] {
@@ -118,12 +155,8 @@ struct ActivityChart: View {
         return buckets.first { calendar.isDate($0.start, equalTo: selection, toGranularity: unit) && $0.count > 0 }
     }
 
-    private func isDimmed(_ bucket: TimeBucket) -> Bool {
-        guard let selected = selectedBucket else { return false }
-        return selected.start != bucket.start
-    }
-
-    /// The whole range, so empty days stay visible as gaps.
+    /// The whole range, so empty days stay visible as gaps. The y ceiling is rounded, so it
+    /// doesn't move with every song: see ``ChartCeiling``.
     private var domain: ClosedRange<Date> {
         guard let first = buckets.first?.start,
               let last = buckets.last?.start,

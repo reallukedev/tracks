@@ -201,6 +201,20 @@ public actor ListeningHistoryReader {
         return Set(captures.values.compactMap(\.artworkURL)).sorted()
     }
 
+    /// Plays with a cover address nothing can load (see ``ArtworkURL``).
+    public func captureIDsWithUnloadableArtwork() throws -> [PersistentIdentifier] {
+        try update()
+        // Covers are shared by many plays, so each address is checked once.
+        var loadable: [String: Bool] = [:]
+        return captures.compactMap { id, capture in
+            guard let url = capture.artworkURL else { return nil }
+            if let known = loadable[url] { return known ? nil : id }
+            let isLoadable = ArtworkURL.isLoadable(url)
+            loadable[url] = isLoadable
+            return isLoadable ? nil : id
+        }
+    }
+
     /// Every play of a song, by ``CaptureStat/songIdentity``.
     public func captureIDs(ofSong identity: String) throws -> [PersistentIdentifier] {
         try update()

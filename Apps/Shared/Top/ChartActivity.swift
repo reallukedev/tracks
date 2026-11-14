@@ -10,6 +10,10 @@ struct ChartActivityCard: View {
     let period: ChartPeriod
     let activity: PeriodActivity
     let entries: [ChartEntry]
+    /// The entries' plays added up, for the artists' shares.
+    let entryPlays: Int
+    /// The album gone deepest into, for the albums' card.
+    let deepest: ChartEntry?
     /// Opens the chart of one bar, a day of a week or a month of a year.
     let open: (ChartPeriod) -> Void
 
@@ -28,11 +32,10 @@ struct ChartActivityCard: View {
                 }
             case .artists:
                 if activity.plays > 0, !entries.isEmpty {
-                    ArtistShareBar(entries: entries, plays: activity.plays)
+                    ArtistShareBar(entries: entries, plays: activity.plays, entryPlays: entryPlays)
                 }
             case .albums:
-                if let deepest = entries.max(by: { ($0.songCount ?? 0, -$0.rank) < ($1.songCount ?? 0, -$1.rank) }),
-                   (deepest.songCount ?? 0) > 1 {
+                if let deepest {
                     DeepestListen(entry: deepest)
                 }
             }
@@ -152,8 +155,13 @@ struct ChartActivityCard: View {
                     #if os(macOS)
                     .onContinuousHover { phase in
                         switch phase {
-                        case .active(let location): hovered = bucket(at: location, proxy: proxy, geometry: geometry)
-                        case .ended: hovered = nil
+                        case .active(let location):
+                            // Only when it moves to another bar: every pointer move would
+                            // otherwise redraw the card.
+                            let next = bucket(at: location, proxy: proxy, geometry: geometry)
+                            if next?.id != hovered?.id { hovered = next }
+                        case .ended:
+                            if hovered != nil { hovered = nil }
                         }
                     }
                     #endif

@@ -105,7 +105,7 @@ private struct ClipJoinedView: View {
             }
         }
         .searchable(text: $model.query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search Apple Music")
-        .task(id: SearchKey(query: model.query, allowsExplicit: snapshot?.allowsExplicit ?? true)) {
+        .task(id: SearchKey(query: model.query.trimmingCharacters(in: .whitespaces), allowsExplicit: snapshot?.allowsExplicit ?? true)) {
             await model.search()
         }
     }

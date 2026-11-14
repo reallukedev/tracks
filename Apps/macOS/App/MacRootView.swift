@@ -159,11 +159,7 @@ struct MacRootView: View {
             .task(id: model.musicSource) {
                 if model.musicSource == .yourMusic { model.prepareYourMusic() }
             }
-            .onChange(of: model.playFeed.builtRevision) {
-                if model.musicSource == .yourMusic { model.prepareYourMusic() }
-                LaunchScene.startDemoPlayback(model)
-                LaunchScene.openMix(model)
-            }
+            .modifier(FeedBuilt(model: model))
             // Through the Mac's one voice: Music may be the player your devices are shown.
             .onPlayingChange(of: model.player) {
                 model.updateHandoff()
@@ -317,6 +313,20 @@ private struct MacSidebar: View {
         ForEach(items) { item in
             Label(item.title, systemImage: item.symbol)
                 .tag(item)
+        }
+    }
+}
+
+/// Follows the feed's rebuilds, which come with every play, in a body of its own: read by the
+/// window's root, each would redraw the whole window.
+private struct FeedBuilt: ViewModifier {
+    let model: AppModel
+
+    func body(content: Content) -> some View {
+        content.onChange(of: model.playFeed.builtRevision) {
+            if model.musicSource == .yourMusic { model.prepareYourMusic() }
+            LaunchScene.startDemoPlayback(model)
+            LaunchScene.openMix(model)
         }
     }
 }

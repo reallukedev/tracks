@@ -23,13 +23,23 @@ final class WidgetRefresher {
     /// What the widgets showed at the last reload, or nil if unknown.
     private var faces: WidgetFaces?
     private var pendingCheck: Task<Void, Never>?
+    /// Whether the pending check is reading, so a save now may be newer than what it reads.
+    private var isReading = false
+    private var checkAgain = false
+    /// Counts reads, so one taken before a newer one was applied can't set `faces` back.
+    private var reads = 0
+    private var appliedRead = 0
 
     private init(store: TracksStore, settings: CaptureSettings = CaptureSettings()) {
         self.store = store
         self.settings = settings
-        // Starting from the current state means a launch doesn't cost a reload by itself.
-        faces = currentFaces()
         Self.reloadAfterUpdate()
+        // Starting from the current state means a launch doesn't cost a reload by itself.
+        // Read in the background, long before the first check's settle runs out.
+        Task { [weak self] in
+            guard let self, let faces = await backgroundFaces(), self.faces == nil else { return }
+            self.faces = faces
+        }
         // Lives as long as the process, so the observer is never removed.
         NotificationCenter.default.addObserver(
             forName: ModelContext.didSave,
@@ -43,11 +53,26 @@ final class WidgetRefresher {
     /// Checks once, a few seconds after the first save. The timer doesn't restart on later
     /// saves, so a steady stream of them can't keep putting the check off.
     private func saved() {
-        guard pendingCheck == nil else { return }
+        guard pendingCheck == nil else {
+            if isReading { checkAgain = true }
+            return
+        }
         pendingCheck = Task { [weak self] in
             try? await Task.sleep(for: Self.settle)
+            guard !Task.isCancelled, let self else { return }
+            isReading = true
+            reads += 1
+            let read = reads
+            // The widgets' reads and a week's tally, off the main actor.
+            let now = await backgroundFaces()
             guard !Task.isCancelled else { return }
-            self?.reloadIfChanged()
+            isReading = false
+            pendingCheck = nil
+            if let now { reload(now, read: read) }
+            if checkAgain {
+                checkAgain = false
+                saved()
+            }
         }
     }
 
@@ -56,8 +81,18 @@ final class WidgetRefresher {
     func reloadIfChanged() {
         pendingCheck?.cancel()
         pendingCheck = nil
+        isReading = false
+        checkAgain = false
+        reads += 1
+        let read = reads
         // If the read fails, leave it to the widgets' own refresh schedule.
         guard let now = currentFaces() else { return }
+        reload(now, read: read)
+    }
+
+    private func reload(_ now: WidgetFaces, read: Int) {
+        guard read > appliedRead else { return }
+        appliedRead = read
         let changed = faces.map { now.kindsChanged(since: $0) }
             ?? [WidgetKind.lastPlayed, WidgetKind.today, WidgetKind.listening, WidgetKind.topSongs]
         faces = now
@@ -82,5 +117,9 @@ final class WidgetRefresher {
 
     private func currentFaces() -> WidgetFaces? {
         try? store.widgetFaces(showsUpNext: settings.showsUpNextInWidget)
+    }
+
+    private func backgroundFaces() async -> WidgetFaces? {
+        try? await store.widgetFacesInBackground(showsUpNext: settings.showsUpNextInWidget)
     }
 }

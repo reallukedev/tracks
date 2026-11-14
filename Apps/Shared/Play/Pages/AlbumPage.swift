@@ -193,7 +193,7 @@ struct AlbumPage: View {
                 plays: plays(of: track) ?? 0,
                 duration: track.duration ?? 0,
                 isExplicit: track.contentRating == .explicit,
-                isCurrent: isCurrent(track),
+                songIdentity: HistoryImport.key(title: track.title, artistName: track.artistName),
                 isPlayable: availability.map { $0 == .checking || $0.track != nil } ?? true,
                 status: availability.flatMap(Self.status),
                 drag: SongDrag.Song(appleMusicID: track.id.rawValue, title: track.title, artistName: track.artistName, albumTitle: album.title)

@@ -95,7 +95,8 @@ enum GenreShelfItems {
         let history = model.library.history
         if model.musicSource == .yourMusic {
             let music = model.yourMusic
-            let groups = LocalGenres.group(music.playableTracks, history: history, facts: facts)
+            let playable = music.playableTracks
+            let groups = await OffMainActor.run { LocalGenres.group(playable, history: history, facts: facts) }
             return groups.map { group in
                 GenreTileItem(
                     genre: group.genre,
@@ -115,8 +116,8 @@ enum GenreShelfItems {
 }
 
 /// Your own music, by genre: the songs in each, the most played first.
-enum LocalGenres {
-    struct Group {
+nonisolated enum LocalGenres {
+    struct Group: Sendable {
         let genre: MusicGenre
         let tracks: [LocalTrack]
         let plays: Int

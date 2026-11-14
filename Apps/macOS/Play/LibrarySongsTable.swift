@@ -88,9 +88,9 @@ struct LibrarySongsTable<Menu: View>: View {
         }
     }
 
+    /// Only the last rows are looked through: every row's cell asks as it scrolls into view.
     private func isNearEnd(_ row: LibrarySongRow) -> Bool {
-        guard let index = rows.lastIndex(where: { $0.id == row.id }) else { return false }
-        return index >= rows.count - 30
+        rows.suffix(30).contains { $0.id == row.id }
     }
 
     /// The one row selected, for Get Info.
@@ -284,7 +284,8 @@ struct LibraryTablePlaceholder: View {
 
 // MARK: - Your Music
 
-/// Every song in your music on the Mac, as a table, with the date each was added.
+/// Every song in your music on the Mac, as a table, with the date each was added. Rows are
+/// filtered, made and sorted off the main actor, once per change, not per redraw.
 struct LibraryYourSongsTablePage: View {
     @Environment(YourMusic.self) private var music
     @Environment(PlayFeed.self) private var feed
@@ -293,18 +294,12 @@ struct LibraryYourSongsTablePage: View {
     @State private var query = ""
     @State private var selection: Set<LibrarySongRow.ID> = []
     @State private var deleting: [LocalTrack] = []
+    /// Nil until first made.
+    @State private var shown: YourSongsRows?
 
     var body: some View {
-        let tracks = query.isEmpty ? music.index.tracks : music.index.search(query, limit: 1_000).tracks
-        let byID = Dictionary(tracks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let rows = order.sorted(tracks.map { track in
-            LibrarySongRow(
-                track: track,
-                plays: feed.facts[track.identity]?.plays ?? 0,
-                isPlayable: music.isPlayable(track),
-                artworkURL: music.artworkURL(track.artwork)?.absoluteString
-            )
-        })
+        let rows = shown?.rows ?? []
+        let byID = shown?.byID ?? [:]
         VStack(spacing: 0) {
             LibraryPageHeader(
                 title: String(localized: "Songs"),
@@ -320,6 +315,8 @@ struct LibraryYourSongsTablePage: View {
                         .padding(.horizontal, PlayMetrics.margin)
                         .frame(maxHeight: .infinity, alignment: .top)
                 }
+            } else if shown == nil {
+                LibraryTablePlaceholder()
             } else if rows.isEmpty {
                 LibraryNoMatches(query: query)
             } else {
@@ -355,6 +352,40 @@ struct LibraryYourSongsTablePage: View {
         } message: {
             Text("The files are removed from the Tracks music folder. Your plays of them stay in your history.")
         }
+        .task(id: rowsKey) {
+            let key = rowsKey
+            // Typing on from a filter already shown waits for a pause; the first letter and
+            // clearing it don't.
+            if let shown, shown.query != key.query, !key.query.isEmpty, !shown.query.isEmpty {
+                try? await Task.sleep(for: .milliseconds(150))
+                guard !Task.isCancelled else { return }
+            }
+            let made = await YourSongsRows.make(
+                index: music.index,
+                revision: key.index,
+                query: key.query,
+                order: key.order,
+                facts: feed.facts,
+                playability: key.playability,
+                clients: music.servers.servers.reduce(into: [:]) { clients, server in
+                    clients[server.id] = music.servers.client(for: server.id)
+                }
+            )
+            guard !Task.isCancelled else { return }
+            if made != shown { shown = made }
+        }
+    }
+
+    /// Everything the rows are made from, cheap to compare: a new play, a download finishing
+    /// or a server going offline makes them again; a redraw doesn't.
+    private var rowsKey: YourSongsRows.Key {
+        YourSongsRows.Key(
+            query: query,
+            order: order,
+            index: music.indexRevision,
+            facts: feed.builtRevision,
+            playability: YourSongsRows.Playability(music: music)
+        )
     }
 
     private var context: PlayContext { .songs(String(localized: "Your Songs")) }
@@ -410,5 +441,107 @@ struct LibraryYourSongsTablePage: View {
                 }
             }
         }
+    }
+}
+
+/// The Your Music table's rows, with the songs they stand for, as made for one filter.
+private nonisolated struct YourSongsRows: Equatable, Sendable {
+    let query: String
+    /// The index's revision they're from: a new index always replaces them, so the songs
+    /// behind the rows are never an older index's.
+    let index: Int
+    let rows: [LibrarySongRow]
+    let byID: [String: LocalTrack]
+
+    /// Most new plays change no row: the table is left alone unless one did.
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.query == rhs.query && lhs.index == rhs.index && lhs.rows == rhs.rows
+    }
+
+    struct Key: Equatable {
+        let query: String
+        let order: LibraryOrder
+        let index: Int
+        let facts: Int?
+        let playability: Playability
+    }
+
+    /// What ``YourMusic/isPlayable(_:)`` goes by, taken on the main actor so rows can be made
+    /// off it.
+    struct Playability: Equatable, Sendable {
+        let downloaded: Set<String>
+        /// Servers that can be reached now, with a client to reach them.
+        let reachable: Set<String>
+
+        @MainActor
+        init(music: YourMusic) {
+            downloaded = Set(music.downloads.items.keys)
+            guard music.network.isOnline else {
+                reachable = []
+                return
+            }
+            reachable = Set(music.servers.servers.map(\.id).filter { id in
+                guard music.servers.client(for: id) != nil else { return false }
+                switch music.servers.status[id] {
+                case .offline, .wrongPassword, .failed: return false
+                case .online, .connecting, nil: return true
+                }
+            })
+        }
+
+        func isPlayable(_ track: LocalTrack) -> Bool {
+            switch track.origin {
+            case .file: true
+            case .server(let serverID, _): downloaded.contains(track.id) || reachable.contains(serverID)
+            }
+        }
+    }
+
+    /// As the main actor made them before: the index's own search when filtered, then the
+    /// order chosen. Covers are addressed once each, not once per song on the album.
+    @concurrent
+    static func make(
+        index: LocalLibraryIndex,
+        revision: Int,
+        query: String,
+        order: LibraryOrder,
+        facts: [String: SongFacts],
+        playability: Playability,
+        clients: [String: SubsonicClient]
+    ) async -> YourSongsRows {
+        let tracks = query.isEmpty ? index.tracks : index.search(query, limit: 1_000).tracks
+        var covers: [LocalTrack.Artwork: String] = [:]
+        func cover(_ artwork: LocalTrack.Artwork?) -> String? {
+            guard let artwork else { return nil }
+            if let known = covers[artwork] { return known }
+            let url: URL? = switch artwork {
+            case .file(let name): LibraryFolders.artwork.appending(path: name)
+            case .server(let serverID, let coverID): clients[serverID]?.coverArtURL(id: coverID, size: 600)
+            }
+            let address = url?.absoluteString
+            if let address { covers[artwork] = address }
+            return address
+        }
+        let rows = tracks.map { track in
+            // Field by field: the `init(track:)` shorthand is the main actor's.
+            LibrarySongRow(
+                id: track.id,
+                title: track.title,
+                artist: track.artist,
+                album: track.album ?? "",
+                duration: track.duration ?? 0,
+                plays: facts[track.identity]?.plays ?? 0,
+                added: track.addedAt,
+                cover: .url(cover(track.artwork), seed: track.album ?? track.title),
+                isPlayable: playability.isPlayable(track),
+                identity: track.identity
+            )
+        }
+        return YourSongsRows(
+            query: query,
+            index: revision,
+            rows: LibrarySort.sorted(rows, by: order) { $0.sortKeys },
+            byID: Dictionary(tracks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        )
     }
 }

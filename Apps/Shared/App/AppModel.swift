@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 import CoreData
 import Observation
+import Synchronization
 import TracksCore
 import TracksMusic
 import MusicKit
@@ -587,9 +588,11 @@ final class AppModel {
         ]
         // Not on the main queue: these are posted from Core Data's own queues, and a `.main`
         // observer makes the poster wait for the main thread, which can be waiting on them.
+        // An iCloud import posts one per batch, so they share a single trip to the main actor.
+        let changed = MainActorSignal { [weak self] in self?.library.refresh() }
         for name in refreshes {
-            observers.append(center.addObserver(forName: name, object: nil, queue: nil) { [weak self] _ in
-                Task { @MainActor in self?.library.refresh() }
+            observers.append(center.addObserver(forName: name, object: nil, queue: nil) { _ in
+                changed.send()
             })
         }
         observers.append(center.addObserver(forName: .NSCalendarDayChanged, object: nil, queue: nil) { [weak self] _ in
@@ -733,6 +736,30 @@ final class AppModel {
         }
         settingsSync?.reconcileAll()
         reconciler?.reconcile()
+    }
+}
+
+/// Calls an action on the main actor for signals sent from any thread, folding those sent
+/// before it runs into the one call.
+nonisolated final class MainActorSignal: Sendable {
+    private let isPending = Mutex(false)
+    private let action: @MainActor @Sendable () -> Void
+
+    init(_ action: @escaping @MainActor @Sendable () -> Void) {
+        self.action = action
+    }
+
+    func send() {
+        let isFirst = isPending.withLock { pending in
+            defer { pending = true }
+            return !pending
+        }
+        guard isFirst else { return }
+        Task { @MainActor in
+            // Cleared first, so a signal sent while the action runs is answered by another call.
+            isPending.withLock { $0 = false }
+            action()
+        }
     }
 }
 

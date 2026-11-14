@@ -11,16 +11,51 @@ import TracksCore
 /// fading them, which would make a faded new bar look like a heard-before one.
 struct DiscoveryCard: View {
     let summary: StatsSummary
-    @State private var selection: Date?
-    @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiatesWithoutColor
+
+    var body: some View {
+        // The whole environment only for the hatch, which needs it to resolve its colour:
+        // read all the time, any change anywhere above redrew the chart.
+        if differentiatesWithoutColor {
+            WholeEnvironment { DiscoveryCardContent(summary: summary, hatchEnvironment: $0) }
+        } else {
+            DiscoveryCardContent(summary: summary, hatchEnvironment: nil)
+        }
+    }
+}
+
+/// Hands its content the whole environment.
+private struct WholeEnvironment<Content: View>: View {
+    @ViewBuilder let content: (EnvironmentValues) -> Content
     @Environment(\.self) private var environment
+
+    var body: some View {
+        content(environment)
+    }
+}
+
+private struct DiscoveryCardContent: View {
+    let summary: StatsSummary
+    /// Set when the heard-before plays are hatched.
+    let hatchEnvironment: EnvironmentValues?
+    @State private var selection: Date?
+    /// The days and their labels, worked out once per range rather than on every redraw: a
+    /// drag or hover across the chart redraws it every frame.
+    @State private var plotted = Memo<DaysKey, [Day]>()
+    @Environment(\.colorSchemeContrast) private var contrast
     private let calendar = Calendar.current
+
+    private struct DaysKey: Equatable {
+        let timeline: [TimeBucket]
+        let newSongs: [TimeBucket]
+        let unit: Calendar.Component
+    }
 
     private struct Day: Identifiable {
         let start: Date
         let new: Int
         let familiar: Int
+        let dateLabel: String
         var id: Date { start }
     }
 
@@ -80,7 +115,7 @@ struct DiscoveryCard: View {
                     y: .value("Plays", day.new)
                 )
                 .foregroundStyle(newStyle(isDimmed: isDimmed))
-                .accessibilityLabel(ActivityChart.dateLabel(day.start, unit: unit))
+                .accessibilityLabel(day.dateLabel)
                 .accessibilityValue(Text("\(day.new) new, \(day.familiar) heard before"))
 
                 BarMark(
@@ -120,10 +155,10 @@ struct DiscoveryCard: View {
     /// A paler shade of the new plays' colour, hatched when colour alone mustn't tell them apart.
     private func familiarStyle(isDimmed: Bool) -> AnyShapeStyle {
         let color = isDimmed ? Self.dimmedColor : .accentColor
-        guard differentiatesWithoutColor else {
+        guard let hatchEnvironment else {
             return AnyShapeStyle(color.opacity(contrast == .increased ? 0.5 : 0.32))
         }
-        return AnyShapeStyle(HatchPattern.paint(color, increasedContrast: contrast == .increased, in: environment))
+        return AnyShapeStyle(HatchPattern.paint(color, increasedContrast: contrast == .increased, in: hatchEnvironment))
     }
 
     private static let dimmedColor = Color.gray
@@ -132,10 +167,18 @@ struct DiscoveryCard: View {
 
     /// The timeline and the first hearings share their buckets, so they line up one to one.
     private var days: [Day] {
-        let new = Dictionary(summary.newSongTimeline.map { ($0.start, $0.count) }) { first, _ in first }
-        return summary.timeline.map { bucket in
-            let fresh = min(bucket.count, new[bucket.start] ?? 0)
-            return Day(start: bucket.start, new: fresh, familiar: bucket.count - fresh)
+        let unit = summary.timelineUnit
+        return plotted.value(for: DaysKey(timeline: summary.timeline, newSongs: summary.newSongTimeline, unit: unit)) {
+            let new = Dictionary(summary.newSongTimeline.map { ($0.start, $0.count) }) { first, _ in first }
+            return summary.timeline.map { bucket in
+                let fresh = min(bucket.count, new[bucket.start] ?? 0)
+                return Day(
+                    start: bucket.start,
+                    new: fresh,
+                    familiar: bucket.count - fresh,
+                    dateLabel: ActivityChart.dateLabel(bucket.start, unit: unit)
+                )
+            }
         }
     }
 

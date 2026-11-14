@@ -117,7 +117,7 @@ extension CarPlaySceneDelegate {
             }
             fillImages(rows) { index in
                 guard let artwork = artists[index].artwork else { return nil }
-                return CarPlayImages.circle(await CarPlayImages.cover(.artwork(artwork), side: side, scale: scale))
+                return await CarPlayImages.circle(await CarPlayImages.cover(.artwork(artwork), side: side, scale: scale))
             }
             sections.append(CPListSection(items: rows, header: String(localized: "Artists"), sectionIndexTitle: nil))
         }
@@ -174,7 +174,7 @@ extension CarPlaySceneDelegate {
             let scale = scale
             fillImages(rows) { index in
                 guard let picture = music.artistPicture(for: artists[index]) else { return nil }
-                return CarPlayImages.circle(await CarPlayImages.cover(picture, side: side, scale: scale))
+                return await CarPlayImages.circle(await CarPlayImages.cover(picture, side: side, scale: scale))
             }
             sections.append(CPListSection(items: rows, header: String(localized: "Artists"), sectionIndexTitle: nil))
         }

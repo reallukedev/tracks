@@ -25,6 +25,9 @@ struct OfflineScreen: View {
     @Environment(PlayFeed.self) private var feed
     @Environment(DownloadedSongs.self) private var downloads
     @State private var showsSettings = LaunchScene.opensPlaySettings
+    /// The mixes and most played shelves, worked out off the main actor when the downloads
+    /// or the history's mixes change.
+    @State private var shelves = OfflineShelves()
 
     /// Mixes need this many of their songs downloaded to be worth a tile.
     private static let mixMinimum = 5
@@ -64,6 +67,12 @@ struct OfflineScreen: View {
         }
         .refreshable { await downloads.load() }
         .task(id: feed.hasBuilt) { await downloads.loadIfNeeded() }
+        .task(id: OfflineShelves.Key(downloads: downloads.revision, feed: feed.rebuilds)) {
+            let (byIdentity, songs, mixes, facts) = (downloads.byIdentity, downloads.songs, feed.mixes.all, feed.facts)
+            let next = await OfflineShelves.make(byIdentity: byIdentity, songs: songs, mixes: mixes, facts: facts, mixMinimum: Self.mixMinimum)
+            guard !Task.isCancelled else { return }
+            shelves = next
+        }
     }
 
     // MARK: - Content
@@ -74,14 +83,14 @@ struct OfflineScreen: View {
         playButtons(songs)
             .padding(.horizontal, PlayMetrics.margin)
 
-        let mixes = downloadedMixes
+        let mixes = shelves.mixes
         if !mixes.isEmpty {
             Shelf(title: String(localized: "Made from Your Listening"), items: mixes) { mix in
                 OfflineMixTile(mix: mix.mix, songs: mix.songs)
             }
         }
 
-        let mostPlayed = self.mostPlayed
+        let mostPlayed = shelves.mostPlayed
         if !mostPlayed.isEmpty {
             Shelf(title: String(localized: "Your Most Played"), items: mostPlayed) { song in
                 OfflineSongTile(song: song, queue: mostPlayed, context: .songs(String(localized: "Your Most Played")))
@@ -101,7 +110,7 @@ struct OfflineScreen: View {
         let context = PlayContext.songs(String(localized: "Downloaded"))
         return HStack(spacing: 12) {
             Button {
-                player.play(songs.sortedByTitle.request(), from: context)
+                player.play(downloads.byTitle.request(), from: context)
             } label: {
                 Label("Play", systemImage: "play.fill")
                     .frame(maxWidth: .infinity)
@@ -121,7 +130,7 @@ struct OfflineScreen: View {
 
     /// Every downloaded song, A to Z, as Music lists songs.
     private var allSongs: some View {
-        let songs = downloads.songs.sortedByTitle
+        let songs = downloads.byTitle
         let context = PlayContext.songs(String(localized: "Downloaded"))
         return LazyVStack(alignment: .leading, spacing: 0) {
             ShelfHeader(title: String(localized: "Downloaded Songs")) {
@@ -131,21 +140,7 @@ struct OfflineScreen: View {
             .padding(.bottom, 8)
 
             ForEach(songs.enumerated(), id: \.element.id) { index, song in
-                Button {
-                    player.play(songs.request(startingAt: index), from: context)
-                } label: {
-                    TrackRow(
-                        title: song.title,
-                        subtitle: song.artistName,
-                        cover: song.cover,
-                        plays: feed.facts[song.identity]?.plays,
-                        isExplicit: song.isExplicit,
-                        isCurrent: player.current?.songIdentity == song.identity
-                    )
-                }
-                .buttonStyle(RowButtonStyle())
-                .contextMenu { OfflineSongMenu(song: song) }
-                Divider().padding(.leading, 60)
+                OfflineSongRow(song: song, index: index, songs: songs, context: context)
             }
         }
     }
@@ -160,34 +155,73 @@ struct OfflineScreen: View {
         }
     }
 
-    // MARK: - Shelves
+}
 
+/// The shelves made from the downloads and the history.
+private nonisolated struct OfflineShelves: Sendable {
     /// Tracks’ mixes, with only their downloaded songs, when enough of them are.
-    private var downloadedMixes: [DownloadedMix] {
-        let downloaded = downloads.byIdentity
-        return feed.mixes.all.compactMap { mix in
-            let songs = mix.songs.compactMap { downloaded[$0.songIdentity] }
-            return songs.count >= Self.mixMinimum ? DownloadedMix(mix: mix, songs: songs) : nil
-        }
+    var mixes: [DownloadedMix] = []
+    /// The downloaded songs you play most, from Tracks’ history.
+    var mostPlayed: [OfflineSong] = []
+
+    struct Key: Equatable {
+        let downloads: Int
+        let feed: Int
     }
 
-    /// The downloaded songs you play most, from Tracks’ history.
-    private var mostPlayed: [OfflineSong] {
-        let plays = downloads.songs.compactMap { song in feed.facts[song.identity].map { (song, $0.plays) } }
-        return Array(plays.filter { $0.1 > 1 }.sorted { $0.1 > $1.1 }.prefix(15).map(\.0))
+    @concurrent
+    static func make(
+        byIdentity: [String: OfflineSong],
+        songs: [OfflineSong],
+        mixes: [Mix],
+        facts: [String: SongFacts],
+        mixMinimum: Int
+    ) async -> OfflineShelves {
+        let downloaded = mixes.compactMap { mix in
+            let songs = mix.songs.compactMap { byIdentity[$0.songIdentity] }
+            return songs.count >= mixMinimum ? DownloadedMix(mix: mix, songs: songs) : nil
+        }
+        let plays = songs.compactMap { song in facts[song.identity].map { (song, $0.plays) } }
+        let mostPlayed = Array(plays.filter { $0.1 > 1 }.sorted { $0.1 > $1.1 }.prefix(15).map(\.0))
+        return OfflineShelves(mixes: downloaded, mostPlayed: mostPlayed)
     }
 }
 
 /// A mix, cut down to the songs of it that are downloaded.
-private struct DownloadedMix: Identifiable {
+private nonisolated struct DownloadedMix: Identifiable, Sendable {
     let mix: Mix
     let songs: [OfflineSong]
     var id: String { mix.id }
 }
 
-private extension Array where Element == OfflineSong {
-    var sortedByTitle: [OfflineSong] {
-        sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+/// One of every downloaded song. Its own view, so the song playing and its play count are
+/// read per row rather than redrawing the whole page as songs change.
+private struct OfflineSongRow: View {
+    let song: OfflineSong
+    let index: Int
+    let songs: [OfflineSong]
+    let context: PlayContext
+    @Environment(PlayerModel.self) private var player
+    @Environment(PlayFeed.self) private var feed
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                player.play(songs.request(startingAt: index), from: context)
+            } label: {
+                TrackRow(
+                    title: song.title,
+                    subtitle: song.artistName,
+                    cover: song.cover,
+                    plays: feed.facts[song.identity]?.plays,
+                    isExplicit: song.isExplicit,
+                    isCurrent: player.current?.songIdentity == song.identity
+                )
+            }
+            .buttonStyle(RowButtonStyle())
+            .contextMenu { OfflineSongMenu(song: song) }
+            Divider().padding(.leading, 60)
+        }
     }
 }
 

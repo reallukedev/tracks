@@ -59,7 +59,11 @@ enum SongInfoSamples {
 
     /// The same number for a song every launch, unlike `hashValue`.
     private static func seed(_ subject: SongInfoSubject) -> Int {
-        subject.identity.unicodeScalars.reduce(7) { ($0 &* 31 &+ Int($1.value)) & 0x7FFF_FFFF }
+        seed(identity: subject.identity)
+    }
+
+    nonisolated private static func seed(identity: String) -> Int {
+        identity.unicodeScalars.reduce(7) { ($0 &* 31 &+ Int($1.value)) & 0x7FFF_FFFF }
     }
 
     private static let people = ["Ada Kestrel", "Milo Arden", "Sana Okafor", "Theo Lindqvist", "June Calloway", "Ravi Mehta", "Odile Brandt", "Cass Navarro"]
@@ -125,12 +129,13 @@ enum SongInfoSamples {
         return SongVersions(versions: versions, covers: covers, key: seed % 4 == 0 ? "A minor" : nil)
     }
 
-    static func lastFM(for subject: SongInfoSubject, history: ListeningHistory) -> LastFMTrackInfo? {
-        let seed = seed(subject)
+    /// Walks the whole history, so called off the main actor with the song's plain values.
+    nonisolated static func lastFM(identity: String, title: String, artistName: String, history: ListeningHistory) -> LastFMTrackInfo? {
+        let seed = seed(identity: identity)
         guard seed % 7 != 0 else { return nil }
         let listeners = 2_000 + (seed % 900) * 1_311
         // Other songs from the sample history, so a similar song opens with plays of its own.
-        var seen: Set<String> = [subject.identity]
+        var seen: Set<String> = [identity]
         let others = history.captures.reversed().filter { seen.insert($0.songIdentity).inserted }
         let similar: [LastFMTrackInfo.SimilarTrack] = others.isEmpty ? [] : (0..<5).map { index in
             let capture = others[(seed / 5 + index * 7) % others.count]
@@ -142,7 +147,7 @@ enum SongInfoSamples {
             yourScrobbles: 12 + seed % 140,
             tags: Array(["Indie Pop", "Dream Pop", "Chill", "Coastal", "Female Vocalists", "2020s"].dropFirst(seed % 3).prefix(4)),
             summary: seed % 2 == 0
-                ? String(localized: "\(subject.title) is a song by \(subject.artistName), written over one winter in a converted boathouse. It became a late-night favourite on independent radio before it was ever released as a single, and is often played to close their shows.")
+                ? String(localized: "\(title) is a song by \(artistName), written over one winter in a converted boathouse. It became a late-night favourite on independent radio before it was ever released as a single, and is often played to close their shows.")
                 : nil,
             url: URL(string: "https://www.last.fm/music"),
             similar: Array(Set(similar)).sorted { $0.title < $1.title }

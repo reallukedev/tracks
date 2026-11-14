@@ -92,13 +92,32 @@ public struct LocalTrack: Codable, Sendable, Hashable, Identifiable {
 
     /// The artist before any "feat.", "ft." or "featuring".
     static func leadArtist(of artist: String) -> String {
-        let markers = [" feat. ", " feat ", " ft. ", " ft ", " featuring ", " (feat. ", " (feat ", " (ft. ", " (featuring ", " [feat. "]
-        // Searched in the name itself: lowercasing can change its length ("İ"), so an index
-        // into a lowered copy can land elsewhere in the original.
-        guard let cut = markers.compactMap({ artist.range(of: $0, options: .caseInsensitive)?.lowerBound }).min() else { return artist }
+        let cut: String.Index
+        if artist.utf8.allSatisfy({ $0 < 0x80 }) {
+            // Plain ASCII lowers without changing length, so a lowered copy's offsets hold in the
+            // name. Ten case-insensitive Foundation searches a call made the album chart of a
+            // long history take a third of a second.
+            let lowered = artist.utf8.map { (0x41...0x5A).contains($0) ? $0 | 0x20 : $0 }
+            guard lowered.contains(UInt8(ascii: "f")) else { return artist }
+            let text = String(decoding: lowered, as: UTF8.self)
+            guard let offset = Self.featuringMarkers.compactMap({ text.utf8.firstRange(of: $0.utf8)?.lowerBound })
+                .map({ text.utf8.distance(from: text.utf8.startIndex, to: $0) }).min()
+            else { return artist }
+            cut = artist.utf8.index(artist.utf8.startIndex, offsetBy: offset)
+        } else {
+            // Searched in the name itself: lowercasing can change its length ("İ"), so an index
+            // into a lowered copy can land elsewhere in the original.
+            guard let found = Self.featuringMarkers.compactMap({ artist.range(of: $0, options: .caseInsensitive)?.lowerBound }).min()
+            else { return artist }
+            cut = found
+        }
         let lead = artist[..<cut].trimmingCharacters(in: .whitespaces)
         return lead.isEmpty ? artist : lead
     }
+
+    private static let featuringMarkers = [
+        " feat. ", " feat ", " ft. ", " ft ", " featuring ", " (feat. ", " (feat ", " (ft. ", " (featuring ", " [feat. ",
+    ]
 
     /// Groups a song with the rest of its album, however the tags are cased.
     public var albumKey: String {

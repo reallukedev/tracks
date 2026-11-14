@@ -1716,6 +1716,7 @@ private final class CrateSpring: NSObject {
             return
         }
         let link = screen.displayLink(target: self, selector: #selector(tick(_:)))
+        link.preferredFrameRateRange = .displayMaximum
         link.add(to: .main, forMode: .common)
         self.link = link
     }

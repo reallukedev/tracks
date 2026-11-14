@@ -99,6 +99,8 @@ struct HighlightsList: View {
     @SeenRevision private var revision
     @State private var insights: [Insight] = []
     @State private var hasLoaded = false
+    /// The scope the insights on show were worked out for.
+    @State private var shownScope: SourceScope?
     private var sources = SourceScopeSetting()
 
     var body: some View {
@@ -123,6 +125,10 @@ struct HighlightsList: View {
         .navigationTitle("Highlights")
         .sourceScopeSubtitle(sources.scope)
         .task(id: "\(sources.scope.rawValue)|\(revision)") {
+            // Already shown: let a burst of revisions settle (see ``LiveUpdate/settle``).
+            if hasLoaded, shownScope == sources.scope {
+                do { try await Task.sleep(for: LiveUpdate.settle) } catch { return }
+            }
             let (range, offset, scope, history, sessions) = (range, periodOffset, sources.scope, model.library.history, model.library.sessions)
             let includesStations = scope.includesStations
             let next = await OffMainActor.run {
@@ -135,6 +141,7 @@ struct HighlightsList: View {
             }
             guard !Task.isCancelled else { return }
             insights = next
+            shownScope = scope
             hasLoaded = model.library.isLoaded
         }
     }

@@ -100,6 +100,28 @@ struct LocalAlbumContent: View {
     @Environment(\.openPlayRoute) private var openPlayRoute
     @State private var deleting: LocalTrack?
 
+    #if os(iOS)
+    private func row(_ track: LocalTrack, position: Int, playable: [LocalTrack], context: PlayContext) -> some View {
+        let isPlayable = music.isPlayable(track)
+        return Button {
+            play(track, in: playable, context: context)
+        } label: {
+            TrackRow(
+                title: track.title,
+                subtitle: showsArtist(of: track) ? track.artist : nil,
+                number: track.trackNumber ?? position + 1,
+                isCurrent: player.current?.local?.id == track.id,
+                localTrack: track,
+                isPlayable: isPlayable
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(!isPlayable)
+        .trackMenu { LocalTrackMenu(track: track, showsStats: true, onDelete: { deleting = $0 }) }
+        .collectionRowInsets(hasCover: false)
+    }
+    #endif
+
     var body: some View {
         let context = PlayContext(kind: .album, title: album.title)
         let playable = album.tracks.filter(music.isPlayable)
@@ -114,22 +136,7 @@ struct LocalAlbumContent: View {
             ForEach(discs, id: \.number) { disc in
                 Section {
                     ForEach(disc.tracks.enumerated(), id: \.element.id) { position, track in
-                        Button {
-                            play(track, in: playable, context: context)
-                        } label: {
-                            TrackRow(
-                                title: track.title,
-                                subtitle: showsArtist(of: track) ? track.artist : nil,
-                                number: track.trackNumber ?? position + 1,
-                                isCurrent: player.current?.local?.id == track.id,
-                                localTrack: track,
-                                isPlayable: music.isPlayable(track)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(!music.isPlayable(track))
-                        .trackMenu { LocalTrackMenu(track: track, showsStats: true, onDelete: { deleting = $0 }) }
-                        .collectionRowInsets(hasCover: false)
+                        row(track, position: position, playable: playable, context: context)
                     }
                 } header: {
                     if discs.count > 1 {
@@ -182,7 +189,7 @@ struct LocalAlbumContent: View {
                             album: album.title,
                             plays: feed.facts[track.identity]?.plays ?? 0,
                             duration: track.duration ?? 0,
-                            isCurrent: player.current?.local?.id == track.id,
+                            localID: track.id,
                             isPlayable: music.isPlayable(track),
                             drag: SongDrag([track]).songs.first
                         )

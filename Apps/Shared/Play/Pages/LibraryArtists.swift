@@ -13,6 +13,8 @@ struct LibraryArtistsPage: View {
     @State private var plays: [String: Int] = [:]
     #if os(macOS)
     @State private var albums = LibraryPager<Album>()
+    /// The library's albums by folded artist name, grouped off the main actor each time they change.
+    @State private var albumsByArtist: [String: [Album]] = [:]
     @State private var selection: Artist.ID?
     #endif
 
@@ -22,6 +24,11 @@ struct LibraryArtistsPage: View {
             .loads(pager, query: query, order: .title) { LibrarySortKeys(artist: $0) }
             #if os(macOS)
             .loads(albums, query: "", order: .natural(.year)) { LibrarySortKeys(album: $0) }
+            .task(id: albums.revision) {
+                let grouped = await Self.grouped(albums.items)
+                guard !Task.isCancelled else { return }
+                albumsByArtist = grouped
+            }
             #endif
     }
 
@@ -70,8 +77,12 @@ struct LibraryArtistsPage: View {
 
     /// Their albums in your library, newest first.
     private func albums(of artist: Artist) -> [Album] {
-        let name = StatsCalculator.folded(artist.name)
-        return albums.items.filter { StatsCalculator.folded($0.artistName) == name }
+        albumsByArtist[StatsCalculator.folded(artist.name)] ?? []
+    }
+
+    @concurrent
+    private nonisolated static func grouped(_ albums: [Album]) async -> [String: [Album]] {
+        Dictionary(grouping: albums) { StatsCalculator.folded($0.artistName) }
     }
     #endif
 
@@ -88,9 +99,11 @@ struct LibraryArtistIndexSections<Artist: Identifiable, Row: View>: View {
     let artists: [Artist]
     let name: (Artist) -> String
     @ViewBuilder var row: (Artist) -> Row
+    /// Each name's letter, kept from render to render so only new names are worked out.
+    @State private var letters = LetterIndex()
 
     var body: some View {
-        ForEach(LibrarySort.sections(artists, name: name)) { section in
+        ForEach(letters.sections(of: artists, names: artists.map(name))) { section in
             Section {
                 ForEach(section.items) { artist in
                     row(artist)
@@ -102,6 +115,81 @@ struct LibraryArtistIndexSections<Artist: Identifiable, Row: View>: View {
             }
             .sectionIndexLabel(section.letter)
         }
+    }
+}
+
+/// The index letter of each name seen, so a page appended by the pager only folds its own
+/// names. A big run of new names is worked out off the main actor; until it lands they join
+/// the letter before them, so no row is lost and the index doesn't collapse.
+@Observable
+final class LetterIndex {
+    struct Section<Item>: Identifiable {
+        let letter: String
+        let items: ArraySlice<Item>
+        var id: String { letter }
+    }
+
+    /// Bumped when letters worked out in the background land.
+    private var revision = 0
+    @ObservationIgnored private var letters: [String: String] = [:]
+    @ObservationIgnored private var inFlight: Set<String> = []
+    @ObservationIgnored private var cached: (names: [String], runs: [(letter: String, count: Int)])?
+
+    /// Fewer new names than this are worked out right away.
+    private static let inlineLimit = 2_000
+
+    func sections<Item>(of items: [Item], names: [String]) -> [Section<Item>] {
+        _ = revision
+        let runs: [(letter: String, count: Int)]
+        if let cached, cached.names == names {
+            runs = cached.runs
+        } else {
+            let unknown = names.filter { letters[$0] == nil }
+            if unknown.count < Self.inlineLimit {
+                for name in unknown { letters[name] = LibraryCollation.indexLetter(name) }
+            } else {
+                request(unknown.filter { !inFlight.contains($0) })
+            }
+            runs = Self.runs(of: names, letters: letters)
+            cached = (names, runs)
+        }
+        var start = items.startIndex
+        return runs.map { run in
+            defer { start += run.count }
+            return Section(letter: run.letter, items: items[start..<start + run.count])
+        }
+    }
+
+    private func request(_ names: [String]) {
+        guard !names.isEmpty else { return }
+        inFlight.formUnion(names)
+        Task { [weak self] in
+            let found = await Self.letters(of: names)
+            guard let self else { return }
+            letters.merge(found) { old, _ in old }
+            inFlight.subtract(names)
+            cached = nil
+            revision += 1
+        }
+    }
+
+    @concurrent
+    private nonisolated static func letters(of names: [String]) async -> [String: String] {
+        Dictionary(names.map { ($0, LibraryCollation.indexLetter($0)) }) { first, _ in first }
+    }
+
+    /// Consecutive names under one letter, as ``LibrarySort/sections(_:name:)`` gathers them.
+    private static func runs(of names: [String], letters: [String: String]) -> [(letter: String, count: Int)] {
+        var runs: [(letter: String, count: Int)] = []
+        for name in names {
+            let letter = letters[name] ?? runs.last?.letter ?? ""
+            if runs.last?.letter == letter {
+                runs[runs.count - 1].count += 1
+            } else {
+                runs.append((letter, 1))
+            }
+        }
+        return runs
     }
 }
 #endif

@@ -68,6 +68,8 @@ struct UpNextList: View {
     @Environment(\.openRadioTuner) private var openRadioTuner
 
     var body: some View {
+        // Once per redraw: each part walks the whole queue.
+        let (queued, picks) = UpNextParts.split(player)
         List(selection: $selection) {
             Section {
                 if let track = player.current {
@@ -288,10 +290,6 @@ struct UpNextList: View {
         let copy = music.resolved(local)
         return music.downloads.isDownloading(copy.id) || music.servers.isWaitingToKeep(copy)
     }
-
-    /// What you queued, and after it Autoplay's picks.
-    private var queued: [UpNextParts.Entry] { UpNextParts.split(player).queued }
-    private var picks: [UpNextParts.Entry] { UpNextParts.split(player).picks }
 
     private func steeringNote(_ steering: LiveMix.Steering) -> some View {
         Label(steering.line, systemImage: steering.isTurningAway ? "arrow.triangle.turn.up.right.circle.fill" : "scope")

@@ -348,7 +348,10 @@ enum SongInfoSources {
         #if DEBUG
         if model.isDemoLaunch {
             do { try await SongInfoSamples.wait() } catch { return .offline }
-            return .loaded(SongInfoSamples.lastFM(for: subject, history: model.library.history))
+            let (history, identity, title, artistName) = (model.library.history, subject.identity, subject.title, subject.artistName)
+            return .loaded(await OffMainActor.run {
+                SongInfoSamples.lastFM(identity: identity, title: title, artistName: artistName, history: history)
+            })
         }
         #endif
         guard let session = LastFMSessionStore.current, let client = LastFMClient.configured() else { return .loaded(nil) }

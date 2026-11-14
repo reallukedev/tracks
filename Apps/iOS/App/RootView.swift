@@ -17,10 +17,14 @@ struct RootView: View {
     @State private var nowPlayingReopens = 0
     @Environment(\.scenePhase) private var scenePhase
     @State private var wasInBackground = false
-    /// The tab open when iOS last saved the scene. iOS keeps it when it ends Tracks in the
-    /// background and drops it when someone swipes Tracks away, so a quiet relaunch comes
-    /// back where you were and a fresh start opens where Settings says.
-    @SceneStorage("selectedTab") private var savedTab = ""
+    /// Made once: a new one on each redraw, as a tab switch makes, would redraw every song
+    /// menu that reads it, since it can't be compared.
+    @State private var showSongInfo: ShowSongInfoAction
+
+    init(model: AppModel) {
+        self.model = model
+        _showSongInfo = State(initialValue: ShowSongInfoAction { [model] in model.songInfo.show($0) })
+    }
 
     var body: some View {
         if let store = model.store, let capture = model.capture, let playback = model.playback {
@@ -76,8 +80,7 @@ struct RootView: View {
             // Someone else's SharePlay, joined from Messages.
             .sharePlayGuestPage(closing: $showsNowPlaying)
             .opensDeepLinks(in: model)
-            .onAppear(perform: restoreTab)
-            .onChange(of: model.selectedTab) { _, tab in savedTab = tab.rawValue }
+            .modifier(TabMemory(model: model))
             // A song from a widget. Summary is the tab whose stack can be pushed from here.
             // Initial too, for a link that launched the app.
             .onChange(of: model.pendingRoute, initial: true) { _, route in
@@ -124,7 +127,7 @@ struct RootView: View {
             .environment(\.playSongs, songDestination == .tracks ? PlaySongsAction { items, title in
                 player.play(.history(items.map(HistorySong.init)), from: .songs(title))
             } : nil)
-            .environment(\.showSongInfo, ShowSongInfoAction { model.songInfo.show($0) })
+            .environment(\.showSongInfo, showSongInfo)
             .task { await model.startCapture() }
             // Lidarr's actions show wherever music does, whatever the source.
             .task { await model.lidarr.check() }
@@ -178,15 +181,6 @@ struct RootView: View {
                 Text("Close Tracks and open it again. If that doesn’t help, restart your iPhone.")
             }
         }
-    }
-
-    /// Back on the saved tab, unless the launch itself asked for a place.
-    private func restoreTab() {
-        guard let tab = AppTab(rawValue: savedTab), model.pendingRoute == nil,
-              LaunchScene.tab == nil, LaunchScene.route == nil,
-              !LaunchScene.opensSearch, LaunchScene.searchText == nil
-        else { return }
-        model.selectedTab = tab
     }
 
     /// The tab Tracks opens to is far left: Play first when it opens to Play, last otherwise.
@@ -263,5 +257,30 @@ struct RootView: View {
             model.selectedTab = .summary
             summaryPath.append(route)
         }
+    }
+}
+
+/// Keeps the open tab for the scene. Its own view, so a tab switch (read here, and written to
+/// scene storage) redraws only this, not the root and with it every tab's stack.
+private struct TabMemory: ViewModifier {
+    let model: AppModel
+    /// The tab open when iOS last saved the scene. iOS keeps it when it ends Tracks in the
+    /// background and drops it when someone swipes Tracks away, so a quiet relaunch comes
+    /// back where you were and a fresh start opens where Settings says.
+    @SceneStorage("selectedTab") private var savedTab = ""
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear(perform: restoreTab)
+            .onChange(of: model.selectedTab) { _, tab in savedTab = tab.rawValue }
+    }
+
+    /// Back on the saved tab, unless the launch itself asked for a place.
+    private func restoreTab() {
+        guard let tab = AppTab(rawValue: savedTab), model.pendingRoute == nil,
+              LaunchScene.tab == nil, LaunchScene.route == nil,
+              !LaunchScene.opensSearch, LaunchScene.searchText == nil
+        else { return }
+        model.selectedTab = tab
     }
 }

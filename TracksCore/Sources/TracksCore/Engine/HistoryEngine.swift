@@ -79,6 +79,9 @@ public final class HistoryEngine: Sendable {
             case .everything(let snapshot):
                 let report = try index.sync(plays: snapshot.captures.map(Self.play), marker: nil)
                 isCurrent.withLock { $0 = true }
+                // A first fill is one transaction as large as the history, and its journal would
+                // stay that size on disk until the next write. Nothing ever called `optimize()`.
+                if report.inserted + report.updated + report.removed > 1_000 { try? index.optimize() }
                 Self.log.info("Synced the history index: \(report.inserted) added, \(report.updated) changed, \(report.removed) removed")
             case .steps(let steps, _):
                 for step in steps {

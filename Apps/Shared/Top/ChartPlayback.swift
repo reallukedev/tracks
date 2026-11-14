@@ -18,6 +18,14 @@ struct ChartPlayback: DynamicProperty {
         return model.isShowingSampleData ? [] : songs.filter { !$0.songID.isEmpty }
     }
 
+    /// Whether any of them can play, stopping at the first that can.
+    func canPlayAny(_ songs: [MixSong]) -> Bool {
+        if playSongs != nil {
+            return songs.contains { player.canPlay(songID: $0.songID) }
+        }
+        return !model.isShowingSampleData && songs.contains { !$0.songID.isEmpty }
+    }
+
     func play(_ songs: [MixSong], shuffled: Bool = false, title: String) {
         let items = playable(songs).map {
             PlaybackItem(songID: $0.songID, title: $0.title, artistName: $0.artistName)

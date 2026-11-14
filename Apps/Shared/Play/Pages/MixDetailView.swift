@@ -127,7 +127,7 @@ struct MixDetailView: View {
                         album: song.albumTitle ?? "",
                         plays: plays(of: song),
                         duration: 0,
-                        isCurrent: player.current?.songIdentity == song.songIdentity,
+                        songIdentity: song.songIdentity,
                         isPlayable: player.canPlay(songID: song.songID),
                         artwork: .url(song.artworkURL, seed: song.albumTitle ?? song.title),
                         drag: SongDrag([HistorySong(song)]).songs.first

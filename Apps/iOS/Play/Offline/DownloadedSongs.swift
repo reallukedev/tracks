@@ -11,7 +11,7 @@ enum OfflineMode {
 }
 
 /// A song from the Apple Music library that's downloaded to this iPhone.
-struct OfflineSong: Identifiable, Hashable {
+nonisolated struct OfflineSong: Identifiable, Hashable, Sendable {
     let id: String
     let title: String
     let artistName: String
@@ -22,9 +22,20 @@ struct OfflineSong: Identifiable, Hashable {
     let dateAdded: Date
     /// The library song, to play. Nil with sample data, which plays by name.
     let song: Song?
+    /// The key Tracks’ history groups plays by. Folded once here rather than per row drawn.
+    let identity: String
 
-    /// The key Tracks’ history groups plays by.
-    var identity: String { HistoryImport.key(title: title, artistName: artistName) }
+    init(id: String, title: String, artistName: String, albumTitle: String?, cover: CoverArt, isExplicit: Bool, dateAdded: Date, song: Song?) {
+        self.id = id
+        self.title = title
+        self.artistName = artistName
+        self.albumTitle = albumTitle
+        self.cover = cover
+        self.isExplicit = isExplicit
+        self.dateAdded = dateAdded
+        self.song = song
+        identity = HistoryImport.key(title: title, artistName: artistName)
+    }
 }
 
 extension Array where Element == OfflineSong {
@@ -47,6 +58,12 @@ extension Array where Element == OfflineSong {
 final class DownloadedSongs {
     /// Newest to the library first.
     private(set) var songs: [OfflineSong] = []
+    /// The same songs A to Z, as Music lists songs. Sorted once per load, off the main actor.
+    private(set) var byTitle: [OfflineSong] = []
+    /// Downloaded songs by the key the history groups plays by.
+    private(set) var byIdentity: [String: OfflineSong] = [:]
+    /// Moves on with each load, for pages that derive from the songs to follow cheaply.
+    private(set) var revision = 0
     private(set) var hasLoaded = false
     private(set) var isLoading = false
 
@@ -59,11 +76,6 @@ final class DownloadedSongs {
     init(isDemo: Bool, demoSongs: @escaping () -> [MixSong]) {
         self.isDemo = isDemo
         self.demoSongs = demoSongs
-    }
-
-    /// Downloaded songs by the key the history groups plays by.
-    var byIdentity: [String: OfflineSong] {
-        Dictionary(songs.map { ($0.identity, $0) }, uniquingKeysWith: { first, _ in first })
     }
 
     /// Loads once, and again whenever the library changes: a download finishing, or one
@@ -83,21 +95,44 @@ final class DownloadedSongs {
         }
         #if DEBUG
         if isDemo {
-            songs = demoDownloads()
+            await show(demoDownloads())
             return
         }
         #endif
         guard !isDemo, MusicAuthorization.currentStatus == .authorized else {
-            songs = []
+            await show([])
             return
         }
         let onDevice = await Self.onDevice()
         guard !onDevice.isEmpty else {
-            songs = []
+            await show([])
             return
         }
-        let found = await Self.librarySongs(for: onDevice)
-        songs = onDevice.compactMap { item in
+        await show(Self.offlineSongs(for: onDevice))
+    }
+
+    /// Sorted and keyed off the main actor, then shown all at once.
+    private func show(_ found: [OfflineSong]) async {
+        let index = await Self.index(found)
+        songs = found
+        byTitle = index.byTitle
+        byIdentity = index.byIdentity
+        revision += 1
+    }
+
+    @concurrent
+    private nonisolated static func index(_ songs: [OfflineSong]) async -> (byTitle: [OfflineSong], byIdentity: [String: OfflineSong]) {
+        (
+            songs.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending },
+            Dictionary(songs.map { ($0.identity, $0) }, uniquingKeysWith: { first, _ in first })
+        )
+    }
+
+    /// Off the main actor: the library's names are folded for every song found.
+    @concurrent
+    private nonisolated static func offlineSongs(for onDevice: [OnDevice]) async -> [OfflineSong] {
+        let found = await librarySongs(for: onDevice)
+        return onDevice.compactMap { item in
             guard let song = found.byID[item.id] ?? found.byKey[item.key] else { return nil }
             return OfflineSong(
                 id: song.id.rawValue,
@@ -158,7 +193,8 @@ final class DownloadedSongs {
 
     /// The library songs for those on this iPhone, by id and by title and artist. By id first,
     /// a few hundred at a time; any left over are found by name in the whole library.
-    private static func librarySongs(for items: [OnDevice]) async -> (byID: [MusicItemID: Song], byKey: [String: Song]) {
+    @concurrent
+    private nonisolated static func librarySongs(for items: [OnDevice]) async -> (byID: [MusicItemID: Song], byKey: [String: Song]) {
         var byID: [MusicItemID: Song] = [:]
         var byKey: [String: Song] = [:]
         var foundKeys = Set<String>()

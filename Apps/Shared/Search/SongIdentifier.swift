@@ -70,10 +70,16 @@ final class SongIdentifier {
 
         switch result {
         case .match(let match):
-            guard let item = match.mediaItems.first, let found = IdentifiedSong(item, history: history) else {
+            guard let item = match.mediaItems.first, let title = item.title, !title.isEmpty else {
                 phase = .noMatch
                 return
             }
+            let (artist, artwork, songID) = (item.artist ?? "", item.artworkURL?.absoluteString, item.appleMusicID ?? "")
+            // Finding its last play walks the whole history.
+            let found = await OffMainActor.run {
+                IdentifiedSong(title: title, artistName: artist, cover: .url(artwork, seed: title), songID: songID, history: history)
+            }
+            guard !Task.isCancelled else { return }
             phase = .found(found)
         case .noMatch:
             phase = .noMatch
@@ -120,7 +126,7 @@ final class SongIdentifier {
 }
 
 /// What Shazam heard, and when you last played it.
-struct IdentifiedSong: Equatable {
+nonisolated struct IdentifiedSong: Equatable, Sendable {
     let title: String
     let artistName: String
     let cover: CoverArt
@@ -140,16 +146,6 @@ struct IdentifiedSong: Equatable {
         lastPlay = history.captures.last { $0.songIdentity == identity }
     }
 
-    init?(_ item: SHMatchedMediaItem, history: ListeningHistory) {
-        guard let title = item.title, !title.isEmpty else { return nil }
-        self.init(
-            title: title,
-            artistName: item.artist ?? "",
-            cover: .url(item.artworkURL?.absoluteString, seed: title),
-            songID: item.appleMusicID ?? "",
-            history: history
-        )
-    }
 }
 
 /// Whether the device has a way to the internet right now, asked once.

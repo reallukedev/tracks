@@ -26,10 +26,15 @@ struct ArtworkView: View {
     /// The address that was asked for and never came, so its generated cover stands in.
     @State private var failed: ArtworkImages.Key?
 
+    private static let fade = Animation.easeOut(duration: 0.2)
+
     /// Covers filling a grid cell are decoded at a size that suits the largest cell.
     private static let unsizedPoints: CGFloat = 300
 
     var body: some View {
+        // Worked out once per redraw: the address is parsed and the cache asked once.
+        let key = key
+        let image = image(for: key)
         let shape = CoverShape(isCircle: isCircle, isBare: isBare, maximumCornerRadius: maximumCornerRadius)
         ZStack {
             if key == nil || failed == key {
@@ -45,6 +50,11 @@ struct ArtworkView: View {
                     .transition(.opacity)
             }
         }
+        // The fade is this view's own, not a transaction around the change: one of those on
+        // the Mac laid the whole window out again on every frame of it, for every cover that
+        // came in while a grid scrolled. A cover already in memory is drawn at once.
+        .animation(Self.fade, value: loaded?.key)
+        .animation(Self.fade, value: failed)
         .frame(width: size, height: size)
         // With no size, the offered space. A cover wider than it's tall overflows here and
         // is clipped, as it is inside a fixed frame.
@@ -53,15 +63,13 @@ struct ArtworkView: View {
         .overlay { shape.stroke(.primary.opacity(isBare ? 0 : 0.08), lineWidth: 1) }
         .accessibilityHidden(true)
         .task(id: key) {
-            guard let key, image == nil else { return }
+            guard let key, self.image(for: key) == nil else { return }
             // A server's cover that didn't come may be there later, once the services it's
             // found on stop turning the server away: asked once more while it's on screen.
             for attempt in 0..<2 {
                 if let image = await ArtworkImages.shared.image(for: key) {
                     guard !Task.isCancelled else { return }
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        loaded = (key, image)
-                    }
+                    loaded = (key, image)
                     return
                 }
                 guard attempt == 0, ArtworkImages.mayArriveLater(key.url) else { break }
@@ -69,7 +77,7 @@ struct ArtworkView: View {
                 guard !Task.isCancelled else { return }
             }
             guard !Task.isCancelled else { return }
-            withAnimation(.easeOut(duration: 0.2)) { failed = key }
+            failed = key
         }
     }
 
@@ -81,7 +89,7 @@ struct ArtworkView: View {
 
     /// The loaded cover if it's for the current address and size, otherwise one already in
     /// memory.
-    private var image: CGImage? {
+    private func image(for key: ArtworkImages.Key?) -> CGImage? {
         guard let key else { return nil }
         if let loaded, loaded.key == key { return loaded.image }
         return ArtworkImages.shared.cached(key)

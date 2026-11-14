@@ -40,24 +40,7 @@ public extension TracksStore {
         now: Date = .now,
         calendar: Calendar = .current
     ) throws -> WidgetReading {
-        let lastPlayed = try context.fetch(Self.allCaptures(limit: 1)).first
-        // A fetch limit of zero means no limit, so skip the fetch instead.
-        let today = todayLimit > 0
-            ? try context.fetch(Self.allCaptures(
-                since: calendar.startOfDay(for: now),
-                limit: todayLimit
-            ))
-            : []
-        // The same query the Play button uses, so Up Next matches what Play plays.
-        let upNext = try upNextLimit.map { limit in
-            let owed = try playBackQueue(now: now, calendar: calendar)
-            return WidgetReading.UpNext(songs: owed.prefix(limit).map(\.snapshot), totalCount: owed.count)
-        }
-        return WidgetReading(
-            lastPlayed: lastPlayed?.snapshot,
-            today: today.map(\.snapshot),
-            upNext: upNext
-        )
+        try Self.widgetReading(in: context, todayLimit: todayLimit, upNextLimit: upNextLimit, now: now, calendar: calendar)
     }
 
     /// Everything the largest widgets could show, for comparing before and after a save.
@@ -66,18 +49,18 @@ public extension TracksStore {
         now: Date = .now,
         calendar: Calendar = .current
     ) throws -> WidgetFaces {
-        let reading = try widgetReading(
-            todayLimit: WidgetReading.mostTodayRows,
-            // With Up Next off, the queue isn't on screen, so play-back shouldn't reload.
-            upNextLimit: showsUpNext ? WidgetReading.mostUpNextRows : nil,
-            now: now,
-            calendar: calendar
-        )
-        return WidgetFaces(
-            reading,
-            topSongs: try widgetTopSongs(limit: WidgetReading.mostTopSongs, now: now, calendar: calendar),
-            captureCount: try context.fetchCount(FetchDescriptor<Capture>())
-        )
+        try Self.widgetFaces(in: context, showsUpNext: showsUpNext, now: now, calendar: calendar)
+    }
+
+    /// ``widgetFaces(showsUpNext:now:calendar:)`` read in the background, on a context of its
+    /// own, so the app can compare after a save without the main actor doing the reads.
+    @concurrent
+    nonisolated func widgetFacesInBackground(
+        showsUpNext: Bool,
+        now: Date = .now,
+        calendar: Calendar = .current
+    ) async throws -> WidgetFaces {
+        try Self.widgetFaces(in: ModelContext(container), showsUpNext: showsUpNext, now: now, calendar: calendar)
     }
 
     /// The most played songs of the last `days` days, today included, most played first.
@@ -90,10 +73,70 @@ public extension TracksStore {
         now: Date = .now,
         calendar: Calendar = .current
     ) throws -> [SongTally] {
+        try Self.widgetTopSongs(in: context, limit: limit, days: days, now: now, calendar: calendar)
+    }
+
+    // MARK: - On any context
+
+    nonisolated static func widgetReading(
+        in context: ModelContext,
+        todayLimit: Int,
+        upNextLimit: Int?,
+        now: Date,
+        calendar: Calendar
+    ) throws -> WidgetReading {
+        let lastPlayed = try context.fetch(allCaptures(limit: 1)).first
+        // A fetch limit of zero means no limit, so skip the fetch instead.
+        let today = todayLimit > 0
+            ? try context.fetch(allCaptures(
+                since: calendar.startOfDay(for: now),
+                limit: todayLimit
+            ))
+            : []
+        // The same query the Play button uses, so Up Next matches what Play plays.
+        let upNext = try upNextLimit.map { limit in
+            let owed = try playBackQueue(in: context, now: now, calendar: calendar)
+            return WidgetReading.UpNext(songs: owed.prefix(limit).map(\.snapshot), totalCount: owed.count)
+        }
+        return WidgetReading(
+            lastPlayed: lastPlayed?.snapshot,
+            today: today.map(\.snapshot),
+            upNext: upNext
+        )
+    }
+
+    nonisolated static func widgetFaces(
+        in context: ModelContext,
+        showsUpNext: Bool,
+        now: Date,
+        calendar: Calendar
+    ) throws -> WidgetFaces {
+        let reading = try widgetReading(
+            in: context,
+            todayLimit: WidgetReading.mostTodayRows,
+            // With Up Next off, the queue isn't on screen, so play-back shouldn't reload.
+            upNextLimit: showsUpNext ? WidgetReading.mostUpNextRows : nil,
+            now: now,
+            calendar: calendar
+        )
+        return WidgetFaces(
+            reading,
+            topSongs: try widgetTopSongs(in: context, limit: WidgetReading.mostTopSongs, days: WidgetReading.topSongDays, now: now, calendar: calendar),
+            captureCount: try context.fetchCount(FetchDescriptor<Capture>())
+        )
+    }
+
+    nonisolated static func widgetTopSongs(
+        in context: ModelContext,
+        limit: Int,
+        days: Int,
+        now: Date,
+        calendar: Calendar
+    ) throws -> [SongTally] {
         guard limit > 0, days > 0 else { return [] }
         let today = calendar.startOfDay(for: now)
         let start = calendar.date(byAdding: .day, value: -(days - 1), to: today) ?? today
-        var descriptor = Self.allCaptures(since: start)
+        var descriptor = allCaptures(since: start)
         descriptor.propertiesToFetch = [
             \.songKey, \.songID, \.title, \.artistName, \.albumTitle, \.artworkURL, \.capturedAt, \.kindRawValue,
         ]

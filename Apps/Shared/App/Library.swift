@@ -53,6 +53,8 @@ final class Library {
     /// How long to let a burst of saves settle before reading. A Mac capture saves the row,
     /// then its id and cover, then the playlist write and scrobble, within seconds.
     private static let settle: Duration = .milliseconds(400)
+    /// The most a steady stream of changes can hold a refresh back.
+    private static let longestSettle: Duration = .seconds(2)
 
     /// How many times a failed first read is tried again before waiting for the store to change.
     private static let firstReadRetries = 5
@@ -92,19 +94,19 @@ final class Library {
         refreshing = Task {
             defer { refreshing = nil }
             repeat {
-                needsAnotherRefresh = false
                 // The first load goes straight away; later ones wait out the burst.
-                if isLoaded { try? await Task.sleep(for: Self.settle) }
+                if isLoaded { await settle() }
+                // Changes until now are in the read that follows.
+                needsAnotherRefresh = false
                 do {
                     if let (change, version) = try await reader.changes(after: version) {
                         if looksUpCatalog, !hasLoadedSongMetadata {
                             songMetadata = await Self.loadSongMetadata(from: songMetadataCache)
                             hasLoadedSongMetadata = true
                             lookupsGeneration += 1
-                            CatalogCredits.shared.update(from: songMetadata)
                         }
                         let generation = lookupsGeneration
-                        let (artwork, metadata) = lookups
+                        let (artwork, metadata) = await lookups()
                         // Each new song is a step on from what's shown, taken off the main
                         // actor. Rebuilding from every play, after every song, cost a long
                         // history a sort of all of it, and the main actor the lookups' pass
@@ -135,9 +137,25 @@ final class Library {
         }
     }
 
-    /// What the lookups have found, as ``history`` shows it.
-    private var lookups: (artwork: [String: String], metadata: [String: SongMetadata]) {
-        (looksUpCatalog ? artistArtwork.urls : [:], looksUpCatalog ? songMetadata : Self.sampleMetadata)
+    /// Waits until the store has been quiet for ``settle``, or ``longestSettle`` at most.
+    ///
+    /// An iCloud import of thousands of plays saves in batches for a minute or more, and each
+    /// publish makes every open page recompute; waiting a fixed time after the first change
+    /// published one every half second for all of it.
+    private func settle() async {
+        let deadline = ContinuousClock.now + Self.longestSettle
+        repeat {
+            needsAnotherRefresh = false
+            try? await Task.sleep(for: Self.settle)
+        } while needsAnotherRefresh && ContinuousClock.now < deadline
+    }
+
+    /// What the lookups have found, as ``history`` shows it. The pictures are read from disk,
+    /// so off the main actor.
+    private func lookups() async -> (artwork: [String: String], metadata: [String: SongMetadata]) {
+        let metadata = looksUpCatalog ? songMetadata : Self.sampleMetadata
+        guard looksUpCatalog else { return ([:], metadata) }
+        return (await Self.artworkURLs(in: artistArtwork), metadata)
     }
 
     /// Goes up whenever the lookups find something, so a rebuild knows whether what it
@@ -235,13 +253,13 @@ final class Library {
                 publishLookups(force: true)
             }
             while looksUpCatalog {
-                let requests = await Self.pendingArtists(in: history, lookedUp: artistArtwork.lookedUp)
+                let requests = await Self.pendingArtists(in: history, cache: artistArtwork)
                 guard !requests.isEmpty,
                       let found = try? await CatalogLookup().artistArtworkURLs(for: requests),
                       looksUpCatalog
                 else { return }
 
-                artistArtwork.record(found: found, asked: requests.map(\.artistIdentity))
+                await Self.record(found: found, asked: requests.map(\.artistIdentity), in: artistArtwork)
                 // `pending` reads what's recorded, not what's published, so the next round
                 // doesn't ask again for these.
                 lookupsGeneration += 1
@@ -275,7 +293,6 @@ final class Library {
                     into: songMetadata,
                     cache: songMetadataCache
                 )
-                CatalogCredits.shared.update(from: songMetadata)
                 lookupsGeneration += 1
                 hasUnpublishedLookups = true
                 publishLookups(force: false)
@@ -289,9 +306,21 @@ final class Library {
     @concurrent
     private nonisolated static func pendingArtists(
         in history: ListeningHistory,
-        lookedUp: Set<String>
+        cache: ArtistArtworkCache
     ) async -> [ArtistArtworkLookup.Request] {
-        ArtistArtworkLookup.pending(in: history, lookedUp: lookedUp, limit: 25)
+        ArtistArtworkLookup.pending(in: history, lookedUp: cache.lookedUp, limit: 25)
+    }
+
+    // The artwork cache reads and writes its whole file on each call.
+
+    @concurrent
+    private nonisolated static func artworkURLs(in cache: ArtistArtworkCache) async -> [String: String] {
+        cache.urls
+    }
+
+    @concurrent
+    private nonisolated static func record(found: [String: String], asked: [String], in cache: ArtistArtworkCache) async {
+        cache.record(found: found, asked: asked)
     }
 
     @concurrent
@@ -304,7 +333,10 @@ final class Library {
 
     @concurrent
     private nonisolated static func loadSongMetadata(from cache: SongMetadataCache) async -> [String: SongMetadata] {
-        cache.load()
+        let loaded = cache.load()
+        // Every song looked up: a pass the main actor shouldn't make.
+        CatalogCredits.shared.update(from: loaded)
+        return loaded
     }
 
     @concurrent
@@ -314,7 +346,9 @@ final class Library {
         into existing: [String: SongMetadata],
         cache: SongMetadataCache
     ) async -> [String: SongMetadata] {
-        cache.record(found: found, asked: asked, into: existing)
+        let recorded = cache.record(found: found, asked: asked, into: existing)
+        CatalogCredits.shared.update(from: recorded)
+        return recorded
     }
 
     /// Puts what the lookups have found into ``history`` and bumps ``revision``, at most
@@ -331,7 +365,7 @@ final class Library {
             defer { attaching = nil }
             while hasUnpublishedLookups, looksUpCatalog {
                 let (base, shown, generation) = (history, revision, lookupsGeneration)
-                let (artwork, metadata) = lookups
+                let (artwork, metadata) = await lookups()
                 let attached = await Self.attach(base, artwork: artwork, metadata: metadata)
                 // A rebuild landed meanwhile, with the lookups of its own: look again.
                 guard revision == shown else { continue }
@@ -401,12 +435,50 @@ extension View {
     /// Calls `action` after each save of `context`, and after each batch of synced changes
     /// has been folded in: the moments rows can change in place, which a query's count and
     /// ends don't show.
+    ///
+    /// The first change is passed on at once and the rest of a burst at most twice a second,
+    /// so a run of saves refetches a page a few times rather than once per save.
     func onStoreChange(of context: ModelContext, perform action: @escaping () -> Void) -> some View {
-        onReceive(NotificationCenter.default.publisher(for: ModelContext.didSave, object: context).receive(on: DispatchQueue.main)) { _ in
-            action()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: SyncReconciler.didReconcileNotification).receive(on: DispatchQueue.main)) { _ in
-            action()
-        }
+        modifier(StoreChanges(context: context, action: action))
+    }
+}
+
+private struct StoreChanges: ViewModifier {
+    let context: ModelContext
+    let action: () -> Void
+
+    /// Changes seen, so each starts the task below again.
+    @State private var seen = 0
+    @State private var lastAction = LastAction()
+
+    private static let spacing: Duration = .milliseconds(500)
+
+    func body(content: Content) -> some View {
+        content
+            .onReceive(NotificationCenter.default.publisher(for: ModelContext.didSave, object: context).receive(on: DispatchQueue.main)) { _ in
+                seen &+= 1
+            }
+            .onReceive(NotificationCenter.default.publisher(for: SyncReconciler.didReconcileNotification).receive(on: DispatchQueue.main)) { _ in
+                seen &+= 1
+            }
+            .task(id: seen) {
+                // Already acted on: the page coming back on screen runs this again.
+                guard seen != lastAction.handled else { return }
+                // A later change cancels this and waits for the same moment, so a burst can't
+                // keep putting it off.
+                if let last = lastAction.at {
+                    try? await Task.sleep(until: last + Self.spacing, clock: .continuous)
+                    guard !Task.isCancelled else { return }
+                }
+                lastAction.at = .now
+                lastAction.handled = seen
+                action()
+            }
+    }
+
+    /// A box, so noting the time doesn't itself update the view.
+    private final class LastAction {
+        var at: ContinuousClock.Instant?
+        var handled = 0
     }
 }

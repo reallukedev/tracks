@@ -427,7 +427,7 @@ extension CarPlaySceneDelegate {
         let scale = scale
         fillImages(rows) { index in
             guard let picture = music.artistPicture(for: artists[index]) else { return nil }
-            return CarPlayImages.circle(await CarPlayImages.cover(picture, side: side, scale: scale))
+            return await CarPlayImages.circle(await CarPlayImages.cover(picture, side: side, scale: scale))
         }
         return page(String(localized: "Artists"), [CPListSection(items: rows)], empty: String(localized: "No Artists"))
     }
@@ -436,8 +436,7 @@ extension CarPlaySceneDelegate {
     private func localSongsPage(_ tracks: [LocalTrack], title: String) async -> CPListTemplate {
         let music = model.yourMusic
         let player = model.player
-        let playable = tracks.filter(music.isPlayable)
-            .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+        let playable = await Self.sortedByTitle(tracks.filter(music.isPlayable))
         guard !playable.isEmpty else {
             return page(title, [], empty: String(localized: "No Songs to Play"))
         }
@@ -451,6 +450,12 @@ extension CarPlaySceneDelegate {
     }
 
     /// Songs with their covers, which fill in once the page is open.
+    /// A whole library's songs sort off the main actor.
+    @concurrent
+    private nonisolated static func sortedByTitle(_ tracks: [LocalTrack]) async -> [LocalTrack] {
+        tracks.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+    }
+
     private func localSongRows(_ tracks: [LocalTrack], context: PlayContext) -> [CPListItem] {
         let player = model.player
         let music = model.yourMusic

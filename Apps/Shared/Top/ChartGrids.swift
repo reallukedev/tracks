@@ -15,6 +15,7 @@ struct ArtistChartGrid: View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: Self.minimum), spacing: 20, alignment: .top)], spacing: 28) {
             ForEach(entries.enumerated(), id: \.element.id) { index, entry in
                 ArtistChartTile(position: index + 1, entry: entry, open: { open(entry) }, play: canPlay(entry) ? { play(entry) } : nil)
+                    .equatable()
             }
         }
     }
@@ -26,12 +27,18 @@ struct ArtistChartGrid: View {
     #endif
 }
 
-private struct ArtistChartTile: View {
+/// Equatable on its values, so a page redrawing around it (a tab switch, a new play elsewhere)
+/// doesn't draw every tile again: its closures are rebuilt each time and never compare equal.
+private struct ArtistChartTile: View, Equatable {
     let position: Int
     let entry: ChartEntry
     let open: () -> Void
     let play: (() -> Void)?
     @State private var isHovered = false
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.position == rhs.position && lhs.entry == rhs.entry && (lhs.play == nil) == (rhs.play == nil)
+    }
 
     var body: some View {
         Button(action: open) {
@@ -56,7 +63,7 @@ private struct ArtistChartTile: View {
                             .font(.headline)
                             .lineLimit(1)
                     }
-                    Text(amounts)
+                    Text(entry.amounts)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
@@ -89,21 +96,13 @@ private struct ArtistChartTile: View {
             Button("Your Stats", systemImage: "chart.bar.xaxis", action: open)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(Text("Number \(position), \(entry.title), \(amounts)"))
+        .accessibilityLabel(Text("Number \(position), \(entry.title), \(entry.amounts)"))
         .accessibilityHint("Opens your stats")
         .accessibilityActions {
             if let play {
                 Button("Play Their Songs", action: play)
             }
         }
-    }
-
-    /// "134 plays · 12 songs".
-    private var amounts: String {
-        let plays = PlayCountText.short(entry.count)
-        guard let songs = entry.songCount else { return plays }
-        let heard = String(AttributedString(localized: "^[\(songs) song](inflect: true)").characters)
-        return "\(plays) · \(heard)"
     }
 }
 
@@ -120,6 +119,7 @@ struct AlbumChartGrid: View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: Self.minimum), spacing: 20, alignment: .top)], spacing: 26) {
             ForEach(entries.enumerated(), id: \.element.id) { index, entry in
                 AlbumChartTile(position: index + 1, entry: entry, open: { open(entry) }, play: canPlay(entry) ? { play(entry) } : nil)
+                    .equatable()
             }
         }
     }
@@ -131,12 +131,18 @@ struct AlbumChartGrid: View {
     #endif
 }
 
-private struct AlbumChartTile: View {
+/// Equatable on its values, so a page redrawing around it (a tab switch, a new play elsewhere)
+/// doesn't draw every tile again: its closures are rebuilt each time and never compare equal.
+private struct AlbumChartTile: View, Equatable {
     let position: Int
     let entry: ChartEntry
     let open: () -> Void
     let play: (() -> Void)?
     @State private var isHovered = false
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.position == rhs.position && lhs.entry == rhs.entry && (lhs.play == nil) == (rhs.play == nil)
+    }
 
     var body: some View {
         Button(action: open) {
@@ -166,7 +172,7 @@ private struct AlbumChartTile: View {
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                         }
-                        Text(amounts)
+                        Text(entry.amounts)
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                             .monospacedDigit()
@@ -187,21 +193,13 @@ private struct AlbumChartTile: View {
             Button("Your Stats", systemImage: "chart.bar.xaxis", action: open)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(Text("Number \(position), \(entry.title), \(entry.subtitle ?? ""), \(amounts)"))
+        .accessibilityLabel(Text("Number \(position), \(entry.title), \(entry.subtitle ?? ""), \(entry.amounts)"))
         .accessibilityHint("Opens your stats")
         .accessibilityActions {
             if let play {
                 Button("Play", action: play)
             }
         }
-    }
-
-    /// "34 plays · 9 songs".
-    private var amounts: String {
-        let plays = PlayCountText.short(entry.count)
-        guard let songs = entry.songCount else { return plays }
-        let heard = String(AttributedString(localized: "^[\(songs) song](inflect: true)").characters)
-        return "\(plays) · \(heard)"
     }
 }
 
@@ -230,13 +228,15 @@ private struct ChartTilePlayButton: View {
 struct ArtistShareBar: View {
     let entries: [ChartEntry]
     let plays: Int
+    /// The entries' plays added up, worked out with the snapshot.
+    let entryPlays: Int
 
     private static let palette: [Color] = [.accentColor, .blue, .teal, .orange, .pink]
 
     /// What the shares are of. A collaboration counts for each artist on it, so the artists'
     /// plays can add up to more than the period's, and the bar is cut from their sum then.
     private var whole: Int {
-        max(plays, entries.reduce(0) { $0 + $1.count })
+        max(plays, entryPlays)
     }
 
     private var shares: [(name: String, plays: Int, color: Color)] {
@@ -254,17 +254,15 @@ struct ArtistShareBar: View {
             Text("Who You Listened To")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
-            GeometryReader { proxy in
-                HStack(spacing: 2) {
-                    ForEach(shares.enumerated(), id: \.offset) { _, share in
-                        Rectangle()
-                            .fill(share.color)
-                            .frame(width: max(2, (proxy.size.width - CGFloat(shares.count - 1) * 2) * CGFloat(share.plays) / CGFloat(max(whole, 1))))
-                    }
+            ShareRow(gap: 2, minimumWidth: 2) {
+                ForEach(shares.enumerated(), id: \.offset) { _, share in
+                    Rectangle()
+                        .fill(share.color)
+                        .share(Double(share.plays) / Double(max(whole, 1)))
                 }
-                .clipShape(.capsule)
             }
             .frame(height: 14)
+            .clipShape(.capsule)
             .accessibilityHidden(true)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 16, alignment: .leading)], alignment: .leading, spacing: 8) {
                 ForEach(shares.enumerated(), id: \.offset) { _, share in

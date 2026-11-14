@@ -263,7 +263,7 @@ final class MusicKitPlayerEngine: PlayerEngine {
             let index = allowed.firstIndex { $0.id.rawValue == wanted }
             startSong = StartSong(allowed, at: index)
             queued = allowed
-            queue = try Self.queue(of: allowed, startingAt: index, shuffled: shuffled)
+            queue = try await Self.queue(of: allowed, startingAt: index, shuffled: shuffled)
         case .songs(let songs, let start):
             let wanted = songs.indices.contains(start) && !shuffled ? songs[start].id.rawValue : nil
             let allowed = Self.allowed(songs, allowsExplicit: allowsExplicit)
@@ -271,7 +271,7 @@ final class MusicKitPlayerEngine: PlayerEngine {
             let index = allowed.firstIndex { $0.id.rawValue == wanted }
             startSong = StartSong(allowed, at: index)
             queued = allowed
-            queue = try Self.queue(of: allowed, startingAt: index, shuffled: shuffled)
+            queue = try await Self.queue(of: allowed, startingAt: index, shuffled: shuffled)
         case .station(let station):
             // A station can't be filtered ahead of time; the player model skips what's not allowed.
             queue = ApplicationMusicPlayer.Queue(for: [station])
@@ -281,7 +281,7 @@ final class MusicKitPlayerEngine: PlayerEngine {
                 systemShuffle = shuffled
             } else {
                 queued = Self.allowed(try await Self.tracks(of: album), allowsExplicit: false)
-                queue = try Self.queue(of: queued, startingAt: nil, shuffled: shuffled)
+                queue = try await Self.queue(of: queued, startingAt: nil, shuffled: shuffled)
             }
         case .playlist(let playlist):
             if allowsExplicit {
@@ -289,7 +289,7 @@ final class MusicKitPlayerEngine: PlayerEngine {
                 systemShuffle = shuffled
             } else {
                 queued = Self.allowed(try await Self.tracks(of: playlist), allowsExplicit: false)
-                queue = try Self.queue(of: queued, startingAt: nil, shuffled: shuffled)
+                queue = try await Self.queue(of: queued, startingAt: nil, shuffled: shuffled)
             }
         case .demoStation, .local:
             throw PlayerProblem.nothingToPlay
@@ -549,9 +549,9 @@ final class MusicKitPlayerEngine: PlayerEngine {
     }
 
     /// A queue of songs, in order or freshly shuffled. Throws when there's nothing left.
-    private static func queue(of songs: [Song], startingAt start: Int?, shuffled: Bool) throws -> ApplicationMusicPlayer.Queue {
+    private static func queue(of songs: [Song], startingAt start: Int?, shuffled: Bool) async throws -> ApplicationMusicPlayer.Queue {
         guard !songs.isEmpty else { throw emptyProblem(allowsExplicit: PlayPreferences.allowsExplicit) }
-        if shuffled { return ApplicationMusicPlayer.Queue(for: fresh(songs)) }
+        if shuffled { return ApplicationMusicPlayer.Queue(for: await fresh(songs)) }
         return ApplicationMusicPlayer.Queue(for: songs, startingAt: start.map { songs[$0] })
     }
 
@@ -632,7 +632,9 @@ final class MusicKitPlayerEngine: PlayerEngine {
         CoverImage.loadableURL(of: artwork, pixels: CoverImage.pixels(for: 0))
     }
 
-    private static func fresh(_ songs: [Song]) -> [Song] {
+    /// Off the main actor: it folds every artist's name.
+    @concurrent
+    private nonisolated static func fresh(_ songs: [Song]) async -> [Song] {
         FreshShuffle.order(songs, artist: { StatsCalculator.folded($0.artistName) }, seed: .random(in: 0...UInt64.max))
     }
 }

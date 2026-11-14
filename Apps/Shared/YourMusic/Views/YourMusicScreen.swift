@@ -129,7 +129,9 @@ struct YourMusicScreen: View {
         // The shelves made from your music, worked out when what they're made from changes
         // rather than on every redraw.
         .task(id: ShelvesKey(songs: music.index.tracks.count, history: feed.builtRevision, downloads: music.downloads.items.count, mixes: feed.mixes.mixes.count)) {
-            shelves = makeShelves()
+            let made = await makeShelves()
+            guard !Task.isCancelled else { return }
+            shelves = made
         }
     }
 
@@ -150,7 +152,7 @@ struct YourMusicScreen: View {
     }
 
     /// The shelves made from your music, kept between redraws. See ``makeShelves()``.
-    struct Shelves {
+    nonisolated struct Shelves: Sendable {
         var mixes: [Mix] = []
         var unplayed: [LocalTrack] = []
         var downloaded: [LocalTrack] = []
@@ -168,35 +170,75 @@ struct YourMusicScreen: View {
         let mixes: Int
     }
 
-    private func makeShelves() -> Shelves {
-        let seed = FreshShuffle.dailySeed(for: .now, salt: "waiting")
-        let blocked = player.signals.blocked
-        let unplayed = music.index.tracks.filter { feed.facts[$0.identity] == nil && music.isPlayable($0) && !blocked.blocks(songBy: $0.artist) }
-        let onPhone = music.index.tracks.filter { !$0.isFromServer || music.downloads.isDownloaded($0.id) }
+    /// Takes what the shelves are made from on the main actor, and makes them off it.
+    private func makeShelves() async -> Shelves {
+        let artists = feed.favoriteArtists.compactMap { favorite in
+            music.index.artist(id: favorite.id).map { (artist: $0, plays: favorite.plays) }
+        }
+        let mixes = feed.mixes.mixes.filter { mix in
+            mix.songs.lazy.filter { music.track(for: HistorySong($0)) != nil }.prefix(5).count >= 5
+        }
+        // A server's songs play while it can be reached, as ``YourMusic/isPlayable(_:)`` says.
+        let reachable = Set(music.network.isOnline ? music.servers.servers.map(\.id).filter { id in
+            guard music.servers.client(for: id) != nil else { return false }
+            switch music.servers.status[id] {
+            case .offline, .wrongPassword, .failed: return false
+            default: return true
+            }
+        } : [])
+        var made = await Self.shelves(
+            index: music.index,
+            facts: feed.facts,
+            playable: PlayableSnapshot(downloaded: Set(music.downloads.items.keys), reachableServers: reachable),
+            blocked: player.signals.blocked,
+            now: .now
+        )
+        made.mixes = mixes
+        made.artists = artists
+        return made
+    }
+
+    /// Whether songs can play, as ``YourMusic/isPlayable(_:)`` says, for work off the main actor.
+    nonisolated struct PlayableSnapshot: Sendable {
+        let downloaded: Set<String>
+        let reachableServers: Set<String>
+
+        func isPlayable(_ track: LocalTrack) -> Bool {
+            switch track.origin {
+            case .file: true
+            case .server(let serverID, _): downloaded.contains(track.id) || reachableServers.contains(serverID)
+            }
+        }
+    }
+
+    @concurrent
+    private nonisolated static func shelves(
+        index: LocalLibraryIndex,
+        facts: [String: SongFacts],
+        playable: PlayableSnapshot,
+        blocked: BlockedArtists,
+        now: Date
+    ) async -> Shelves {
+        let seed = FreshShuffle.dailySeed(for: now, salt: "waiting")
+        let unplayed = index.tracks.filter { facts[$0.identity] == nil && playable.isPlayable($0) && !blocked.blocks(songBy: $0.artist) }
+        let onPhone = index.tracks.filter { !$0.isFromServer || playable.downloaded.contains($0.id) }
         // Songs on this iPhone: ones you haven't played first, then the ones you've played
         // least lately, a fresh order each day.
         let downloaded = FreshShuffle.order(
             onPhone,
             artist: \.artistKey,
-            recentlyHeard: { feed.facts[$0.identity] != nil },
-            seed: FreshShuffle.dailySeed(for: .now, salt: "downloads")
+            recentlyHeard: { facts[$0.identity] != nil },
+            seed: FreshShuffle.dailySeed(for: now, salt: "downloads")
         )
         // Each album by the last time you heard any song on it.
-        let heard = music.index.albums.compactMap { album -> (album: LocalAlbum, at: Date)? in
-            let last = album.tracks.compactMap { feed.facts[$0.identity]?.lastHeard }.max()
+        let heard = index.albums.compactMap { album -> (album: LocalAlbum, at: Date)? in
+            let last = album.tracks.compactMap { facts[$0.identity]?.lastHeard }.max()
             return last.map { (album, $0) }
         }
-        let artists = feed.favoriteArtists.compactMap { favorite in
-            music.index.artist(id: favorite.id).map { (artist: $0, plays: favorite.plays) }
-        }
         return Shelves(
-            mixes: feed.mixes.mixes.filter { mix in
-                mix.songs.lazy.filter { music.track(for: HistorySong($0)) != nil }.count >= 5
-            },
             unplayed: Array(FreshShuffle.order(unplayed, artist: \.artistKey, seed: seed).prefix(15)),
             downloaded: Array(downloaded.prefix(15)),
-            recentlyPlayed: Array(heard.sorted { $0.at > $1.at }.prefix(15).map(\.album)),
-            artists: artists
+            recentlyPlayed: Array(heard.sorted { $0.at > $1.at }.prefix(15).map(\.album))
         )
     }
 

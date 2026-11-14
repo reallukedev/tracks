@@ -17,33 +17,32 @@ struct LibraryDownloadsPage: View {
     /// The room left on this Mac, read when the page opens and after anything's removed.
     @State private var freeBytes: Int64?
 
+    /// Nil until first made.
+    @State private var made: DownloadsPageRows?
+
     var body: some View {
         let downloads = music.downloads
-        let songs = downloads.items.values.map { DownloadedSong(track: $0.keptTrack, bytes: $0.bytes, downloadedAt: $0.downloadedAt) }
-        let stats = DownloadReport.stats(songs, facts: feed.facts)
-        let unplayed = DownloadReport.unplayed(songs, facts: feed.facts)
-        let rows = songs.map { song in
-            LibraryDownloadRow(
-                song: song,
-                plays: feed.facts[song.track.identity]?.plays ?? 0,
-                artworkURL: music.artworkURL(song.track.artwork)?.absoluteString
-            )
-        }
-        .sorted(using: sortOrder)
-        let byID = Dictionary(songs.map { ($0.track.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let songs = made?.songs ?? []
+        let stats = made?.stats ?? DownloadReport.stats([], facts: [:])
+        let unplayed = made?.unplayed ?? []
+        let rows = made?.rows ?? []
+        let byID = made?.byID ?? [:]
         VStack(spacing: 0) {
             LibraryPageHeader(
                 title: String(localized: "Downloads"),
                 subtitle: songs.isEmpty ? nil : String(localized: "\(String(AttributedString(localized: "^[\(stats.songs) song](inflect: true)").characters)) · \(LocalFormat.bytes(stats.bytes))"),
                 shuffle: songs.isEmpty ? nil : { player.play(.local(rows.compactMap { byID[$0.id]?.track }), from: context, shuffled: true) }
             )
-            if songs.isEmpty, downloads.progress.isEmpty, downloads.failures.isEmpty {
+            // Which songs are coming, not how far along: the page isn't redrawn at every step.
+            if made == nil, !downloads.items.isEmpty {
+                LibraryTablePlaceholder()
+            } else if songs.isEmpty, downloads.downloading.isEmpty, downloads.failures.isEmpty {
                 emptyState
             } else {
                 summary(stats: stats, unplayed: unplayed)
                     .padding(.horizontal, PlayMetrics.margin)
                     .padding(.bottom, 16)
-                activity
+                DownloadActivity()
                 table(rows: rows, byID: byID)
             }
         }
@@ -64,6 +63,18 @@ struct LibraryDownloadsPage: View {
             }
         }
         .task(id: downloads.items.count) { freeBytes = await Self.freeSpace() }
+        // The rows, stats and table order, made off the main actor whenever the downloads,
+        // your plays or the order change.
+        .task(id: sortOrder) {
+            for await (items, _) in Observations({ (music.downloads.items, feed.builtRevision) }) {
+                let clients = music.servers.servers.reduce(into: [String: SubsonicClient]()) { clients, server in
+                    clients[server.id] = music.servers.client(for: server.id)
+                }
+                let next = await DownloadsPageRows.make(items: Array(items.values), facts: feed.facts, clients: clients, order: sortOrder)
+                guard !Task.isCancelled else { return }
+                made = next
+            }
+        }
         .confirmationDialog(removeTitle(byID), isPresented: Binding(get: { !removing.isEmpty }, set: { if !$0 { removing = [] } }), titleVisibility: .visible) {
             Button("Remove", role: .destructive) {
                 downloads.remove(removing)
@@ -134,42 +145,6 @@ struct LibraryDownloadsPage: View {
                 .foregroundStyle(.secondary)
         }
         .accessibilityElement(children: .combine)
-    }
-
-    /// What's coming down, and what couldn't, above the table while there's any.
-    @ViewBuilder
-    private var activity: some View {
-        let downloads = music.downloads
-        let active = downloads.progress.keys.sorted().compactMap { id in music.index.track(id: id).map { ($0, downloads.progress[id] ?? 0) } }
-        let failed = downloads.failures.keys.sorted().compactMap { id in music.index.track(id: id).map { ($0, downloads.failures[id] ?? "") } }
-        if !active.isEmpty || !failed.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                if !active.isEmpty {
-                    let progress = active.map(\.1).reduce(0, +) / Double(active.count)
-                    HStack(spacing: 10) {
-                        Text("Downloading ^[\(active.count) Song](inflect: true)")
-                            .font(.callout.weight(.semibold))
-                        ProgressView(value: progress)
-                            .frame(maxWidth: 220)
-                            .controlSize(.small)
-                        Button("Stop") { downloads.cancel(Set(active.map(\.0.id))) }
-                            .controlSize(.small)
-                    }
-                }
-                if !failed.isEmpty {
-                    HStack(spacing: 10) {
-                        Label("^[\(failed.count) Song](inflect: true) Couldn't Download", systemImage: "exclamationmark.triangle.fill")
-                            .font(.callout.weight(.semibold))
-                            .foregroundStyle(.red)
-                            .help(failed.map { "\($0.0.title): \($0.1)" }.joined(separator: "\n"))
-                        Button("Try Again") { downloads.retryFailed() }
-                            .controlSize(.small)
-                    }
-                }
-            }
-            .padding(.horizontal, PlayMetrics.margin)
-            .padding(.bottom, 12)
-        }
     }
 
     private func table(rows: [LibraryDownloadRow], byID: [String: DownloadedSong]) -> some View {
@@ -275,5 +250,91 @@ nonisolated struct LibraryDownloadRow: Identifiable, Sendable {
         self.plays = plays
         downloadedAt = song.downloadedAt
         cover = .url(artworkURL, seed: song.track.album ?? song.track.title)
+    }
+}
+
+/// What's coming down, and what couldn't, above the table while there's any. A view of its
+/// own, so the progress it follows redraws only this, not the page and its table.
+private struct DownloadActivity: View {
+    @Environment(YourMusic.self) private var music
+
+    var body: some View {
+        let downloads = music.downloads
+        let active = downloads.progress.keys.sorted().compactMap { id in music.index.track(id: id).map { ($0, downloads.progress[id] ?? 0) } }
+        let failed = downloads.failures.keys.sorted().compactMap { id in music.index.track(id: id).map { ($0, downloads.failures[id] ?? "") } }
+        if !active.isEmpty || !failed.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                if !active.isEmpty {
+                    let progress = active.map(\.1).reduce(0, +) / Double(active.count)
+                    HStack(spacing: 10) {
+                        Text("Downloading ^[\(active.count) Song](inflect: true)")
+                            .font(.callout.weight(.semibold))
+                        ProgressView(value: progress)
+                            .frame(maxWidth: 220)
+                            .controlSize(.small)
+                        Button("Stop") { downloads.cancel(Set(active.map(\.0.id))) }
+                            .controlSize(.small)
+                    }
+                }
+                if !failed.isEmpty {
+                    HStack(spacing: 10) {
+                        Label("^[\(failed.count) Song](inflect: true) Couldn't Download", systemImage: "exclamationmark.triangle.fill")
+                            .font(.callout.weight(.semibold))
+                            .foregroundStyle(.red)
+                            .help(failed.map { "\($0.0.title): \($0.1)" }.joined(separator: "\n"))
+                        Button("Try Again") { downloads.retryFailed() }
+                            .controlSize(.small)
+                    }
+                }
+            }
+            .padding(.horizontal, PlayMetrics.margin)
+            .padding(.bottom, 12)
+        }
+    }
+}
+
+/// The Downloads page's songs, stats and table rows, made together off the main actor.
+private nonisolated struct DownloadsPageRows: Sendable {
+    let songs: [DownloadedSong]
+    let stats: DownloadReport.Stats
+    let unplayed: [DownloadedSong]
+    let rows: [LibraryDownloadRow]
+    let byID: [String: DownloadedSong]
+
+    @concurrent
+    static func make(
+        items: [Downloads.Item],
+        facts: [String: SongFacts],
+        clients: [String: SubsonicClient],
+        order: [KeyPathComparator<LibraryDownloadRow>]
+    ) async -> DownloadsPageRows {
+        let songs = items.map { item in
+            // The song as kept: its format the file's, where that's known.
+            var track = item.track
+            if let format = item.format { track.format = format }
+            return DownloadedSong(track: track, bytes: item.bytes, downloadedAt: item.downloadedAt)
+        }
+        var covers: [LocalTrack.Artwork: String] = [:]
+        func cover(_ artwork: LocalTrack.Artwork?) -> String? {
+            guard let artwork else { return nil }
+            if let known = covers[artwork] { return known }
+            let url: URL? = switch artwork {
+            case .file(let name): LibraryFolders.artwork.appending(path: name)
+            case .server(let serverID, let coverID): clients[serverID]?.coverArtURL(id: coverID, size: 600)
+            }
+            let address = url?.absoluteString
+            if let address { covers[artwork] = address }
+            return address
+        }
+        return DownloadsPageRows(
+            songs: songs,
+            stats: DownloadReport.stats(songs, facts: facts),
+            unplayed: DownloadReport.unplayed(songs, facts: facts),
+            rows: songs.map { song in
+                LibraryDownloadRow(song: song, plays: facts[song.track.identity]?.plays ?? 0, artworkURL: cover(song.track.artwork))
+            }
+            .sorted(using: order),
+            byID: Dictionary(songs.map { ($0.track.id, $0) }, uniquingKeysWith: { first, _ in first })
+        )
     }
 }

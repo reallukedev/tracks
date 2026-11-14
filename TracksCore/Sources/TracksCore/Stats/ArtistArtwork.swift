@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// Artist pictures from Apple Music, by ``CaptureStat/artistIdentity``.
 ///
@@ -10,6 +11,10 @@ import Foundation
 public struct ArtistArtworkCache: Sendable {
     /// Where the pictures used to be kept, read once to move them.
     public static let legacyDefaultsKey = "TracksArtistArtwork"
+
+    /// Callers run off the main actor and concurrently, and each change rewrites the whole
+    /// file: one at a time, so none drops another's entries.
+    private static let writes = Mutex(())
 
     private let url: URL?
     /// The suite name, not the `UserDefaults`, which isn't `Sendable`.
@@ -61,9 +66,11 @@ public struct ArtistArtworkCache: Sendable {
     /// Saves one round of lookups. `found` is keyed by artist identity; every artist in
     /// `asked` missing from it is remembered as having no picture.
     public func record(found: [String: String], asked: some Sequence<String>) {
-        var updated = stored
-        for identity in asked { updated[identity] = found[identity] ?? "" }
-        save(updated)
+        Self.writes.withLock { _ in
+            var updated = stored
+            for identity in asked { updated[identity] = found[identity] ?? "" }
+            save(updated)
+        }
     }
 
     /// Forgets the artists Apple Music had no picture for, so they're asked about again.
@@ -74,12 +81,14 @@ public struct ArtistArtworkCache: Sendable {
     /// - Returns: how many artists will be asked about again.
     @discardableResult
     public func forgetMissing() -> Int {
-        let all = stored
-        let kept = all.filter { !$0.value.isEmpty }
-        let forgotten = all.count - kept.count
-        guard forgotten > 0 else { return 0 }
-        save(kept)
-        return forgotten
+        Self.writes.withLock { _ in
+            let all = stored
+            let kept = all.filter { !$0.value.isEmpty }
+            let forgotten = all.count - kept.count
+            guard forgotten > 0 else { return 0 }
+            save(kept)
+            return forgotten
+        }
     }
 }
 

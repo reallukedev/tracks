@@ -200,7 +200,7 @@ final class BackdropCanvasView: NSView {
             let rate = Float(frameRate)
             link.preferredFrameRateRange = CAFrameRateRange(minimum: rate, maximum: rate, preferred: rate)
         } else {
-            link.preferredFrameRateRange = .default
+            link.preferredFrameRateRange = .displayMaximum
         }
     }
 
@@ -370,6 +370,15 @@ private final class BackdropSurface {
         guard let texture = device.makeTexture(descriptor: description, iosurface: surface, plane: 0) else { return nil }
         self.surface = surface
         self.texture = texture
+    }
+}
+
+extension CAFrameRateRange {
+    /// Every frame the fastest screen shows, asked for outright: the default leaves the rate
+    /// to the system, which can hold a link below a ProMotion display's 120.
+    @MainActor static var displayMaximum: CAFrameRateRange {
+        let fastest = Float(NSScreen.screens.map(\.maximumFramesPerSecond).max() ?? 60)
+        return CAFrameRateRange(minimum: min(60, fastest), maximum: fastest, preferred: fastest)
     }
 }
 

@@ -17,6 +17,7 @@ final class NetworkStatus {
     @ObservationIgnored private let monitor = NWPathMonitor()
     /// The interfaces in use at the last look, so a path updated with nothing new is let be.
     @ObservationIgnored private var interfaces: [String]?
+    @ObservationIgnored private var settling: Task<Void, Never>?
 
     init() {
         monitor.pathUpdateHandler = { [weak self] path in
@@ -26,13 +27,27 @@ final class NetworkStatus {
             Task { @MainActor in
                 guard let self else { return }
                 let moved = self.interfaces != nil && (online != self.isOnline || interfaces != self.interfaces)
-                self.isOnline = online
-                self.isExpensive = expensive
+                if online != self.isOnline { self.isOnline = online }
+                if expensive != self.isExpensive { self.isExpensive = expensive }
                 self.interfaces = interfaces
-                if moved, online { self.onChange?() }
+                if moved { self.settle(online: online) }
             }
         }
         monitor.start(queue: DispatchQueue(label: "com.luke.tracks.network"))
+    }
+
+    /// Passes a move on once the path has held still for a moment. Walking out of Wi-Fi
+    /// flips between networks a few times in a second, and each move asks every server again.
+    private func settle(online: Bool) {
+        settling?.cancel()
+        settling = nil
+        guard online else { return }
+        settling = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled, let self, self.isOnline else { return }
+            self.settling = nil
+            self.onChange?()
+        }
     }
 
     deinit {

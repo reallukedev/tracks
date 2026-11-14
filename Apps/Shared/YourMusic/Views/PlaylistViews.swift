@@ -469,15 +469,17 @@ struct TracksPlaylistPage: View {
         Button {
             play(track, in: playable, context: context)
         } label: {
-            TrackRow(
-                title: track.title,
-                subtitle: track.artist,
-                cover: cover(of: track),
-                plays: feed.facts[track.identity]?.plays,
-                isCurrent: player.current?.local?.id == track.id,
-                localTrack: track,
-                isPlayable: music.isPlayable(track)
-            )
+            CurrentSongReader(localID: track.id) { isCurrent in
+                TrackRow(
+                    title: track.title,
+                    subtitle: track.artist,
+                    cover: cover(of: track),
+                    plays: feed.facts[track.identity]?.plays,
+                    isCurrent: isCurrent,
+                    localTrack: track,
+                    isPlayable: music.isPlayable(track)
+                )
+            }
         }
         .buttonStyle(.plain)
         .disabled(!music.isPlayable(track))
@@ -516,7 +518,7 @@ struct TracksPlaylistPage: View {
                 album: pair.1.album ?? "",
                 plays: feed.facts[pair.1.identity]?.plays ?? 0,
                 duration: pair.1.duration ?? 0,
-                isCurrent: player.current?.local?.id == pair.1.id,
+                localID: pair.1.id,
                 isPlayable: music.isPlayable(pair.1),
                 // Each song's own cover, as Apple Music's playlists show them.
                 artwork: .url(music.artworkURL(pair.1.artwork)?.absoluteString, seed: pair.1.album ?? pair.1.title),

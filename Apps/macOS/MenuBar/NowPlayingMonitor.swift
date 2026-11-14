@@ -35,8 +35,9 @@ final class NowPlayingMonitor {
     func refresh() async {
         let read = await ScriptingQueue.run { MusicScripting.presence() }
         readAt = .now
-        music = read
-        hasRead = true
+        // Paused or stopped, Music answers the same each time: the card isn't redrawn for it.
+        if read != music { music = read }
+        if !hasRead { hasRead = true }
     }
 
     /// Where Music is in the song at `date`, carried on from the last read while it plays.

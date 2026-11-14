@@ -415,7 +415,7 @@ struct YourMusicSearchResults: View {
         shownCount = Self.revealed
         nextPage = ServerSearchPage()
         // A short pause so typing doesn't ask on every letter.
-        try? await Task.sleep(for: .milliseconds(250))
+        try? await Task.sleep(for: .milliseconds(300))
         guard !Task.isCancelled else { return }
         // First the songs your servers have, which even Octo answers at once…
         let quick = await music.searchServers(query, isFull: false)

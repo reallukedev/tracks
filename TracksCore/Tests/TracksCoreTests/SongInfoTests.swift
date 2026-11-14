@@ -311,6 +311,28 @@ struct SongInfoCacheTests {
             return
         }
     }
+
+    @Test("past its limit, the least lately used answer goes")
+    func keepsToLimit() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "SongInfoCache-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = SongInfoCache(directory: directory, limit: 2)
+        let lifetime = SongInfoCache.Lifetime(found: 100, missing: 10)
+
+        await cache.store(LastFMTrackInfo(listeners: 1), for: "first")
+        await cache.store(LastFMTrackInfo(listeners: 2), for: "second")
+        _ = await cache.value(LastFMTrackInfo.self, for: "first", lifetime: lifetime)
+        await cache.store(LastFMTrackInfo(listeners: 3), for: "third")
+
+        let files = try FileManager.default.contentsOfDirectory(atPath: directory.path(percentEncoded: false))
+        #expect(files.count == 2)
+        guard case .miss = await cache.value(LastFMTrackInfo.self, for: "second", lifetime: lifetime),
+              case .hit = await cache.value(LastFMTrackInfo.self, for: "first", lifetime: lifetime)
+        else {
+            Issue.record("The answer read most lately should outlast the one never read again")
+            return
+        }
+    }
 }
 
 @Suite("Song day parts")

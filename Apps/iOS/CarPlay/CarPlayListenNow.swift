@@ -84,8 +84,10 @@ extension CarPlaySceneDelegate {
             }) { index in
                 await cards[index].image()
             }
-            let elements = zip(cards, images).map { card, image in
-                CPListImageRowItemCardElement(image: image, showsImageFullHeight: false, title: card.title, subtitle: nil, tintColor: CarPlayImages.tint(of: image))
+            var tints: [UIColor] = []
+            for image in images { tints.append(await CarPlayImages.tint(of: image)) }
+            let elements = zip(zip(cards, images), tints).map { pair, tint in
+                CPListImageRowItemCardElement(image: pair.1, showsImageFullHeight: false, title: pair.0.title, subtitle: nil, tintColor: tint)
             }
             late.attach(elements)
             let title = String(localized: "For You")
@@ -299,7 +301,7 @@ extension CarPlaySceneDelegate {
                 let rows = artists.map { artist in
                     let plays = String(AttributedString(localized: "^[\(artist.count) play](inflect: true)").characters)
                     return CarRow(title: artist.name, detail: "\(plays) · \(Format.listening(artist.listeningSeconds))", cover: {
-                        CarPlayImages.circle(await CarPlayImages.cover(url: artist.artworkURL, seed: artist.name, side: rowSide, scale: scale))
+                        await CarPlayImages.circle(await CarPlayImages.cover(url: artist.artworkURL, seed: artist.name, side: rowSide, scale: scale))
                     }) {
                         await player.start(.history(await artistSongs(artist.id)), from: PlayContext(kind: .artist, title: artist.name), shuffled: true)
                     }

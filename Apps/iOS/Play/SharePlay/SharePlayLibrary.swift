@@ -80,6 +80,14 @@ enum SharePlayLibraryPlaylist: Hashable {
         }
     }
 
+    /// Cheap to compare in a list, where hashing a whole playlist per row was not.
+    var listID: String {
+        switch self {
+        case .appleMusic(let playlist): "am." + playlist.id.rawValue
+        case .sample(let name, _): "sample." + name
+        }
+    }
+
     var cover: CoverArt {
         switch self {
         case .appleMusic(let playlist): playlist.artwork.map(CoverArt.artwork) ?? .url(nil, seed: playlist.name)
@@ -158,7 +166,7 @@ struct SharePlayLibraryPageView: View {
         } else if let playlists {
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    ForEach(playlists, id: \.self) { playlist in
+                    ForEach(playlists, id: \.listID) { playlist in
                         NavigationLink(value: SharePlayLibraryPage.playlist(playlist)) {
                             HStack(spacing: 12) {
                                 CoverImage(cover: playlist.cover, size: 56)

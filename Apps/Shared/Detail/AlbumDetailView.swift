@@ -38,6 +38,11 @@ struct AlbumDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .task(id: "\(albumID)|\(revision)") {
+            // New listening on the page already shown: a play bumps the revision, and its
+            // lookups again a moment later, so let the burst settle and work it out once.
+            if profile?.album.id == albumID {
+                do { try await Task.sleep(for: LiveUpdate.settle) } catch { return }
+            }
             let (id, history, isLoaded) = (albumID, model.library.history, model.library.isLoaded)
             let next = await OffMainActor.run { StatsCalculator.albumProfile(id: id, history: history) }
             guard !Task.isCancelled else { return }

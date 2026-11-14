@@ -750,12 +750,12 @@ final class PlayerModel {
         if let waitingSession {
             guard engine.current != nil else {
                 // Still waiting: the song left paused stands in for the engine's empty queue.
-                current = waitingSession.tracks.first
-                upNext = Array(waitingSession.tracks.dropFirst())
-                status = .paused
-                context = waitingSession.context
-                isShuffled = engine.isShuffled
-                repeatMode = engine.repeatMode
+                update(\.current, to: waitingSession.tracks.first)
+                update(\.upNext, to: Array(waitingSession.tracks.dropFirst()))
+                update(\.status, to: .paused)
+                update(\.context, to: waitingSession.context)
+                update(\.isShuffled, to: engine.isShuffled)
+                update(\.repeatMode, to: engine.repeatMode)
                 return
             }
             // It's playing for real now. The stand-in wasn't a song being left.
@@ -781,21 +781,23 @@ final class PlayerModel {
         // starts when the song first actually plays, as the capture's does, not while it's
         // still loading: a song from a server can take seconds to arrive.
         if next?.id != previous?.id || next?.songIdentity != previous?.songIdentity {
-            trackStartedAt = nil
+            update(\.trackStartedAt, to: nil)
         }
-        status = engine.status
+        update(\.status, to: engine.status)
         if next != nil, status == .playing, trackStartedAt == nil {
             trackStartedAt = .now
         }
         if let intendsToPlay, (status == .playing) == intendsToPlay || status == .stopped {
             self.intendsToPlay = nil
         }
-        current = next
-        upNext = engine.upNext
-        isShuffled = engine.isShuffled
-        repeatMode = engine.repeatMode
+        // Only what changed: the engine reports often, and every page showing the song on
+        // or the queue redraws for each write, even of the same value.
+        update(\.current, to: next)
+        update(\.upNext, to: engine.upNext)
+        update(\.isShuffled, to: engine.isShuffled)
+        update(\.repeatMode, to: engine.repeatMode)
         if next == nil {
-            context = nil
+            update(\.context, to: nil)
             endAutoplay()
             // Nothing left to reach the end of.
             if sleepTimer == .endOfSong { sleepTimer = nil }
@@ -815,6 +817,10 @@ final class PlayerModel {
         if isOnAutoplayPick != onPick { isOnAutoplayPick = onPick }
         startTickerIfNeeded()
         if previous?.id != next?.id || status != .playing { scheduleSave() }
+    }
+
+    private func update<Value: Equatable>(_ keyPath: ReferenceWritableKeyPath<PlayerModel, Value>, to value: Value) {
+        if self[keyPath: keyPath] != value { self[keyPath: keyPath] = value }
     }
 
     // MARK: - Where you left off

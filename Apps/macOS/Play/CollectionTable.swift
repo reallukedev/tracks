@@ -16,7 +16,13 @@ struct CollectionTrack: Identifiable, Hashable {
     let plays: Int
     let duration: TimeInterval
     var isExplicit = false
+    /// Set by a page that already knows; otherwise the row asks the player itself, by
+    /// ``songIdentity`` or ``localID``, so a new song doesn't rebuild the page's tracks.
     var isCurrent = false
+    /// The history's key for the song, for the row to tell it's the one playing.
+    var songIdentity: String?
+    /// A song of yours' id, for the same.
+    var localID: String?
     var isPlayable = true
     /// Why it can't play, or what's happening to it, for the end of its title.
     var status: String?
@@ -118,16 +124,20 @@ struct CollectionTable<SongMenu: View>: View {
     /// The end of the selection ⇧ and an arrow moves, the other end from the anchor.
     @State private var head: CollectionTrack.ID?
     @State private var removing: Set<CollectionTrack.ID>?
-    @State private var width: CGFloat = 0
+    /// Whether there's room for the album column. Kept as that alone, so a resize redraws
+    /// the rows only when it changes.
+    @State private var isWide = false
     @FocusState private var isFocused: Bool
 
     /// Only where some song isn't by the collection's main artist: on a playlist or mix, or a
     /// compilation.
     private var showsArtist: Bool {
-        style == .list || Set(tracks.map { $0.artist.lowercased() }).count > 1
+        guard style == .album, let first = tracks.first?.artist.lowercased() else { return style == .list }
+        // Stops at the first song by someone else, rather than folding every name.
+        return tracks.contains { $0.artist.lowercased() != first }
     }
 
-    private var showsAlbum: Bool { style == .list && width > 720 }
+    private var showsAlbum: Bool { style == .list && isWide }
 
     private var showsCovers: Bool { style == .list && tracks.contains { $0.artwork != nil } }
 
@@ -137,13 +147,15 @@ struct CollectionTable<SongMenu: View>: View {
     }
 
     var body: some View {
+        // Once for every row: each walks the whole collection.
+        let columns = Columns(cover: showsCovers, artist: showsArtist, album: showsAlbum, time: showsTime)
         LazyVStack(spacing: 0) {
             ForEach(tracks.enumerated(), id: \.element.id) { index, track in
-                row(track, index: index)
+                row(track, index: index, columns: columns)
             }
         }
         .padding(.horizontal, PlayMetrics.margin - 10)
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        .onGeometryChange(for: Bool.self) { $0.size.width > 720 } action: { isWide = $0 }
         .focusable()
         .focused($isFocused)
         .focusEffectDisabled()
@@ -192,18 +204,28 @@ struct CollectionTable<SongMenu: View>: View {
         return SongInfoSubject(title: track.title, artistName: track.artist, albumTitle: track.album, cover: track.artwork)
     }
 
-    private func row(_ track: CollectionTrack, index: Int) -> some View {
-        CollectionSongRow(
-            track: track,
-            isSelected: selection.contains(track.id),
-            isFocused: isFocused,
-            showsCover: showsCovers,
-            showsArtist: showsArtist,
-            showsAlbum: showsAlbum,
-            showsTime: showsTime,
-            isLast: index == tracks.count - 1,
-            play: { play(track.id) }
-        )
+    private struct Columns {
+        let cover: Bool
+        let artist: Bool
+        let album: Bool
+        let time: Bool
+    }
+
+    private func row(_ track: CollectionTrack, index: Int, columns: Columns) -> some View {
+        CurrentSongReader(identity: track.songIdentity, localID: track.localID) { isCurrent in
+            CollectionSongRow(
+                track: track,
+                isCurrent: track.isCurrent || isCurrent,
+                isSelected: selection.contains(track.id),
+                isFocused: isFocused,
+                showsCover: columns.cover,
+                showsArtist: columns.artist,
+                showsAlbum: columns.album,
+                showsTime: columns.time,
+                isLast: index == tracks.count - 1,
+                play: { play(track.id) }
+            )
+        }
         .onTapGesture { click(track) }
         .simultaneousGesture(TapGesture(count: 2).onEnded {
             if track.isPlayable { play(track.id) }
@@ -329,6 +351,7 @@ private struct RowReordering: ViewModifier {
 /// One song of a collection.
 private struct CollectionSongRow: View {
     let track: CollectionTrack
+    let isCurrent: Bool
     let isSelected: Bool
     let isFocused: Bool
     let showsCover: Bool
@@ -370,8 +393,8 @@ private struct CollectionSongRow: View {
             }
             HStack(spacing: 6) {
                 Text(track.title)
-                    .foregroundStyle(track.isCurrent ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
-                    .fontWeight(track.isCurrent ? .semibold : .regular)
+                    .foregroundStyle(isCurrent ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+                    .fontWeight(isCurrent ? .semibold : .regular)
                     .lineLimit(1)
                 if track.isExplicit {
                     ExplicitBadge()
@@ -447,7 +470,7 @@ private struct CollectionSongRow: View {
             }
             .buttonStyle(.plain)
             .help("Play \(track.title)")
-        } else if track.isCurrent {
+        } else if isCurrent {
             PlayingWaveform(isActive: player.isPlaying)
                 .font(.callout.weight(.semibold))
                 .accessibilityLabel("Now Playing")

@@ -37,6 +37,11 @@ struct SongDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .task(id: "\(songID)|\(revision)") {
+            // New listening on the page already shown: a play bumps the revision, and its
+            // lookups again a moment later, so let the burst settle and work it out once.
+            if profile?.song.id == songID {
+                do { try await Task.sleep(for: LiveUpdate.settle) } catch { return }
+            }
             let (id, history, isLoaded) = (songID, model.library.history, model.library.isLoaded)
             let next = await OffMainActor.run { StatsCalculator.songProfile(id: id, history: history) }
             guard !Task.isCancelled else { return }
@@ -120,18 +125,22 @@ struct SongDetailView: View {
                     LazyVStack(spacing: 0) {
                         let plays = showsAllPlays ? profile.plays : Array(profile.plays.prefix(8))
                         ForEach(plays.enumerated(), id: \.offset) { index, date in
-                            HStack {
-                                Text(Format.day(date))
-                                Spacer()
-                                Text(date, format: .dateTime.hour().minute())
-                                    .foregroundStyle(.secondary)
-                                    .monospacedDigit()
-                            }
-                            .font(.subheadline)
-                            .padding(.horizontal, Metrics.cardPadding)
-                            .padding(.vertical, 11)
-                            if index < plays.count - 1 {
-                                Divider().padding(.leading, Metrics.cardPadding)
+                            // One view per play, divider included, so the stack tells rows
+                            // apart by id alone instead of drawing every row to count them.
+                            VStack(spacing: 0) {
+                                HStack {
+                                    Text(Format.day(date))
+                                    Spacer()
+                                    Text(date, format: .dateTime.hour().minute())
+                                        .foregroundStyle(.secondary)
+                                        .monospacedDigit()
+                                }
+                                .font(.subheadline)
+                                .padding(.horizontal, Metrics.cardPadding)
+                                .padding(.vertical, 11)
+                                if index < plays.count - 1 {
+                                    Divider().padding(.leading, Metrics.cardPadding)
+                                }
                             }
                         }
                     }
@@ -142,7 +151,7 @@ struct SongDetailView: View {
 
     /// The artists the title names that the artist line doesn't, like "Song (feat. B)" by A.
     private func titleOnlyCredits(_ song: SongTally) -> [ArtistCredit] {
-        let named = Set(CreditedText.links(in: song.artistName, credits: song.credits).map(\.credit.identity))
+        let named = Set(CreditedText.prepared(song.artistName, credits: song.credits).links.map(\.credit.identity))
         return song.credits.filter { !named.contains($0.identity) }
     }
 

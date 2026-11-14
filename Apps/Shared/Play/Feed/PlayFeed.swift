@@ -42,6 +42,8 @@ final class PlayFeed {
     private(set) var hasBuilt = false
     /// The library revision the mixes were last built from.
     private(set) var builtRevision: Int?
+    /// Counts every rebuild, including one for new signals alone, which keeps the revision.
+    private(set) var rebuilds = 0
 
     private(set) var liveStations: [FeedItem] = []
     private(set) var recentlyPlayed: [FeedItem] = []
@@ -102,6 +104,7 @@ final class PlayFeed {
         heardArtists = built.3
         tasteArtists = built.4.filter { !blocked.contains(artist: $0) }
         builtRevision = revision
+        rebuilds += 1
         // A Discover song leaves once it's been played: it isn't new any more.
         discover.removeAll { facts[HistoryImport.key(title: $0.title, artistName: $0.artistName)] != nil || blocked.blocks(songBy: $0.artistName) }
         newReleases.removeAll { $0.subtitle.map(blocked.blocks(songBy:)) ?? false }

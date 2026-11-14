@@ -64,6 +64,12 @@ final class ClipModel {
 
     // MARK: - Searching
 
+    /// The response read off the main actor, which is drawing the field as it's typed in.
+    @concurrent
+    private nonisolated static func songs(from data: Data, allowsExplicit: Bool) async -> [SharePlaySong] {
+        SharePlaySongSearch.songs(from: data, allowsExplicit: allowsExplicit)
+    }
+
     /// Searches after a short pause, so typing doesn't search on every letter.
     func search() async {
         let term = query.trimmingCharacters(in: .whitespaces)
@@ -72,7 +78,7 @@ final class ClipModel {
             searchState = .idle
             return
         }
-        try? await Task.sleep(for: .milliseconds(280))
+        try? await Task.sleep(for: .milliseconds(300))
         guard !Task.isCancelled else { return }
         searchState = .loading
         #if DEBUG
@@ -91,7 +97,9 @@ final class ClipModel {
             let (data, _) = try await URLSession.shared.data(from: url)
             guard !Task.isCancelled else { return }
             let allowsExplicit = session?.guest.snapshot?.allowsExplicit ?? true
-            results = SharePlaySongSearch.songs(from: data, allowsExplicit: allowsExplicit)
+            let found = await Self.songs(from: data, allowsExplicit: allowsExplicit)
+            guard !Task.isCancelled else { return }
+            results = found
             searchState = .loaded
         } catch {
             guard !Task.isCancelled else { return }
